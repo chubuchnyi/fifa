@@ -90,26 +90,65 @@ def axis_angle_to_matrix(aa: np.ndarray) -> np.ndarray:
     return out[0] if squeeze else out
 
 
-def matrix_to_axis_angle(r: np.ndarray) -> np.ndarray:
-    """3x3 rotation matrix → axis-angle (via quaternion, numerically stable)."""
+def matrix_to_quat(r: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix → unit quaternion (w, x, y, z), Shepperd's method.
+
+    Robust for *all* rotations, including the ``theta = π`` case where the naive
+    antisymmetric-part axis extraction degenerates (the difference terms vanish). We pick the
+    largest of the four denominators per matrix for numerical stability.
+    """
     m = np.asarray(r, dtype=float)
     squeeze = m.ndim == 2
     m = m.reshape(-1, 3, 3)
-    trace = np.clip((m[:, 0, 0] + m[:, 1, 1] + m[:, 2, 2] - 1.0) / 2.0, -1.0, 1.0)
-    theta = np.arccos(trace)
+    m00, m11, m22 = m[:, 0, 0], m[:, 1, 1], m[:, 2, 2]
+    m21, m12 = m[:, 2, 1], m[:, 1, 2]
+    m02, m20 = m[:, 0, 2], m[:, 2, 0]
+    m10, m01 = m[:, 1, 0], m[:, 0, 1]
+    t = m00 + m11 + m22
     q = np.zeros((m.shape[0], 4))
-    q[:, 0] = np.cos(theta / 2.0)
-    vec = np.stack(
-        [m[:, 2, 1] - m[:, 1, 2], m[:, 0, 2] - m[:, 2, 0], m[:, 1, 0] - m[:, 0, 1]],
-        axis=1,
-    )
-    n = np.linalg.norm(vec, axis=1, keepdims=True)
-    sin_half = np.sin(theta / 2.0)[:, None]
-    axis = np.where(n < _EPS, 0.0, vec / np.where(n < _EPS, 1.0, n))
-    q[:, 1:4] = axis * sin_half
-    aa = quat_to_axis_angle(q)
-    aa = aa.reshape(-1, 3)
-    return aa[0] if squeeze else aa
+
+    c0 = t > 0.0
+    c1 = (~c0) & (m00 >= m11) & (m00 >= m22)
+    c2 = (~c0) & (~c1) & (m11 >= m22)
+    c3 = ~(c0 | c1 | c2)
+
+    def _s(diag: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        s = np.sqrt(np.maximum(diag[mask], 0.0)) * 2.0
+        return np.where(s < _EPS, 1.0, s)
+
+    if np.any(c0):  # trace > 0: largest term is w
+        s = _s(t + 1.0, c0)
+        q[c0, 0] = 0.25 * s
+        q[c0, 1] = (m21[c0] - m12[c0]) / s
+        q[c0, 2] = (m02[c0] - m20[c0]) / s
+        q[c0, 3] = (m10[c0] - m01[c0]) / s
+    if np.any(c1):  # m00 dominant: largest term is x
+        s = _s(1.0 + m00 - m11 - m22, c1)
+        q[c1, 0] = (m21[c1] - m12[c1]) / s
+        q[c1, 1] = 0.25 * s
+        q[c1, 2] = (m01[c1] + m10[c1]) / s
+        q[c1, 3] = (m02[c1] + m20[c1]) / s
+    if np.any(c2):  # m11 dominant: largest term is y
+        s = _s(1.0 + m11 - m00 - m22, c2)
+        q[c2, 0] = (m02[c2] - m20[c2]) / s
+        q[c2, 1] = (m01[c2] + m10[c2]) / s
+        q[c2, 2] = 0.25 * s
+        q[c2, 3] = (m12[c2] + m21[c2]) / s
+    if np.any(c3):  # m22 dominant: largest term is z
+        s = _s(1.0 + m22 - m00 - m11, c3)
+        q[c3, 0] = (m10[c3] - m01[c3]) / s
+        q[c3, 1] = (m02[c3] + m20[c3]) / s
+        q[c3, 2] = (m12[c3] + m21[c3]) / s
+        q[c3, 3] = 0.25 * s
+
+    q = q / np.linalg.norm(q, axis=1, keepdims=True)
+    q = np.where(q[:, 0:1] < 0, -q, q)  # canonical hemisphere (w >= 0)
+    return q[0] if squeeze else q
+
+
+def matrix_to_axis_angle(r: np.ndarray) -> np.ndarray:
+    """3x3 rotation matrix → axis-angle (via the robust quaternion extraction)."""
+    return quat_to_axis_angle(matrix_to_quat(r))
 
 
 def compose_axis_angle(offset_aa: np.ndarray, base_aa: np.ndarray) -> np.ndarray:

@@ -10,6 +10,14 @@ from .cache import Cache, content_key
 from .export import Exporter, ExportFormat, ExportResult
 from .io import ClipRef, CropRef
 from .jobs import JobHandle, JobQueue, JobState, Worker
+from .observation import (
+    Observation,
+    ObservationImage,
+    ObservationKind,
+    SceneObserver,
+    Viewpoint,
+    ViewpointCamera,
+)
 from .perception import (
     BallTracker,
     Detection,
@@ -45,15 +53,21 @@ __all__ = [
     "JobQueue",
     "JobState",
     "ModelProvider",
+    "Observation",
+    "ObservationImage",
+    "ObservationKind",
     "Port",
     "PoseEstimator",
     "RenderPass",
     "RenderQuality",
     "RenderResult",
+    "SceneObserver",
     "Tracker",
     "Tracklet",
     "Tracks",
     "ViewSynthesizer",
+    "Viewpoint",
+    "ViewpointCamera",
     "Worker",
     "content_key",
 ]
