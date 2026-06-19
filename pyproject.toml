@@ -1,0 +1,123 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pitch3d"
+version = "0.0.1"
+description = "Offline desktop tool for editable photorealistic 3D reconstruction of football episodes from a single broadcast camera (architecture scaffold)."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }  # editing platform is Blender (GPL); internal/research use
+authors = [{ name = "AVATAR project" }]
+
+# --- Core runtime dependency ---------------------------------------------------
+# The pure core needs only numerical computing. numpy is NOT an ML/render library,
+# so it is allowed inside `core/` (see ADR-0002). We use a compatible-release range
+# here so the scaffold runs on the local interpreter; EXACT pins for a reproducible
+# build live in the lockfile (see README "Reproducibility").
+dependencies = [
+  "numpy>=1.26,<3",
+]
+
+# --- Optional, heavy adapter dependencies --------------------------------------
+# These are DECLARED for reproducibility (NFR-7) and license visibility, but are
+# NOT installed or imported by the scaffold: every real adapter is a stub raising
+# NotImplementedError. Versions are pinned to mid-2026 baselines; bump per adapter
+# without touching the core (NFR-6). License caveats are noted inline; internal /
+# research use makes GPL/AGPL/SMPL acceptable (NFR-8).
+[project.optional-dependencies]
+
+# Detection / tracking / team classification / field calibration
+cv = [
+  "opencv-python==4.11.0.86",
+  "ultralytics==8.3.40",        # AGPL-3.0  (YOLO family)
+  "supervision==0.25.1",        # MIT       (ByteTrack/BoT-SORT helpers)
+  "rfdetr==1.1.0",              # Apache-2.0 (RF-DETR, primary detector)
+]
+
+# Human Mesh Recovery -> SMPL-X (poses) + constraint-guided re-fit
+hmr = [
+  "torch==2.6.0",               # BSD-3
+  "smplx==0.1.28",              # SMPL-X model license (research only) -- SMPL caveat
+  "chumpy==0.70",
+]
+
+# Ball 2D tracking (3D lift / ballistics lives in core)
+ball = [
+  "torch==2.6.0",
+]
+
+# Photoreal environment: 3D Gaussian Splatting / NeRF
+env = [
+  "gsplat==1.4.0",              # Apache-2.0
+  "torch==2.6.0",
+]
+
+# Photoreal avatars (textured SMPL-X / generative / per-subject gaussian)
+avatars = [
+  "torch==2.6.0",
+  "trimesh==4.5.3",
+]
+
+# Generative novel-view (video-diffusion) -- ViewSynthesizer port, seams A & B
+viewsynth = [
+  "torch==2.6.0",
+  "diffusers==0.32.1",          # Apache-2.0 (ReCamMaster/TrajectoryCrafter/GEN3C-class backends)
+  "imageio[ffmpeg]==2.36.1",
+]
+
+# Editing platform. NOTE: `bpy` (GPL) is normally provided BY a Blender install;
+# the wheel is large and version-locked to Blender. Kept separate on purpose so it
+# can never leak into `core/` (ADR-0001).
+blender = [
+  "bpy==4.3.0",                 # GPL-3.0  (Blender python module)
+]
+
+# Export targets
+export = [
+  "usd-core==25.2",             # Apache-2.0 (Pixar USD / pxr)
+  "pygltflib==1.16.3",          # MIT  (glTF/GLB)
+  "trimesh==4.5.3",
+]
+
+# Tooling
+dev = [
+  "pytest>=7.4,<9",
+  "mypy>=1.13",
+  "ruff>=0.8",
+]
+
+# Everything except bpy (which is environment-provided)
+all = [
+  "pitch3d[cv,hmr,ball,env,avatars,viewsynth,export,dev]",
+]
+
+[project.scripts]
+pitch3d-dryrun = "pitch3d.app.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+# Lets `pytest` import the package straight from src/ without an editable install.
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["pitch3d"]
+mypy_path = "src"
+ignore_missing_imports = true       # heavy adapter deps are declared-not-installed
+disallow_untyped_defs = false
