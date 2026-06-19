@@ -23,9 +23,13 @@ on fakes, glTF export path exists.
 | M0-6 Real-adapter + exporter stubs (`NotImplementedError`) | `adapters/{models,viewsynth,blender,render,export}` | 🟡 |
 | M0-7 CLI dry-run + wiring | `app` | ✅ |
 | M0-8 Core tests green without GPU/Blender | `tests` | ✅ |
+| M0-9 Observation port + viewpoint math + scene summary (LLM feedback) | `core/ports`, `core/agent` | ✅ |
+| M0-10 MCP tool catalog (import-free) + `FakeSceneObserver` | `adapters/mcp`, `adapters/fakes` | ✅ |
+| M0-11 Live MCP `serve()` (needs `mcp` extra + app controller) | `adapters/mcp` | 🟡 |
 
 **Artifact:** `python -m pitch3d.app.cli` runs source → stages(fakes) → scene → edit →
-propagate → render(fake) → export, and `pytest` is green.
+propagate → render(fake) → export, and `pytest` is green. The LLM-feedback loop
+(`observe → reason → Correction → resolve → observe`) is exercisable on fakes — no GPU/LLM.
 
 ---
 
@@ -101,6 +105,38 @@ loss; core still passes tests with fakes (incl. `FakeViewSynthesizer`) **without
 
 ---
 
+## Agent / MCP automation track (cross-cutting, ADR-0008) ⬜
+
+The north-star: **automate operator work with an LLM** that drives the same use-cases a human
+does, over MCP, with visual feedback. This is not a milestone — it *rides on top of* each one,
+gaining capability as the render path matures. The contracts (port, catalog, viewpoint math,
+fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
+
+| Capability | Lands with | Package | State |
+|---|---|---|---|
+| A-1 `SceneObserver` port + `Observation` (3D/overlay/UI + summary) | M0 | `core/ports/observation` | ✅ |
+| A-2 Pure viewpoint math: `look_at`, `standard_viewpoints`, centroid | M0 | `core/agent` | ✅ |
+| A-3 `scene_summary` from the UX-4 attention list (text feedback) | M0 | `core/agent` | ✅ |
+| A-4 MCP `tool_catalog` (import-free, 12 use-cases as data) | M0 | `adapters/mcp` | ✅ |
+| A-5 `FakeSceneObserver` (stdlib PNGs, no renderer) | M0 | `adapters/fakes` | ✅ |
+| A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | 🟡 |
+| A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | ⬜ |
+| A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ⬜ |
+| A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/viewsynth` | ⬜ |
+| A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ⬜ |
+
+**Invariants (hold at every milestone):** the agent edits *only* via `Correction` tools
+(`apply_offset|keyframes|smoothing|refit`), never raw geometry; `resolve()` is the sole path to
+pixels; feedback images come from the *same* `RenderPass` a human sees. The loop is testable on
+fakes with **no GPU, no Blender, no LLM** (TZ AC-7 extends to the agent seam).
+
+**Exit criteria (per stage):** *(M0)* catalog + observer satisfy their contracts in tests and the
+dry-run emits inspectable snapshots; *(M1)* an MCP client opens an episode, calls `observe`, applies
+an offset, and sees the overlay change; *(M2)* `observe` returns photoreal multi-view of the edited
+scene; *(M3)* an agent fixes a seeded-wrong pose end-to-end, verified by the attention list clearing.
+
+---
+
 ## M4 (optional) — Real multi-camera ⬜
 
 Out of scope. The data model already treats cameras as a **list** and homography as a degenerate
@@ -118,3 +154,6 @@ core rewrite. Note: seam-B amplification already exercises the same multi-view i
   GEN3C/TrajectoryCrafter; seam A favors orbit fidelity, e.g. ReCamMaster) — see ADR-0007.
 - **Cross-cutting:** SMPL-X (hands/face) vs SMPL/SMPL-H (body only) — affects pose dimensions;
   generative-API budget per episode bounds the share of per-subject/ViewSynthesizer work.
+- **Agent track (ADR-0008):** which MCP host(s) to target first (Claude CLI/Desktop); how many
+  viewpoints per `observe` is the right cost/feedback trade-off; whether the agent eval harness
+  (A-10) seeds known-wrong scenes or replays operator-fixed episodes.

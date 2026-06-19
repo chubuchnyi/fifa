@@ -28,6 +28,7 @@ photoreal result. Real-time is not a goal; **quality and ease of manual correcti
 | C5 | **Offline queue + content-addressable cache** | Every stage is a job; results are keyed by `hash(input + params + model_version)`. Expensive generative passes (avatars, ViewSynthesizer) are always cached (ADR-0004). |
 | C6 | **ViewSynthesizer at two seams** | Seam A = a `RenderPass` (limited orbit, video out, non-editable). Seam B = pre-reconstruction amplifier (mono → pseudo-multi-view) + occlusion inpaint (ADR-0007). |
 | C7 | Photoreal **staged** | M1 editable proxy loop → M2 photoreal (+ VS seam A) → M3 quality (+ VS seam B). (roadmap). |
+| C8 | **LLM-in-the-loop** automation | The editor is drivable by an LLM over **MCP** (a driving adapter, parallel to the CLI), with **visual feedback**: a `SceneObserver` port renders the resolved scene from several viewpoints + frame overlays + UI screenshots. Agent edits are `Correction`s, never raw geometry (ADR-0008). |
 
 ---
 
@@ -35,38 +36,45 @@ photoreal result. Real-time is not a goal; **quality and ease of manual correcti
 
 ```mermaid
 flowchart TD
-    subgraph app["app/  (composition root + CLI)"]
-        WIRING[wiring.py]
+    subgraph driving["driving adapters (primary)"]
         CLI[cli.py dry-run]
+        MCP[mcp/ — LLM agent control surface]
+    end
+    subgraph app["app/  (composition root)"]
+        WIRING[wiring.py]
     end
     subgraph adapters["adapters/  (infrastructure)"]
         MODELS[models/ — detect, track, calibrate, HMR, ball, env, avatars]
         VIEWSYNTH[viewsynth/ — video-diffusion backends]
         RENDER[render/ — splat/avatar passes + VS seam A]
+        OBSERVER[observer — SceneObserver: multi-view snapshots]
         BLENDER[blender/ — bpy adapter]
         EXPORT[export/ — glTF/USD/FBX/Alembic/JSON/three.js]
-        FAKES[fakes/ — deterministic test doubles]
+        FAKES[fakes/ — deterministic test doubles + FakeSceneObserver]
     end
     subgraph core["core/  (pure, numpy only)"]
         SCENE[scene/ — canonical data model + serialization]
         CORR[correction/ — 4 propagation modes, honest math]
         ORCH[orchestration/ — stages, pipeline, queue/cache contracts]
-        PORTS[ports/ — ABCs: ModelProvider*, ViewSynthesizer, RenderPass, Exporter, Cache, JobQueue]
+        AGENT[agent/ — viewpoint math + scene summary for LLM feedback]
+        PORTS[ports/ — ABCs: ModelProvider*, ViewSynthesizer, RenderPass, SceneObserver, Exporter, Cache, JobQueue]
     end
 
-    WIRING --> MODELS & VIEWSYNTH & RENDER & BLENDER & EXPORT & FAKES
-    CLI --> WIRING
-    MODELS & VIEWSYNTH & RENDER & BLENDER & EXPORT & FAKES --> PORTS
-    MODELS & VIEWSYNTH & RENDER & BLENDER & EXPORT & FAKES --> SCENE
+    CLI & MCP --> WIRING
+    WIRING --> MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES
+    MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES --> PORTS
+    MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES --> SCENE
     PORTS --> SCENE
     CORR --> SCENE
+    AGENT --> PORTS & SCENE & CORR
     ORCH --> PORTS & SCENE
 ```
 
 **Rule:** arrows only point toward `core`. `core/` has no arrow leaving it (except `numpy`).
-The only way the core touches Blender, a GPU model, or a video-diffusion API is through a
-port that an adapter implements. This is what makes the whole core testable with **fakes,
-no GPU, no Blender** (AC-7).
+The only way the core touches Blender, a GPU model, a video-diffusion API, or an LLM is through
+a port/adapter. Both the CLI and the **MCP server** are *driving* adapters that call the same
+application wiring — so an LLM agent and a human run the identical use-cases. This is what makes
+the whole core testable with **fakes, no GPU, no Blender, no LLM** (AC-7).
 
 ---
 
@@ -78,20 +86,24 @@ src/pitch3d/
     scene/          # WorldFrame (Z-up, meters), Field+homography, Camera, Subject (SMPL-X),
                     # BallTrack, 3-layer model (proposal/corrections/resolved), Confidence,
                     # RenderAssetRef, SynthViewRef, provenance/RunLog, JSON serialization
-    correction/     # rotations (Rodrigues/slerp), 4 propagation modes as pure functions,
+    correction/     # rotations (Rodrigues/slerp/Shepperd), 4 propagation modes as pure functions,
                     # layer resolve (proposal ⊕ corrections → resolved)
     orchestration/  # Stage enum, Pipeline DAG, cache-key derivation, ball 2D→3D lift,
                     # contracts used from ports (JobQueue/Cache) — abstract only
+    agent/          # pure viewpoint camera math (look_at, standard_viewpoints) + scene_summary
+                    # — the port-free pieces of the LLM visual-feedback loop (ADR-0008)
     ports/          # ABCs only: ModelProvider, Detector, Tracker, FieldCalibrator,
                     # PoseEstimator(+refit), BallTracker, EnvReconstructor, AvatarBuilder,
-                    # ViewSynthesizer (seams A&B), RenderPass, Exporter, Cache, JobQueue
+                    # ViewSynthesizer (seams A&B), RenderPass, SceneObserver, Exporter, Cache, JobQueue
   adapters/
     models/         # real-model stubs behind ports (RF-DETR, ByteTrack, GVHMR, …) — NotImplementedError
     viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
     blender/        # bpy adapter (proxy I/O, gizmo/F-curve bridge) — isolated stubs
     render/         # SplatAvatarRenderPass + ViewSynthRenderPass (wraps VS seam A) — stubs
+    mcp/            # LLM control surface: tool catalog (pure) + serve() stub (driving adapter, ADR-0008)
     export/         # glTF/USD/FBX/Alembic/JSON + three.js viewer — stubs
-    fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams), in-proc queue, cache
+    fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams),
+                    # FakeSceneObserver (stdlib PNG snapshots), in-proc queue, cache
   app/              # wiring (composition) + CLI dry-run (source → … → export)
 ```
 
@@ -140,6 +152,7 @@ structured to be **USD-mappable**; USD/glTF/FBX/Alembic are *export targets*, no
 | `AvatarBuilder` | Photoreal avatar per subject (FR-12) | `build(subject, ref_crops, synth_views=None) -> RenderAssetRef` |
 | **`ViewSynthesizer`** | Generative novel-view, **two seams** | **A:** `render_orbit(clip, target_camera, scene_hints=None) -> SynthViewRef`; **B:** `amplify(clip, n_views, deviation) -> list[SynthViewRef]`, `inpaint_occlusions(subject_views) -> SynthViewRef` |
 | `RenderPass` | Photoreal frame(s) from current scene state (FR-14) | `render(scene, camera_path, quality=PREVIEW) -> RenderResult` |
+| **`SceneObserver`** | Visual feedback for the LLM loop (ADR-0008): 3D-from-N-viewpoints + frame overlay + UI | `capture_scene_views(scene, views, quality=PREVIEW)`, `capture_frame_overlay(scene, frame)`, `capture_ui(scene=None)`, `observe(...) -> Observation` |
 | `Exporter` | glTF/USD/FBX/Alembic/JSON/three.js (FR-26..28) | `supports(fmt) -> bool`, `export(scene, fmt, out_path) -> ExportResult` |
 | `Cache` | Content-addressable artifact store (NFR-4) | `key_for(stage, input_hash, params, model_version)`, `has/get/put` |
 | `JobQueue` / `Worker` | Offline non-blocking execution (UX-8) | `submit(stage, thunk, meta=None) -> JobHandle`, `state(job)`, `result(job)`, `cancel(job)`; `Worker.run(thunk)` |
@@ -266,7 +279,74 @@ subjects/ranges (FR-24).
 
 ---
 
-## 11. Milestones (detail in [`roadmap.md`](roadmap.md))
+## 11. LLM-in-the-loop automation (MCP + observation) — ADR-0008
+
+**Goal:** an LLM agent drives the *same* editor a human does — open an episode, find the wrong
+poses/trajectories, fix them, and **check the result by looking at it**. This adds two seams and
+zero new coupling in `core`.
+
+**Two new seams**
+
+- **MCP server = a *driving* adapter** (`adapters/mcp/`), parallel to the CLI. Its tool catalog
+  (`tools.py::tool_catalog`) is the application's use-cases as pure data — `list_episodes`,
+  `run_reconstruction`, `observe`, `get_attention`, `apply_offset|keyframes|smoothing|refit`,
+  `set_correction_enabled`, `preview`, `render`, `export`. The catalog is **import-free** (no SDK),
+  so the agreed surface is testable today; the live `serve()` is gated behind the optional `mcp`
+  extra + the app controller (Task 7) and is an honest `NotImplementedError` until then.
+- **`SceneObserver` = a *driven* port** (`core/ports/observation.py`). One `observe()` returns an
+  `Observation` = images + a textual `summary`, where images come in three kinds:
+  `SCENE_3D` (resolved scene from N canonical viewpoints), `FRAME_OVERLAY` (source frame +
+  reprojection), `UI` (editor screenshot). It composes the existing `RenderPass`; producing real
+  pixels is an adapter, so `core` ships the contract + a stdlib `FakeSceneObserver`.
+
+**Viewpoint math is pure core** (`core/agent/`): `look_at` (OpenCV +Z-forward, world→camera),
+`standard_viewpoints` (front/left/top/broadcast + an orbit ring around the action centroid), and
+`scene_summary`, which turns the UX-4 attention list into the text half of the feedback. No
+adapter, no I/O — just numpy, so the agent's "where do I look" decision is unit-tested.
+
+**The loop** — `observe → reason(images + summary) → mutate via a correction tool → resolve →
+observe`:
+
+```mermaid
+flowchart LR
+  subgraph agent["LLM agent (host: Claude CLI/Desktop)"]
+    REASON["reason over<br/>images + summary"]
+  end
+  subgraph mcp["adapters/mcp (driving)"]
+    TOOLS["tool_catalog<br/>(use-cases as data)"]
+  end
+  subgraph app["application (Task 7)"]
+    UC["use-cases:<br/>observe · apply_* · preview · render · export"]
+  end
+  subgraph core["core (pure)"]
+    CORR["Correction<br/>(FR-21, toggleable)"]
+    RESOLVE["resolve()<br/>proposal ⊕ corrections"]
+    SCENE["resolved Scene"]
+    VP["agent.standard_viewpoints<br/>+ scene_summary"]
+  end
+  subgraph driven["adapters (driven)"]
+    OBS["SceneObserver<br/>(Fake / Blender / splat)"]
+  end
+
+  REASON -->|"call tool"| TOOLS --> UC
+  UC -->|"apply_offset/keyframes/…"| CORR --> RESOLVE --> SCENE
+  UC -->|"observe"| VP --> OBS
+  SCENE --> OBS
+  OBS -->|"images + summary"| REASON
+```
+
+**Guardrails (why this is safe).** Every agent edit is a `Correction`, the same reviewable unit a
+human produces: toggleable, previewable (FR-23), reversible. The agent **never** writes resolved
+geometry and **never** edits render output — `resolve()` stays the only path from
+proposal+corrections to pixels. Feedback is honest because snapshots come from the same
+`RenderPass` a human sees, from canonical viewpoints, with the attention list as guidance.
+Cost (N renders per `observe`) is bounded by `PREVIEW` quality, the content-addressable cache
+(§9), and letting the agent request only the viewpoints it needs. The whole loop runs in tests and
+the dry-run on `FakeSceneObserver` — **no GPU, no Blender, no LLM** required to exercise it.
+
+---
+
+## 12. Milestones (detail in [`roadmap.md`](roadmap.md))
 
 - **M0** — skeleton: project/source/timeline, canonical scene model, queue+cache, hex core, glTF export.
 - **M1** — editable loop: detect+track+homography+HMR, placement, ball-on-ground, proxy, reprojection overlay, pose/trajectory editing, propagation. *Artifact: an editable 3D clip.*
