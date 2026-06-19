@@ -131,18 +131,18 @@ structured to be **USD-mappable**; USD/glTF/FBX/Alembic are *export targets*, no
 | Port | Purpose | Notable methods |
 |---|---|---|
 | `ModelProvider` (base) | Provenance + capability advertisement | `info() -> ModelInfo` |
-| `Detector` | Players/keepers/refs/ball per frame (FR-5) | `detect(frames) -> Detections` |
-| `Tracker` | Stable IDs + team classification (FR-6) | `track(detections) -> Tracks` |
-| `FieldCalibrator` | Field homography per frame (FR-7) | `calibrate(frames) -> FieldCalibration` |
-| `PoseEstimator` (HMR) | SMPL-X θ/β per subject (FR-8) **and** constraint-guided **re-fit** | `estimate(...) -> dict[track_id, SubjectMotion]`, `refit(frames, motion, constraints) -> SubjectMotion` |
-| `BallTracker` | 2D ball track (FR-9); 3D lift is core math | `track_ball(frames) -> BallTrack2D` |
-| `EnvReconstructor` | 3DGS/NeRF environment (FR-11) | `reconstruct(frames, camera, synth_views=…) -> RenderAssetRef` |
-| `AvatarBuilder` | Photoreal avatar per subject (FR-12) | `build(subject, ref_crops, synth_views=…) -> RenderAssetRef` |
-| **`ViewSynthesizer`** | Generative novel-view, **two seams** | **A:** `render_orbit(source, trajectory, hints=…) -> SynthViewRef`; **B:** `amplify(source, n_views, deviation) -> list[SynthViewRef]`, `inpaint_occlusions(subject_views) -> SynthViewRef` |
-| `RenderPass` | Photoreal frame(s) from current scene state (FR-14) | `render(scene, camera_path, quality) -> RenderResult` |
-| `Exporter` | glTF/USD/FBX/Alembic/JSON/three.js (FR-26..28) | `export(scene, fmt, out_path) -> ExportResult` |
-| `Cache` | Content-addressable artifact store (NFR-4) | `key_for(stage, inputs, params, model_version)`, `get/put` |
-| `JobQueue` / `Worker` | Offline non-blocking execution (UX-8) | `submit(job)`, `status(id)`, `result(id)`, `cancel(id)` |
+| `Detector` | Players/keepers/refs/ball per frame (FR-5) | `detect(clip: ClipRef) -> Detections` |
+| `Tracker` | Stable IDs + team classification (FR-6) | `track(clip, detections) -> Tracks` |
+| `FieldCalibrator` | Field homography per frame (FR-7) | `calibrate(clip) -> FieldCalibration` |
+| `PoseEstimator` (HMR) | SMPL-X θ/β per subject (FR-8) **and** constraint-guided **re-fit** | `estimate(clip, tracks, calibration) -> dict[int, SubjectMotion]`, `refit(clip, motion, constraints, frames) -> SubjectMotion` |
+| `BallTracker` | 2D ball track (FR-9); 3D lift is core math | `track_ball(clip) -> Ball2DTrack` |
+| `EnvReconstructor` | 3DGS/NeRF environment (FR-11) | `reconstruct(clip, camera, synth_views=None) -> RenderAssetRef` |
+| `AvatarBuilder` | Photoreal avatar per subject (FR-12) | `build(subject, ref_crops, synth_views=None) -> RenderAssetRef` |
+| **`ViewSynthesizer`** | Generative novel-view, **two seams** | **A:** `render_orbit(clip, target_camera, scene_hints=None) -> SynthViewRef`; **B:** `amplify(clip, n_views, deviation) -> list[SynthViewRef]`, `inpaint_occlusions(subject_views) -> SynthViewRef` |
+| `RenderPass` | Photoreal frame(s) from current scene state (FR-14) | `render(scene, camera_path, quality=PREVIEW) -> RenderResult` |
+| `Exporter` | glTF/USD/FBX/Alembic/JSON/three.js (FR-26..28) | `supports(fmt) -> bool`, `export(scene, fmt, out_path) -> ExportResult` |
+| `Cache` | Content-addressable artifact store (NFR-4) | `key_for(stage, input_hash, params, model_version)`, `has/get/put` |
+| `JobQueue` / `Worker` | Offline non-blocking execution (UX-8) | `submit(stage, thunk, meta=None) -> JobHandle`, `state(job)`, `result(job)`, `cancel(job)`; `Worker.run(thunk)` |
 
 `ViewSynthesizer` deliberately exposes **both seams** on one port: seam A returns a
 `SynthViewRef` whose video an adapter can wrap as a `RenderPass`; seam B returns
