@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .assemble import assemble_scene, resolve_scene
 from .ball_lift import ballistic_z, lift_ball_to_3d
 from .pipeline import ReconstructionPipeline, ReconstructionResult
 from .stages import RECON_ORDER, Stage, StageRun, clip_hash, run_cached
@@ -12,8 +13,10 @@ __all__ = [
     "ReconstructionResult",
     "Stage",
     "StageRun",
+    "assemble_scene",
     "ballistic_z",
     "clip_hash",
     "lift_ball_to_3d",
+    "resolve_scene",
     "run_cached",
 ]
