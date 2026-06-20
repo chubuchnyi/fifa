@@ -45,14 +45,15 @@ class AppPorts:
 
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
-    detector: str = "fake", tracker: str = "fake",
+    detector: str = "fake", tracker: str = "fake", calibrator: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
-    ``detector`` / ``tracker`` select real adapters so the fakes can be swapped one at a time
-    (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR). ``tracker``:
-    ``"fake"`` (default) or ``"bytetrack"`` (ByteTrack + team clustering). The real adapters need
-    the ``cv`` extra (+ weights/GPU) at *call* time; importing them stays light.
+    ``detector`` / ``tracker`` / ``calibrator`` select real adapters so the fakes can be swapped
+    one at a time (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR).
+    ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering). ``calibrator``:
+    ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). The real adapters need the
+    ``cv`` extra (+ weights/GPU) at *call* time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -88,11 +89,20 @@ def default_ports(
     else:
         raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
 
+    if calibrator == "fake":
+        cal: FieldCalibrator = FakeFieldCalibrator()
+    elif calibrator == "keypoints":
+        from ..adapters.models import KeypointFieldCalibrator
+
+        cal = KeypointFieldCalibrator()
+    else:
+        raise ValueError(f"unknown calibrator {calibrator!r}; expected 'fake' or 'keypoints'")
+
     out = Path(out_dir)
     return AppPorts(
         detector=det,
         tracker=trk,
-        calibrator=FakeFieldCalibrator(),
+        calibrator=cal,
         pose=FakePoseEstimator(),
         ball=FakeBallTracker(),
         env=FakeEnvReconstructor(out_dir=out / "assets"),

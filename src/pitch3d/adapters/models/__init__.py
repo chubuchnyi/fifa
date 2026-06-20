@@ -18,7 +18,6 @@ import numpy as np
 from ...core.ports.io import ClipRef, CropRef
 from ...core.ports.perception import (
     BallTracker,
-    FieldCalibrator,
     Tracks,
 )
 from ...core.ports.pose import PoseEstimator
@@ -29,6 +28,7 @@ from ...core.scene.field import FieldCalibration
 from ...core.scene.motion import Ball2DTrack, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from .calibration import KeypointFieldCalibrator, PitchKeypointBackend
 from .detection import RFDETRBackend, RFDETRDetector
 from .tracking import ByteTrackBackend, ByteTrackTracker
 
@@ -38,17 +38,6 @@ def _todo(what: str) -> NotImplementedError:
         f"{what} is not wired yet — install the `models` extra and implement it (roadmap M1). "
         "Use the matching fake in pitch3d.adapters.fakes for tests and the dry-run."
     )
-
-
-@dataclass
-class KeypointFieldCalibrator(FieldCalibrator):
-    """Pitch-keypoint model + ``cv2.findHomography`` + temporal smoothing (FR-7)."""
-
-    def info(self) -> ModelInfo:
-        return ModelInfo(name="PitchKeypoints+findHomography", backend=Backend.LOCAL)
-
-    def calibrate(self, clip: ClipRef) -> FieldCalibration:
-        raise _todo("field homography calibration")
 
 
 @dataclass
@@ -108,6 +97,7 @@ __all__ = [
     "ByteTrackTracker",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
+    "PitchKeypointBackend",
     "RFDETRBackend",
     "RFDETRDetector",
     "SplatEnvReconstructor",
