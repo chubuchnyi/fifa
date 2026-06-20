@@ -45,9 +45,10 @@ python3 -m pytest                                       # or: just test
 # end-to-end dry-run on fake adapters — no install, straight from the source tree:
 PYTHONPATH=src python3 -m pitch3d --out-dir out/dryrun   # or: just dryrun
 
-# …or install once (editable), then use the module or the console script:
-pip install -e .
-python3 -m pitch3d --out-dir out/dryrun                  # or: pitch3d-dryrun --out-dir out/dryrun
+# …or install once into a venv (same as `just setup`), then use the module / console script:
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --out-dir out/dryrun
 
 # flags: --out-dir DIR   --frames N   --subjects N   --format json
 ```
