@@ -15,3 +15,4 @@ Format follows [MADR](https://adr.github.io/madr/)-style headers; all are **Acce
 | [0007](0007-viewsynthesizer-two-seams.md) | One `ViewSynthesizer` port, two seams (A render / B amplify+inpaint) | C6, FR-29..32, R-14..16 |
 | [0008](0008-llm-in-the-loop-mcp-and-visual-feedback.md) | LLM-in-the-loop editing via MCP + multi-view visual feedback | FR-21..23, UX-4 |
 | [0009](0009-device-config-and-cpu-validation-profile.md) | Inference `device` is a runtime knob; CPU is the local validation profile, GPU the production target | NFR-6, M1 |
+| [0010](0010-live-blender-edit-bridge.md) | Live Blender edits become `Correction`s over a socket; the host owns the scene, human ≡ LLM | C2, FR-14/21/22a, ADR-0008 |

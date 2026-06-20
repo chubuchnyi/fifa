@@ -41,6 +41,24 @@ def world_to_radar(
     return np.column_stack([u, v])
 
 
+def radar_to_world(
+    radar_uv: np.ndarray, *, length: float, width: float, px_w: int, px_h: int, margin: int
+) -> np.ndarray:
+    """Inverse of :func:`world_to_radar`: radar pixels ``(N, 2)`` → pitch-plane world XY (meters).
+
+    The exact algebraic inverse, so a dragged radar dot becomes the world position a
+    ``ROOT_TRANSLATION`` correction targets (the interactive-placement seam, ADR-0010, UX-3).
+    Pixels outside the pitch border map to off-pitch world coordinates (not clamped) — the caller
+    decides whether an out-of-bounds drop is meaningful.
+    """
+    uv = np.asarray(radar_uv, dtype=float).reshape(-1, 2)
+    inner_w = max(px_w - 2 * margin, 1)
+    inner_h = max(px_h - 2 * margin, 1)
+    x = (uv[:, 0] - margin) / inner_w * length - length / 2.0
+    y = width / 2.0 - (uv[:, 1] - margin) / inner_h * width
+    return np.column_stack([x, y])
+
+
 def _draw_pitch(fb: np.ndarray, margin: int) -> None:
     """Fill the playing surface and paint the outline + halfway line (pure numpy slicing)."""
     height, width = fb.shape[:2]
@@ -83,4 +101,4 @@ def render_radar(
     return _encode_png(fb)
 
 
-__all__ = ["render_radar", "world_to_radar"]
+__all__ = ["radar_to_world", "render_radar", "world_to_radar"]

@@ -30,6 +30,27 @@ _SENSOR_WIDTH_MM = 36.0  # Blender default 35mm-equivalent sensor; lens is deriv
 _REFEREE_RGB = (1.0, 0.31, 0.78)   # pink — referees carry no team colour
 _PLAYER_RGB = (0.24, 0.67, 1.0)    # blue — default when a team has no colour set
 _BALL_RGB = (1.0, 0.84, 0.0)       # gold
+_SUBJECT_NAME_PREFIX = "subject_"
+
+
+def subject_object_name(track_id: int) -> str:
+    """Proxy controller name for a subject — the id↔name contract the live editor parses back.
+
+    The single source of truth for the naming so :func:`build_proxy_plan` (which names the Blender
+    Empties) and the live edit bridge (which reads a moved Empty back to a track id, ADR-0010)
+    cannot drift.
+    """
+    return f"{_SUBJECT_NAME_PREFIX}{int(track_id)}"
+
+
+def parse_subject_name(name: str) -> int | None:
+    """Inverse of :func:`subject_object_name`; ``None`` for the ball / any non-subject object."""
+    if not name.startswith(_SUBJECT_NAME_PREFIX):
+        return None
+    try:
+        return int(name[len(_SUBJECT_NAME_PREFIX):])
+    except ValueError:
+        return None
 
 
 @dataclass
@@ -149,7 +170,7 @@ def build_proxy_plan(
         motion = resolve_subject_motion(subj.proposal, scene.corrections_for(subj.track_id))
         objects.append(
             ProxyObject(
-                name=f"subject_{subj.track_id}",
+                name=subject_object_name(subj.track_id),
                 kind="subject",
                 frames=np.asarray(motion.pose.frames, dtype=int),
                 location=np.asarray(motion.pose.transl, dtype=float),
@@ -272,6 +293,8 @@ __all__ = [
     "build_proxy_plan",
     "camera_eye_target",
     "load_plan",
+    "parse_subject_name",
     "plan_to_json",
+    "subject_object_name",
     "write_plan",
 ]

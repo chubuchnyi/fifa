@@ -12,8 +12,12 @@ and easy manual correction that **propagates across frames**.
 > behind its optional extra with an actionable install error. The dependency-free reals — the
 > reprojection-overlay `RenderPass` (with confidence highlighting), a camera-free top-down **radar**
 > VIEW, and the SMPL-X-`.npz`/JSON exporter — run the whole golden path on a real clip today with no
-> GPU/Blender. See [`docs/roadmap.md`](docs/roadmap.md) for per-step
-> state and [`docs/architecture.md`](docs/architecture.md).
+> GPU/Blender. Editing closes the same loop: a drag in a *live* Blender session (a radar dot or the
+> root Empty) becomes a `ROOT_TRANSLATION` `Correction` through the **same** `apply_offset` use-case
+> the LLM drives — the host owns the scene, Blender just reports world positions (ADR-0010). The
+> host side (the `radar_to_world` inverse, the `subject_<id>` id↔name contract, and the socket edit
+> loop) is unit-tested headlessly; only the GUI session needs a Blender binary + a display. See
+> [`docs/roadmap.md`](docs/roadmap.md) for per-step state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).
 Source of truth for the *shape* of this deliverable: [`CLAUDE_CODE_architecture_task.md`](CLAUDE_CODE_architecture_task.md).

@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from pitch3d.adapters.fakes import FakeSceneObserver
-from pitch3d.adapters.render.radar import render_radar, world_to_radar
+from pitch3d.adapters.render.radar import radar_to_world, render_radar, world_to_radar
 from pitch3d.core.ports.observation import (
     ObservationImage,
     ObservationKind,
@@ -42,6 +42,17 @@ def test_pitch_corners_map_to_the_inner_border():
     uv = world_to_radar(corners, **_PITCH)
     np.testing.assert_allclose(uv[0], [4, 4])
     np.testing.assert_allclose(uv[1], [96 - 4, 64 - 4])
+
+
+def test_radar_to_world_inverts_world_to_radar():
+    # a drag lands on a pixel; the inverse must recover the world XY the dot came from (ADR-0010).
+    world = np.array([[0.0, 0.0], [-52.5, 34.0], [52.5, -34.0], [17.3, -9.1], [-4.0, 22.5]])
+    uv = world_to_radar(world, **_PITCH)
+    np.testing.assert_allclose(radar_to_world(uv, **_PITCH), world, atol=1e-9)
+
+
+def test_radar_centre_pixel_maps_to_world_origin():
+    np.testing.assert_allclose(radar_to_world(np.array([[96 / 2, 64 / 2]]), **_PITCH), [[0.0, 0.0]])
 
 
 # --- render pass behaviour -----------------------------------------------------
