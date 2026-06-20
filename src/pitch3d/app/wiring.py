@@ -8,7 +8,7 @@ GPU/Blender/models; swapping a real adapter is a one-line change here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.ports.cache import Cache
@@ -44,13 +44,15 @@ class AppPorts:
 
 
 def default_ports(
-    *, out_dir: str | Path = "out", n_subjects: int = 4, detector: str = "fake"
+    *, out_dir: str | Path = "out", n_subjects: int = 4,
+    detector: str = "fake", tracker: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
-    ``detector`` selects the detection adapter so the first fake can be swapped for a real
-    model in isolation (roadmap M1): ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR, needs the
-    ``cv`` extra + weights + GPU at *call* time; importing it stays light).
+    ``detector`` / ``tracker`` select real adapters so the fakes can be swapped one at a time
+    (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR). ``tracker``:
+    ``"fake"`` (default) or ``"bytetrack"`` (ByteTrack + team clustering). The real adapters need
+    the ``cv`` extra (+ weights/GPU) at *call* time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -77,10 +79,19 @@ def default_ports(
     else:
         raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")
 
+    if tracker == "fake":
+        trk: Tracker = FakeTracker()
+    elif tracker == "bytetrack":
+        from ..adapters.models import ByteTrackTracker
+
+        trk = ByteTrackTracker()
+    else:
+        raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
+
     out = Path(out_dir)
     return AppPorts(
         detector=det,
-        tracker=FakeTracker(),
+        tracker=trk,
         calibrator=FakeFieldCalibrator(),
         pose=FakePoseEstimator(),
         ball=FakeBallTracker(),

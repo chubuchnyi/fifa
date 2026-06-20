@@ -18,9 +18,7 @@ import numpy as np
 from ...core.ports.io import ClipRef, CropRef
 from ...core.ports.perception import (
     BallTracker,
-    Detections,
     FieldCalibrator,
-    Tracker,
     Tracks,
 )
 from ...core.ports.pose import PoseEstimator
@@ -32,6 +30,7 @@ from ...core.scene.motion import Ball2DTrack, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .detection import RFDETRBackend, RFDETRDetector
+from .tracking import ByteTrackBackend, ByteTrackTracker
 
 
 def _todo(what: str) -> NotImplementedError:
@@ -39,17 +38,6 @@ def _todo(what: str) -> NotImplementedError:
         f"{what} is not wired yet — install the `models` extra and implement it (roadmap M1). "
         "Use the matching fake in pitch3d.adapters.fakes for tests and the dry-run."
     )
-
-
-@dataclass
-class ByteTrackTracker(Tracker):
-    """ByteTrack / BoT-SORT tracking + appearance team clustering (FR-6)."""
-
-    def info(self) -> ModelInfo:
-        return ModelInfo(name="ByteTrack+BoT-SORT", backend=Backend.LOCAL, license="MIT")
-
-    def track(self, clip: ClipRef, detections: Detections) -> Tracks:
-        raise _todo("ByteTrack tracking")
 
 
 @dataclass
@@ -116,6 +104,7 @@ class ApiAvatarBuilder(AvatarBuilder):
 
 __all__ = [
     "ApiAvatarBuilder",
+    "ByteTrackBackend",
     "ByteTrackTracker",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
