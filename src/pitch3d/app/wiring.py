@@ -43,8 +43,15 @@ class AppPorts:
     model_version: str = "fake-0"
 
 
-def default_ports(*, out_dir: str | Path = "out", n_subjects: int = 4) -> AppPorts:
-    """All-fakes wiring: deterministic, dependency-free, writes artifacts under ``out_dir``."""
+def default_ports(
+    *, out_dir: str | Path = "out", n_subjects: int = 4, detector: str = "fake"
+) -> AppPorts:
+    """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
+
+    ``detector`` selects the detection adapter so the first fake can be swapped for a real
+    model in isolation (roadmap M1): ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR, needs the
+    ``cv`` extra + weights + GPU at *call* time; importing it stays light).
+    """
     from ..adapters.fakes import (
         DiskCache,
         FakeAvatarBuilder,
@@ -61,9 +68,18 @@ def default_ports(*, out_dir: str | Path = "out", n_subjects: int = 4) -> AppPor
         InProcessJobQueue,
     )
 
+    if detector == "fake":
+        det: Detector = FakeDetector(n_subjects=n_subjects)
+    elif detector == "rfdetr":
+        from ..adapters.models import RFDETRDetector
+
+        det = RFDETRDetector()
+    else:
+        raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")
+
     out = Path(out_dir)
     return AppPorts(
-        detector=FakeDetector(n_subjects=n_subjects),
+        detector=det,
         tracker=FakeTracker(),
         calibrator=FakeFieldCalibrator(),
         pose=FakePoseEstimator(),

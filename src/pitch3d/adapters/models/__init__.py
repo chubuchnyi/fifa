@@ -1,10 +1,11 @@
-"""Real ML-model adapters — honest stubs (roadmap M0-6 / M1).
+"""Real ML-model adapters (roadmap M0-6 / M1).
 
-Each class names the intended backend + license and satisfies the port's ABC, but the work
-methods raise ``NotImplementedError``: wiring real weights is M1, behind the optional
-``models`` extra. Keeping these importable (no torch/cv2 at import time) means the hexagonal
-wiring, provenance (``info()``), and tests are complete now — only the model call is pending.
-Swap a fake for the matching stub one at a time; each must pass the same port test the fake does.
+Each class names its intended backend + license and satisfies the port's ABC. **Detection is
+wired** (:class:`RFDETRDetector`, behind the optional ``cv`` extra); the remaining classes are
+honest stubs whose work methods raise ``NotImplementedError`` until their milestone. Keeping
+every class importable with **no torch/cv2 at import time** means the hexagonal wiring,
+provenance (``info()``), and tests are complete now. Swap a fake for the matching real adapter
+one at a time; each must pass the same port test the fake does (see ``tests`` and ADR-0001).
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from ...core.ports.io import ClipRef, CropRef
 from ...core.ports.perception import (
     BallTracker,
     Detections,
-    Detector,
     FieldCalibrator,
     Tracker,
     Tracks,
@@ -31,6 +31,7 @@ from ...core.scene.field import FieldCalibration
 from ...core.scene.motion import Ball2DTrack, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from .detection import RFDETRBackend, RFDETRDetector
 
 
 def _todo(what: str) -> NotImplementedError:
@@ -38,17 +39,6 @@ def _todo(what: str) -> NotImplementedError:
         f"{what} is not wired yet — install the `models` extra and implement it (roadmap M1). "
         "Use the matching fake in pitch3d.adapters.fakes for tests and the dry-run."
     )
-
-
-@dataclass
-class RFDETRDetector(Detector):
-    """RF-DETR (roboflow/sports) player/ball detector (FR-5)."""
-
-    def info(self) -> ModelInfo:
-        return ModelInfo(name="RF-DETR", version="sports", backend=Backend.LOCAL, license="Apache-2.0")
-
-    def detect(self, clip: ClipRef) -> Detections:
-        raise _todo("RF-DETR detection")
 
 
 @dataclass
@@ -129,6 +119,7 @@ __all__ = [
     "ByteTrackTracker",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
+    "RFDETRBackend",
     "RFDETRDetector",
     "SplatEnvReconstructor",
     "TrackNetBallTracker",

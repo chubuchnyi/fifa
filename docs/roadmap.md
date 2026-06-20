@@ -41,7 +41,7 @@ Proxy only — no photoreal yet. This is the first milestone that replaces fakes
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
 2. **Episode** select (manual range first; action-spotting later). `core/scene`, `app`
-3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`)
+3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`) — 🟡 *wired*: `RFDETRDetector` (pure map/threshold/assembly, unit-tested) over an injected `RFDETRBackend` (torch/cv2/rfdetr, `cv` extra). Live inference needs the extra + weights + GPU.
 4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models`
 5. **Field homography** — keypoint model + `findHomography` + temporal smoothing → world anchor. `adapters/models`
 6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models`
@@ -59,6 +59,10 @@ show up in 3D and export.
 **Engineering notes**
 - Replace one fake at a time; the dry-run wiring is the integration harness.
 - Each real adapter must satisfy the same port test the fake passes.
+- **Pattern (set by the detector):** split each real adapter into a *pure* half (maps the model's
+  raw output into the canonical types — tested with no GPU via an injected backend) and a *heavy*
+  half (decode + inference, lazy torch/cv2, gated behind its extra). Select it in wiring per-port
+  (`default_ports(detector="rfdetr")`) so the swap is isolated.
 - `re-fit` is the first place a model is called from inside a correction — keep it behind the port.
 
 ---

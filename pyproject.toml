@@ -21,19 +21,20 @@ dependencies = [
 ]
 
 # --- Optional, heavy adapter dependencies --------------------------------------
-# These are DECLARED for reproducibility (NFR-7) and license visibility, but are
-# NOT installed or imported by the scaffold: every real adapter is a stub raising
-# NotImplementedError. Versions are pinned to mid-2026 baselines; bump per adapter
-# without touching the core (NFR-6). License caveats are noted inline; internal /
-# research use makes GPL/AGPL/SMPL acceptable (NFR-8).
+# DECLARED for reproducibility (NFR-7) and license visibility. Importing an adapter
+# never pulls these — heavy imports are lazy, inside the methods that need them — so
+# the core and tests run without them. Detection is the first WIRED adapter
+# (RFDETRDetector, `cv` extra); the rest still raise NotImplementedError until their
+# milestone. Versions are pinned to mid-2026 baselines; bump per adapter without
+# touching the core (NFR-6). Internal/research use makes GPL/AGPL/SMPL acceptable (NFR-8).
 [project.optional-dependencies]
 
-# Detection / tracking / team classification / field calibration
+# Detection (WIRED: RFDETRDetector) / tracking / team classification / field calibration
 cv = [
-  "opencv-python==4.11.0.86",
+  "opencv-python==4.11.0.86",   # frame decode for the detection backend
   "ultralytics==8.3.40",        # AGPL-3.0  (YOLO family)
-  "supervision==0.25.1",        # MIT       (ByteTrack/BoT-SORT helpers)
-  "rfdetr==1.1.0",              # Apache-2.0 (RF-DETR, primary detector)
+  "supervision==0.25.1",        # MIT       (ByteTrack/BoT-SORT helpers + Detections type)
+  "rfdetr==1.1.0",              # Apache-2.0 (RF-DETR, primary detector — wired)
 ]
 
 # Human Mesh Recovery -> SMPL-X (poses) + constraint-guided re-fit

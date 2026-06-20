@@ -96,7 +96,7 @@ src/pitch3d/
                     # PoseEstimator(+refit), BallTracker, EnvReconstructor, AvatarBuilder,
                     # ViewSynthesizer (seams A&B), RenderPass, SceneObserver, Exporter, Cache, JobQueue
   adapters/
-    models/         # real-model stubs behind ports (RF-DETR, ByteTrack, GVHMR, …) — NotImplementedError
+    models/         # real-model adapters behind ports: RF-DETR detection wired (cv extra), rest stubs
     viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
     blender/        # bpy adapter (proxy I/O, gizmo/F-curve bridge) — isolated stubs
     render/         # SplatAvatarRenderPass + ViewSynthRenderPass (wraps VS seam A) — stubs
