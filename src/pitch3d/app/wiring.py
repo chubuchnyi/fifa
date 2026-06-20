@@ -45,15 +45,16 @@ class AppPorts:
 
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
-    detector: str = "fake", tracker: str = "fake", calibrator: str = "fake",
+    detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
-    ``detector`` / ``tracker`` / ``calibrator`` select real adapters so the fakes can be swapped
-    one at a time (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"`` (RF-DETR).
+    ``detector`` / ``tracker`` / ``calibrator`` / ``pose`` select real adapters so the fakes can
+    be swapped one at a time (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"``.
     ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering). ``calibrator``:
-    ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). The real adapters need the
-    ``cv`` extra (+ weights/GPU) at *call* time; importing them stays light.
+    ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``: ``"fake"`` or
+    ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). The real adapters need their extra (+ weights/GPU)
+    at *call* time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -98,12 +99,21 @@ def default_ports(
     else:
         raise ValueError(f"unknown calibrator {calibrator!r}; expected 'fake' or 'keypoints'")
 
+    if pose == "fake":
+        pse: PoseEstimator = FakePoseEstimator()
+    elif pose == "gvhmr":
+        from ..adapters.models import GVHMRPoseEstimator
+
+        pse = GVHMRPoseEstimator()
+    else:
+        raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")
+
     out = Path(out_dir)
     return AppPorts(
         detector=det,
         tracker=trk,
         calibrator=cal,
-        pose=FakePoseEstimator(),
+        pose=pse,
         ball=FakeBallTracker(),
         env=FakeEnvReconstructor(out_dir=out / "assets"),
         avatar=FakeAvatarBuilder(out_dir=out / "assets"),

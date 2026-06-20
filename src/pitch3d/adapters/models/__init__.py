@@ -13,23 +13,17 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-import numpy as np
-
 from ...core.ports.io import ClipRef, CropRef
-from ...core.ports.perception import (
-    BallTracker,
-    Tracks,
-)
-from ...core.ports.pose import PoseEstimator
+from ...core.ports.perception import BallTracker
 from ...core.ports.reconstruction import AvatarBuilder, EnvReconstructor
 from ...core.scene.assets import RenderAssetRef, SynthViewRef
 from ...core.scene.camera import CameraTrack
-from ...core.scene.field import FieldCalibration
-from ...core.scene.motion import Ball2DTrack, SubjectMotion
+from ...core.scene.motion import Ball2DTrack
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .calibration import KeypointFieldCalibrator, PitchKeypointBackend
 from .detection import RFDETRBackend, RFDETRDetector
+from .pose import GVHMRBackend, GVHMRPoseEstimator
 from .tracking import ByteTrackBackend, ByteTrackTracker
 
 
@@ -38,20 +32,6 @@ def _todo(what: str) -> NotImplementedError:
         f"{what} is not wired yet — install the `models` extra and implement it (roadmap M1). "
         "Use the matching fake in pitch3d.adapters.fakes for tests and the dry-run."
     )
-
-
-@dataclass
-class GVHMRPoseEstimator(PoseEstimator):
-    """GVHMR / WHAM / TRAM SMPL-X HMR + PromptHMR-class re-fit (FR-8, FR-22c)."""
-
-    def info(self) -> ModelInfo:
-        return ModelInfo(name="GVHMR", backend=Backend.LOCAL, license="see upstream (non-commercial SMPL-X)")
-
-    def estimate(self, clip: ClipRef, tracks: Tracks, calibration: FieldCalibration) -> dict[int, SubjectMotion]:
-        raise _todo("GVHMR pose estimation")
-
-    def refit(self, clip: ClipRef, motion: SubjectMotion, constraints: dict, frames: np.ndarray) -> SubjectMotion:
-        raise _todo("constraint-guided pose re-fit")
 
 
 @dataclass
@@ -95,6 +75,7 @@ __all__ = [
     "ApiAvatarBuilder",
     "ByteTrackBackend",
     "ByteTrackTracker",
+    "GVHMRBackend",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
     "PitchKeypointBackend",
