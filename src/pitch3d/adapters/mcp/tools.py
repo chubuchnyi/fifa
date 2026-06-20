@@ -74,9 +74,9 @@ def tool_catalog() -> list[McpTool]:
         McpTool(
             "observe",
             "Capture visual + textual feedback for a scene: the resolved 3D from several "
-            "viewpoints, an optional source-frame reprojection overlay, and an optional UI "
-            "screenshot, plus the prioritized 'needs attention' summary. This is how the "
-            "agent SEES the consequences of its edits.",
+            "viewpoints, an optional source-frame reprojection overlay, an optional top-down "
+            "tactical radar, and an optional UI screenshot, plus the prioritized 'needs "
+            "attention' summary. This is how the agent SEES the consequences of its edits.",
             _obj(
                 {
                     "scene_id": {"type": "string"},
@@ -91,6 +91,7 @@ def tool_catalog() -> list[McpTool]:
                     },
                     "n_orbit": {"type": "integer", "default": 0},
                     "include_ui": {"type": "boolean", "default": False},
+                    "include_radar": {"type": "boolean", "default": False},
                 },
                 ["scene_id"],
             ),

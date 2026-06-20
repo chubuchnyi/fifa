@@ -153,7 +153,7 @@ structured to be **USD-mappable**; USD/glTF/FBX/Alembic are *export targets*, no
 | `AvatarBuilder` | Photoreal avatar per subject (FR-12) | `build(subject, ref_crops, synth_views=None) -> RenderAssetRef` |
 | **`ViewSynthesizer`** | Generative novel-view, **two seams** | **A:** `render_orbit(clip, target_camera, scene_hints=None) -> SynthViewRef`; **B:** `amplify(clip, n_views, deviation) -> list[SynthViewRef]`, `inpaint_occlusions(subject_views) -> SynthViewRef` |
 | `RenderPass` | Photoreal frame(s) from current scene state (FR-14) | `render(scene, camera_path, quality=PREVIEW) -> RenderResult` |
-| **`SceneObserver`** | Visual feedback for the LLM loop (ADR-0008): 3D-from-N-viewpoints + frame overlay + UI | `capture_scene_views(scene, views, quality=PREVIEW)`, `capture_frame_overlay(scene, frame)`, `capture_ui(scene=None)`, `observe(...) -> Observation` |
+| **`SceneObserver`** | Visual feedback for the LLM loop (ADR-0008): 3D-from-N-viewpoints + frame overlay + top-down radar + UI | `capture_scene_views(scene, views, quality=PREVIEW)`, `capture_frame_overlay(scene, frame)`, `capture_radar(scene, frame=0)`, `capture_ui(scene=None)`, `observe(..., include_radar=False) -> Observation` |
 | `Exporter` | glTF/USD/FBX/Alembic/JSON/three.js (FR-26..28) | `supports(fmt) -> bool`, `export(scene, fmt, out_path) -> ExportResult` |
 | `Cache` | Content-addressable artifact store (NFR-4) | `key_for(stage, input_hash, params, model_version)`, `has/get/put` |
 | `JobQueue` / `Worker` | Offline non-blocking execution (UX-8) | `submit(stage, thunk, meta=None) -> JobHandle`, `state(job)`, `result(job)`, `cancel(job)`; `Worker.run(thunk)` |
@@ -295,10 +295,14 @@ zero new coupling in `core`.
   so the agreed surface is testable today; the live `serve()` is gated behind the optional `mcp`
   extra + the app controller (Task 7) and is an honest `NotImplementedError` until then.
 - **`SceneObserver` = a *driven* port** (`core/ports/observation.py`). One `observe()` returns an
-  `Observation` = images + a textual `summary`, where images come in three kinds:
+  `Observation` = images + a textual `summary`, where images come in four kinds:
   `SCENE_3D` (resolved scene from N canonical viewpoints), `FRAME_OVERLAY` (source frame +
-  reprojection), `UI` (editor screenshot). It composes the existing `RenderPass`; producing real
-  pixels is an adapter, so `core` ships the contract + a stdlib `FakeSceneObserver`.
+  reprojection), `RADAR` (camera-free top-down tactical minimap, opt-in via
+  `observe(include_radar=True)`), `UI` (editor screenshot). It composes the existing `RenderPass`;
+  producing real pixels is an adapter, so `core` ships the contract + a stdlib `FakeSceneObserver`.
+  `capture_radar`/`capture_ui` are *concrete and default to `None`* — an observer opts in by
+  overriding (the fake renders a real minimap; the Blender observer delegates to it, since the
+  radar is pure 2D and needs no Blender).
 
 **Viewpoint math is pure core** (`core/agent/`): `look_at` (OpenCV +Z-forward, world→camera),
 `standard_viewpoints` (front/left/top/broadcast + an orbit ring around the action centroid), and

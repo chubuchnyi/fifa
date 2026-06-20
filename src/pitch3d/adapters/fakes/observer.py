@@ -60,6 +60,8 @@ class FakeSceneObserver(SceneObserver):
     out_dir: Path = field(default_factory=lambda: Path("out/observations"))
     width: int = 64
     height: int = 36
+    radar_width: int = 96
+    radar_height: int = 64
 
     def __post_init__(self) -> None:
         self.out_dir = Path(self.out_dir)
@@ -104,3 +106,16 @@ class FakeSceneObserver(SceneObserver):
     def capture_ui(self, scene: Scene | None = None) -> ObservationImage | None:
         sid = scene.id if scene is not None else "none"
         return self._write(f"{sid}_ui.png", (30, 30, 30), ObservationKind.UI)
+
+    def capture_radar(self, scene: Scene, frame: int = 0) -> ObservationImage | None:
+        """Real top-down minimap (pure numpy + stdlib PNG) — no renderer dependency."""
+        from pitch3d.adapters.render.radar import render_radar
+
+        path = self.out_dir / f"{scene.id}_radar_{frame:05d}.png"
+        path.write_bytes(
+            render_radar(scene, frame, width=self.radar_width, height=self.radar_height)
+        )
+        return ObservationImage(
+            kind=ObservationKind.RADAR, uri=str(path), viewpoint=Viewpoint.TOP,
+            frame=frame, width=self.radar_width, height=self.radar_height, note="tactical radar",
+        )

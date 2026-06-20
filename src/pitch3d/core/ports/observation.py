@@ -34,6 +34,7 @@ class ObservationKind(str, Enum):
 
     SCENE_3D = "scene_3d"            # resolved scene rendered from a viewpoint
     FRAME_OVERLAY = "frame_overlay"  # source frame + reprojection overlay
+    RADAR = "radar"                  # top-down tactical minimap (no camera)
     UI = "ui"                        # editor screenshot
 
 
@@ -105,6 +106,15 @@ class SceneObserver(Port):
         """Screenshot the editor UI; ``None`` when running headless."""
         raise NotImplementedError
 
+    def capture_radar(self, scene: Scene, frame: int = 0) -> ObservationImage | None:
+        """Top-down tactical radar of the resolved scene at ``frame``; ``None`` when unsupported.
+
+        Concrete (default ``None``) so observers *opt in* by overriding — same headless contract
+        as :meth:`capture_ui`. The fake observer renders a real, dependency-free minimap; the
+        Blender observer delegates to it (the radar is camera-free 2D, so it needs no Blender).
+        """
+        return None
+
     def observe(
         self,
         scene: Scene,
@@ -112,10 +122,11 @@ class SceneObserver(Port):
         *,
         frame: int | None = None,
         include_ui: bool = False,
+        include_radar: bool = False,
         quality: RenderQuality = RenderQuality.PREVIEW,
         summary: str = "",
     ) -> Observation:
-        """Compose a feedback bundle (3D views + optional frame overlay + optional UI).
+        """Compose a feedback bundle (3D views + optional frame overlay + optional radar/UI).
 
         Concrete so every adapter gets the bundling for free; ``summary`` is supplied by the
         caller (e.g. ``agent.scene_summary(scene)``) to keep this port free of agent logic.
@@ -125,6 +136,10 @@ class SceneObserver(Port):
             images.extend(self.capture_scene_views(scene, views, quality=quality))
         if frame is not None:
             images.append(self.capture_frame_overlay(scene, frame))
+        if include_radar:
+            radar = self.capture_radar(scene, frame if frame is not None else 0)
+            if radar is not None:
+                images.append(radar)
         if include_ui:
             ui = self.capture_ui(scene)
             if ui is not None:

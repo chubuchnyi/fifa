@@ -183,6 +183,9 @@ class BlenderSceneObserver(SceneObserver):
     def capture_ui(self, scene: Scene | None = None) -> ObservationImage | None:
         return self.fallback.capture_ui(scene)
 
+    def capture_radar(self, scene: Scene, frame: int = 0) -> ObservationImage | None:
+        return self.fallback.capture_radar(scene, frame)
+
 
 __all__ = [
     "BlenderProxyBuilder",

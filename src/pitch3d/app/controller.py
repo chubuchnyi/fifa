@@ -124,9 +124,10 @@ class Application:
         viewpoints: list[str] | None = None,
         n_orbit: int = 0,
         include_ui: bool = False,
+        include_radar: bool = False,
         quality: str = "preview",
     ) -> Observation:
-        """Snapshot the resolved 3D from several viewpoints (+ overlay/UI) with a text summary.
+        """Snapshot the resolved 3D from several viewpoints (+ overlay/radar/UI) with a summary.
 
         Pixels come from the *resolved* scene (single source of truth), but the textual
         summary is built from the *stored* scene so the agent sees the live correction count
@@ -136,7 +137,7 @@ class Application:
         which = [Viewpoint(v) for v in viewpoints] if viewpoints else None
         views = standard_viewpoints(resolved, frame=frame, which=which, n_orbit=n_orbit)
         return self.ports.observer.observe(
-            resolved, views, frame=frame, include_ui=include_ui,
+            resolved, views, frame=frame, include_ui=include_ui, include_radar=include_radar,
             quality=RenderQuality(quality), summary=scene_summary(self._scenes[scene_id]),
         )
 

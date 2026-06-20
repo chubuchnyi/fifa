@@ -10,8 +10,9 @@ and easy manual correction that **propagates across frames**.
 > the same way: a **pure half** (canonical-type mapping + maths) unit-tested with **no GPU** via
 > an injected stub backend, and a **heavy half** (inference/serialization) lazy-imported and gated
 > behind its optional extra with an actionable install error. The dependency-free reals — the
-> reprojection-overlay `RenderPass` and the SMPL-X-`.npz`/JSON exporter — run the whole golden path
-> on a real clip today with no GPU/Blender. See [`docs/roadmap.md`](docs/roadmap.md) for per-step
+> reprojection-overlay `RenderPass` (with confidence highlighting), a camera-free top-down **radar**
+> VIEW, and the SMPL-X-`.npz`/JSON exporter — run the whole golden path on a real clip today with no
+> GPU/Blender. See [`docs/roadmap.md`](docs/roadmap.md) for per-step
 > state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).

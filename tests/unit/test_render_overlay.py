@@ -16,11 +16,13 @@ from pitch3d.adapters.fakes import FakeRenderPass
 from pitch3d.adapters.render.overlay import (
     ReprojectionOverlayRenderPass,
     _draw_marker,
+    confidence_to_color,
     project_world_points,
     quat_to_rotation_matrix,
 )
 from pitch3d.core.ports.render import RenderPass, RenderResult
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
+from pitch3d.core.scene.layers import ConfidenceMap
 from pitch3d.core.scene.motion import BallTrack
 from pitch3d.core.scene.subject import Role, Subject
 
@@ -151,3 +153,45 @@ def test_render_is_non_destructive(tmp_path, make_scene, make_motion):
     before = scene.subjects[0].proposal.pose.transl.copy()
     ReprojectionOverlayRenderPass(out_dir=tmp_path / "n").render(scene, _camera(4))
     np.testing.assert_array_equal(scene.subjects[0].proposal.pose.transl, before)
+
+
+# --- confidence highlighting (UX-3, FR-16) -------------------------------------
+def test_confidence_to_color_endpoints_and_clamp():
+    base, low = (60, 170, 255), (255, 60, 60)
+    assert confidence_to_color(base, 1.0) == base       # full confidence → untouched
+    assert confidence_to_color(base, 0.0) == low        # zero confidence → warning colour
+    assert confidence_to_color(base, 2.0) == base       # clamps above 1
+    assert confidence_to_color(base, -1.0) == low       # clamps below 0
+    mid = confidence_to_color(base, 0.5)
+    assert all(min(b, low[i]) <= mid[i] <= max(b, low[i]) for i, b in enumerate(base))
+
+
+def _render(scene, tmp_path, name):
+    return _frame0(ReprojectionOverlayRenderPass(out_dir=tmp_path / name).render(scene, _camera(4)))
+
+
+def test_full_confidence_renders_identically_to_no_confidence(tmp_path, make_scene, make_motion):
+    subj = Subject(track_id=1, proposal=make_motion(range(4), transl_z=5.0))
+    none = _render(make_scene(subjects=[subj]), tmp_path, "none")
+    ones = _render(
+        make_scene(subjects=[subj], confidence=ConfidenceMap(subject_frame_conf={1: np.ones(4)})),
+        tmp_path, "ones",
+    )
+    assert none == ones  # the colour-untouched guarantee: existing scenes render unchanged
+
+
+def test_low_confidence_tints_the_subject_marker(tmp_path, make_scene, make_motion):
+    subj = Subject(track_id=1, proposal=make_motion(range(4), transl_z=5.0))
+    full = _render(make_scene(subjects=[subj]), tmp_path, "full")
+    low = _render(
+        make_scene(subjects=[subj], confidence=ConfidenceMap(subject_frame_conf={1: np.zeros(4)})),
+        tmp_path, "low",
+    )
+    assert full != low  # a low-confidence subject is visibly highlighted
+
+
+def test_low_ball_height_confidence_tints_the_ball(tmp_path, make_scene):
+    frames, pos = np.arange(4), np.tile([0.0, 0.0, 5.0], (4, 1))
+    high = make_scene(ball=BallTrack(frames=frames, positions_3d=pos, height_confidence=np.ones(4)))
+    low = make_scene(ball=BallTrack(frames=frames, positions_3d=pos, height_confidence=np.zeros(4)))
+    assert _render(high, tmp_path, "bh") != _render(low, tmp_path, "bl")

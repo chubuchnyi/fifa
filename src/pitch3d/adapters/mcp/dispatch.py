@@ -65,6 +65,7 @@ def dispatch_tool(app: Any, name: str, arguments: dict | None = None) -> list[Bl
             viewpoints=a.get("viewpoints"),
             n_orbit=a.get("n_orbit", 0),
             include_ui=a.get("include_ui", False),
+            include_radar=a.get("include_radar", False),
         )
         return observation_blocks(obs)
     if name == "get_attention":

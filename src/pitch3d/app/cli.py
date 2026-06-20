@@ -104,9 +104,10 @@ def run_dry_run(
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
 
-    # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + UI + textual summary.
+    # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + radar + UI + textual summary.
     obs_before = app.observe(
-        scene_id, frame=mid_frame, n_orbit=2, include_ui=True, quality="preview"
+        scene_id, frame=mid_frame, n_orbit=2, include_ui=True, include_radar=True,
+        quality="preview",
     )
     _print_observation(obs_before, label="observe:before")
 

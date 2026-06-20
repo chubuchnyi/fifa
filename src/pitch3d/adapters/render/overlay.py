@@ -31,6 +31,21 @@ _BALL_COLOR = (255, 215, 0)       # gold
 _REFEREE_COLOR = (255, 80, 200)   # pink — referees carry no team colour
 _PLAYER_COLOR = (60, 170, 255)    # blue — default when a team has no colour set
 _BACKGROUND = (18, 22, 18)        # dark pitch green
+_LOW_CONF_COLOR = (255, 60, 60)   # red — markers fade toward this as confidence drops
+
+
+def confidence_to_color(
+    base: tuple[int, int, int], conf: float, *, low: tuple[int, int, int] = _LOW_CONF_COLOR
+) -> tuple[int, int, int]:
+    """Blend ``base`` toward ``low`` as confidence drops: ``conf=1`` → base, ``conf=0`` → low.
+
+    Confidence highlighting (UX-3, FR-16): a low-confidence marker is pulled toward a warning
+    colour so the operator/LLM can *see* where the reconstruction is unsure (e.g. the ball at a
+    flight apex, R-4). Full confidence leaves the colour untouched, so a scene with no confidence
+    map renders exactly as before.
+    """
+    c = float(np.clip(conf, 0.0, 1.0))
+    return tuple(int(round(low[i] * (1.0 - c) + base[i] * c)) for i in range(3))
 
 
 def quat_to_rotation_matrix(quat: np.ndarray) -> np.ndarray:
@@ -105,11 +120,12 @@ def _subject_color(subject: Subject, teams: list[Team]) -> tuple[int, int, int]:
 
 @dataclass
 class _Marker:
-    """One resolved world-space track to draw: its frames, world points, and colour."""
+    """One resolved world-space track to draw: its frames, world points, colour, confidence."""
 
     frames: np.ndarray
     points: np.ndarray
     color: tuple[int, int, int]
+    conf: np.ndarray  # (T,) per-frame confidence in [0, 1]; 1.0 = full (colour untouched)
 
 
 @dataclass
@@ -138,7 +154,7 @@ class ReprojectionOverlayRenderPass(RenderPass):
         width, height = int(k.width), int(k.height)
         target = self.out_dir / f"{scene.id}_{quality.value}"
         target.mkdir(parents=True, exist_ok=True)
-        markers = self._resolved_markers(scene)
+        markers = _resolved_markers(scene)
 
         for i, frame in enumerate(camera_path.frames.tolist()):
             fb = np.empty((height, width, 3), dtype=np.uint8)
@@ -166,31 +182,55 @@ class ReprojectionOverlayRenderPass(RenderPass):
             note=f"reprojection overlay {width}x{height}",
         )
 
-    def _resolved_markers(self, scene: Scene) -> list[_Marker]:
-        """Resolve every subject's motion + the ball once (proposal ⊕ corrections, copy-safe)."""
-        markers: list[_Marker] = []
-        for subj in scene.subjects:
-            motion = resolve_subject_motion(subj.proposal, scene.corrections_for(subj.track_id))
-            markers.append(
-                _Marker(motion.pose.frames, motion.pose.transl, _subject_color(subj, scene.teams))
+
+def _resolved_markers(scene: Scene) -> list[_Marker]:
+    """Resolve every subject's motion + the ball once (proposal ⊕ corrections, copy-safe).
+
+    Module-level so any top-down/2D consumer (e.g. the tactical radar) can reuse the same
+    resolved world points + confidence-tinted colours without a camera or a RenderPass instance.
+    """
+    conf_map = scene.confidence.subject_frame_conf if scene.confidence is not None else {}
+    markers: list[_Marker] = []
+    for subj in scene.subjects:
+        motion = resolve_subject_motion(subj.proposal, scene.corrections_for(subj.track_id))
+        frames = motion.pose.frames
+        markers.append(
+            _Marker(
+                frames, motion.pose.transl, _subject_color(subj, scene.teams),
+                _frame_conf(conf_map.get(subj.track_id), frames.shape[0]),
             )
-        if scene.ball is not None:
-            ball = resolve_ball(scene.ball, scene.corrections_for(None))
-            markers.append(_Marker(ball.frames, ball.positions_3d, _BALL_COLOR))
-        return markers
+        )
+    if scene.ball is not None:
+        ball = resolve_ball(scene.ball, scene.corrections_for(None))
+        markers.append(
+            _Marker(
+                ball.frames, ball.positions_3d, _BALL_COLOR,
+                _frame_conf(ball.height_confidence, ball.frames.shape[0]),
+            )
+        )
+    return markers
+
+
+def _frame_conf(conf: np.ndarray | None, n: int) -> np.ndarray:
+    """Per-frame confidence aligned to ``n`` frames; full confidence when absent or mismatched."""
+    if conf is None:
+        return np.ones(n)
+    arr = np.asarray(conf, dtype=float).reshape(-1)
+    return arr if arr.shape[0] == n else np.ones(n)
 
 
 def _points_at_frame(
     markers: list[_Marker], frame: int
 ) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
-    """Collect the world points (and colours) present at ``frame`` across all markers."""
+    """Collect the world points (and confidence-tinted colours) present at ``frame``."""
     pts: list[np.ndarray] = []
     colors: list[tuple[int, int, int]] = []
     for m in markers:
         hit = np.nonzero(m.frames == frame)[0]
         if hit.size:
-            pts.append(m.points[int(hit[0])])
-            colors.append(m.color)
+            row = int(hit[0])
+            pts.append(m.points[row])
+            colors.append(confidence_to_color(m.color, float(m.conf[row])))
     arr = np.asarray(pts, dtype=float).reshape(-1, 3) if pts else np.zeros((0, 3))
     return arr, colors
 

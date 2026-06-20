@@ -49,8 +49,12 @@ fakes (the SDK stdio loop is lazy-imported, gated behind the `mcp` extra). The B
 wired as well: a pure `ProxyPlan` builder (unit-tested, never imports `bpy`) feeds an
 out-of-process `blender --background` runner that writes the editable `.blend` (root/ball as
 F-curves, β + body pose as channels) and renders proxy `SCENE_3D` viewpoints for the LLM loop —
-gated on a Blender binary (`$PITCH3D_BLENDER`/PATH), Workbench/CPU, no GPU. Remaining for M1: the
-in-Blender 2D radar placement affordance (step 10) and the heavy perception weights at call time.
+gated on a Blender binary (`$PITCH3D_BLENDER`/PATH), Workbench/CPU, no GPU. Confidence
+highlighting (overlay/radar markers fade toward a warning colour as confidence drops, UX-3/FR-16)
+and the top-down tactical **radar** VIEW (a camera-free 2D minimap surfaced through
+`observe(include_radar=…)`) are real and dependency-free too. Remaining for M1: the *interactive*
+in-Blender radar placement affordance (a GUI drag that maps onto a `ROOT_TRANSLATION` correction,
+step 10) and the heavy perception weights at call time (GPU).
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
@@ -61,8 +65,8 @@ in-Blender 2D radar placement affordance (step 10) and the heavy perception weig
 6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟡 *wired*: `GVHMRPoseEstimator` (pure homography root-grounding + geometric refit, unit-tested); live HMR needs the `hmr` extra + weights + GPU.
 7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟡 *wired*: `TrackNetBallTracker` (pure threshold + linear gap-fill with honest zero-confidence fills, unit-tested); live TrackNet needs the `ball` extra.
 8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration` — ✅
-9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — 🟡 *reprojection overlay + Blender proxy are real*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra, no GPU) and the Blender proxy (`build_proxy_plan` → out-of-process `blender --background` → editable `.blend` / proxy `SCENE_3D` PNGs, Workbench/CPU). Confidence highlighting stays ⬜.
-10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar placement. `adapters/blender` ↔ `core/correction` — 🟡 *editing surface is real*: `BlenderProxyBuilder` writes the editable `.blend` with root/ball location + axis-angle **F-curves** and β + per-joint body pose as keyframed channels (baked from the resolved proposal ⊕ corrections); edits there map back to `Correction`s, the source of truth (ADR-0002). The in-Blender 2D radar placement affordance stays ⬜.
+9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — ✅ *all real, no GPU*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra) and the Blender proxy (`build_proxy_plan` → out-of-process `blender --background` → editable `.blend` / proxy `SCENE_3D` PNGs, Workbench/CPU). **Confidence highlighting** is real (`confidence_to_color` blends each marker toward a red warning colour as per-frame confidence drops; full confidence is a no-op so existing scenes render unchanged — UX-3/FR-16).
+10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar VIEW + placement. `adapters/blender` ↔ `core/correction` — 🟡 *editing surface + radar VIEW are real*: `BlenderProxyBuilder` writes the editable `.blend` with root/ball location + axis-angle **F-curves** and β + per-joint body pose as keyframed channels (baked from the resolved proposal ⊕ corrections); edits there map back to `Correction`s, the source of truth (ADR-0002). The top-down **radar** is real on the read side — `render_radar` (pure numpy + stdlib PNG) draws a pitch + team-coloured subject dots + ball from the resolved world XY, surfaced as an `ObservationImage(kind=RADAR)` via `observe(include_radar=…)`. The *interactive* in-Blender radar **placement** drag (which maps onto a `ROOT_TRANSLATION` correction) stays ⬜ — it is a GUI affordance.
 11. **Propagate** — offset / interp / re-fit / smoothing with preview + undo (re-fit calls `PoseEstimator.refit`). `core/correction` — ✅
 12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export` — 🟡 *wired*: `GltfExporter` — SMPL-X `.npz` (resolved per subject) + canonical JSON are real (numpy/stdlib, no extra); glTF/GLB assembly (Z-up→Y-up) is real and unit-tested, the `pygltflib` serialization gated behind the `export` extra.
 
