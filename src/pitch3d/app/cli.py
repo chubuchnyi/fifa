@@ -67,7 +67,7 @@ def run_dry_run(
     *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str,
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
-    render: str = "fake", export: str = "fake",
+    render: str = "fake", export: str = "fake", observer: str = "fake",
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -81,6 +81,7 @@ def run_dry_run(
     ports = default_ports(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
+        observer=observer,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -181,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="render pass; 'overlay' is real + dependency-free (reprojection PNGs)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
                         help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
+    parser.add_argument("--observer", default="fake", choices=["fake", "blender"],
+                        help="scene observer; 'blender' renders real proxy SCENE_3D "
+                             "($PITCH3D_BLENDER or 'blender' on PATH)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -196,6 +200,7 @@ def main(argv: list[str] | None = None) -> int:
         ball=args.ball,
         render=args.render,
         export=args.export,
+        observer=args.observer,
     )
 
 

@@ -45,8 +45,12 @@ the matching CLI flags (`--detector/--tracker/--calibrator/--pose/--ball/--rende
 two dependency-free reals (overlay render, glTF/npz export) run end-to-end on a real clip today
 with no GPU; the heavy perception reals need their extra + weights at call time. The live MCP
 `serve()` is wired too — its tool→use-case→content-block dispatch is real and unit-tested on the
-fakes (the SDK stdio loop is lazy-imported, gated behind the `mcp` extra). Remaining for M1: the
-Blender SMPL proxy + bone/F-curve editing surface (step 10).
+fakes (the SDK stdio loop is lazy-imported, gated behind the `mcp` extra). The Blender proxy is
+wired as well: a pure `ProxyPlan` builder (unit-tested, never imports `bpy`) feeds an
+out-of-process `blender --background` runner that writes the editable `.blend` (root/ball as
+F-curves, β + body pose as channels) and renders proxy `SCENE_3D` viewpoints for the LLM loop —
+gated on a Blender binary (`$PITCH3D_BLENDER`/PATH), Workbench/CPU, no GPU. Remaining for M1: the
+in-Blender 2D radar placement affordance (step 10) and the heavy perception weights at call time.
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
@@ -57,8 +61,8 @@ Blender SMPL proxy + bone/F-curve editing surface (step 10).
 6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟡 *wired*: `GVHMRPoseEstimator` (pure homography root-grounding + geometric refit, unit-tested); live HMR needs the `hmr` extra + weights + GPU.
 7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟡 *wired*: `TrackNetBallTracker` (pure threshold + linear gap-fill with honest zero-confidence fills, unit-tested); live TrackNet needs the `ball` extra.
 8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration` — ✅
-9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — 🟡 *reprojection overlay is real*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra, no GPU). The Blender SMPL proxy + confidence highlighting stay ⬜.
-10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar placement. `adapters/blender` ↔ `core/correction` — ⬜ (the correction engine + offset/keyframe/refit/smoothing tools are real in `core`; the Blender editing surface is not yet wired).
+9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — 🟡 *reprojection overlay + Blender proxy are real*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra, no GPU) and the Blender proxy (`build_proxy_plan` → out-of-process `blender --background` → editable `.blend` / proxy `SCENE_3D` PNGs, Workbench/CPU). Confidence highlighting stays ⬜.
+10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar placement. `adapters/blender` ↔ `core/correction` — 🟡 *editing surface is real*: `BlenderProxyBuilder` writes the editable `.blend` with root/ball location + axis-angle **F-curves** and β + per-joint body pose as keyframed channels (baked from the resolved proposal ⊕ corrections); edits there map back to `Correction`s, the source of truth (ADR-0002). The in-Blender 2D radar placement affordance stays ⬜.
 11. **Propagate** — offset / interp / re-fit / smoothing with preview + undo (re-fit calls `PoseEstimator.refit`). `core/correction` — ✅
 12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export` — 🟡 *wired*: `GltfExporter` — SMPL-X `.npz` (resolved per subject) + canonical JSON are real (numpy/stdlib, no extra); glTF/GLB assembly (Z-up→Y-up) is real and unit-tested, the `pygltflib` serialization gated behind the `export` extra.
 
@@ -134,7 +138,7 @@ fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
 | A-4 MCP `tool_catalog` (import-free, 12 use-cases as data) | M0 | `adapters/mcp` | ✅ |
 | A-5 `FakeSceneObserver` (stdlib PNGs, no renderer) | M0 | `adapters/fakes` | ✅ |
 | A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | ✅ dispatch (tool→use-case→text/image blocks) real + unit-tested on fakes; SDK stdio loop lazy-imported, gated behind the `mcp` extra |
-| A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | 🟡 reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` still ⬜ |
+| A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | ✅ reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` real via `BlenderSceneObserver` (out-of-process `blender --background`, Workbench/CPU, gated on a Blender binary) — `--observer blender` |
 | A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ⬜ |
 | A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/viewsynth` | ⬜ |
 | A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ⬜ |

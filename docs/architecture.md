@@ -99,9 +99,9 @@ src/pitch3d/
     models/         # real-model adapters behind ports: detect/track/calibrate/pose/ball all wired
                     # (split: pure half unit-tested via injected stub; heavy half gated by extra)
     viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
-    blender/        # bpy adapter (proxy I/O, gizmo/F-curve bridge) — isolated stubs
+    blender/        # proxy plan (pure, no bpy) + out-of-process `blender --background` (.blend F-curves, proxy SCENE_3D) — gated on a binary
     render/         # ReprojectionOverlayRenderPass wired (numpy+stdlib, no GPU); splat/VS-seam-A stubs
-    mcp/            # LLM control surface: tool catalog (pure) + serve() stub (driving adapter, ADR-0008)
+    mcp/            # LLM control surface: tool→use-case dispatch (pure) + serve() over stdio (lazy SDK, mcp extra) — driving adapter, ADR-0008
     export/         # GltfExporter wired: SMPL-X npz + JSON real; glTF/GLB gated (export extra); USD/FBX/Alembic stubs
     fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams),
                     # FakeSceneObserver (stdlib PNG snapshots), in-proc queue, cache

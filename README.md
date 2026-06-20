@@ -58,8 +58,11 @@ python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --
 #        --clip path/to.mp4                       # real ingest via ffprobe (else a synthetic clip)
 #        per-port adapter swap (fake default | real): --detector rfdetr  --tracker bytetrack
 #        --calibrator keypoints  --pose gvhmr  --ball tracknet  --render overlay  --export gltf
+#        --observer blender                      # real proxy SCENE_3D via blender --background (CPU)
 #   e.g. fully-real-but-no-GPU render + export path:
 #        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --render overlay --export gltf --format smplx_npz
+#   e.g. real Blender proxy SCENE_3D feedback (needs a Blender binary, no GPU):
+#        PITCH3D_BLENDER=/path/to/blender PYTHONPATH=src python3 -m pitch3d --observer blender
 ```
 
 `numpy` is the only runtime dependency and is enough to run the tests and the dry-run.
