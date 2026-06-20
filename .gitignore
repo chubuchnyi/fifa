@@ -21,3 +21,9 @@ out/
 
 # Local sample media (large; not part of the repo)
 samples/
+
+# Model weights (large; downloaded on demand by the heavy adapters, e.g. RF-DETR base)
+*.pth
+*.pt
+*.onnx
+*.safetensors

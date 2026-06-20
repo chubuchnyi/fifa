@@ -52,14 +52,17 @@ F-curves, β + body pose as channels) and renders proxy `SCENE_3D` viewpoints fo
 gated on a Blender binary (`$PITCH3D_BLENDER`/PATH), Workbench/CPU, no GPU. Confidence
 highlighting (overlay/radar markers fade toward a warning colour as confidence drops, UX-3/FR-16)
 and the top-down tactical **radar** VIEW (a camera-free 2D minimap surfaced through
-`observe(include_radar=…)`) are real and dependency-free too. Remaining for M1: the *interactive*
+`observe(include_radar=…)`) are real and dependency-free too. The inference **device** is now a
+wired runtime knob — `default_ports(device=…)` / CLI `--device {cpu,cuda}` forwards it to every
+real perception adapter, defaulting to **`cpu`** (the local concept-validation profile, ADR-0009);
+production flips to `--device cuda` with no code change. Remaining for M1: the *interactive*
 in-Blender radar placement affordance (a GUI drag that maps onto a `ROOT_TRANSLATION` correction,
-step 10) and the heavy perception weights at call time (GPU).
+step 10) and running the heavy perception reals end-to-end on real weights (CPU validation first).
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
 2. **Episode** select (manual range first; action-spotting later). `core/scene`, `app`
-3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`) — 🟡 *wired*: `RFDETRDetector` (pure map/threshold/assembly, unit-tested) over an injected `RFDETRBackend` (torch/cv2/rfdetr, `cv` extra). Live inference needs the extra + weights + GPU.
+3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`) — 🟡 *wired*: `RFDETRDetector` (pure map/threshold/assembly, unit-tested) over an injected `RFDETRBackend` (torch/cv2/rfdetr, `cv` extra). Live inference needs the `cv` extra + weights; it runs on CPU via `--device cpu` (concept validation) or GPU in production — same path, one knob (ADR-0009).
 4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models` — 🟡 *wired*: `ByteTrackTracker` (pure association + appearance team clustering, unit-tested via injected stub); live ByteTrack needs the `cv` extra.
 5. **Field homography** — keypoint model + `findHomography` + temporal smoothing → world anchor. `adapters/models` — 🟡 *wired*: `KeypointFieldCalibrator` (pure numpy DLT homography + smoothing, unit-tested); live keypoint net needs the `cv` extra + weights.
 6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟡 *wired*: `GVHMRPoseEstimator` (pure homography root-grounding + geometric refit, unit-tested); live HMR needs the `hmr` extra + weights + GPU.

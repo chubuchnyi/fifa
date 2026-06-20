@@ -47,6 +47,7 @@ def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
     ball: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
+    device: str = "cpu", detector_weights: str | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -61,6 +62,12 @@ def default_ports(
     ``observer``: ``"fake"`` (stdlib PNGs) or ``"blender"`` (real proxy ``SCENE_3D`` via a
     ``blender --background`` subprocess; needs the binary on ``$PITCH3D_BLENDER``/``PATH``). The
     real model adapters need their extra (+ weights/GPU) at *call* time; importing them stays light.
+
+    ``device`` (default ``"cpu"``, the local concept-validation profile) is forwarded to every
+    real perception adapter; pass ``"cuda"`` where a GPU exists. Each adapter's own dataclass
+    default stays ``"cuda"`` (production intent) — the composition root is the seam that picks
+    the deployment profile. ``detector_weights`` is an optional RF-DETR weights path (the only
+    adapter exposing a user-settable weights path today; others source weights in-backend).
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -83,7 +90,7 @@ def default_ports(
     elif detector == "rfdetr":
         from ..adapters.models import RFDETRDetector
 
-        det = RFDETRDetector()
+        det = RFDETRDetector(device=device, weights=detector_weights)
     else:
         raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")
 
@@ -92,7 +99,7 @@ def default_ports(
     elif tracker == "bytetrack":
         from ..adapters.models import ByteTrackTracker
 
-        trk = ByteTrackTracker()
+        trk = ByteTrackTracker(device=device)
     else:
         raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
 
@@ -101,7 +108,7 @@ def default_ports(
     elif calibrator == "keypoints":
         from ..adapters.models import KeypointFieldCalibrator
 
-        cal = KeypointFieldCalibrator()
+        cal = KeypointFieldCalibrator(device=device)
     else:
         raise ValueError(f"unknown calibrator {calibrator!r}; expected 'fake' or 'keypoints'")
 
@@ -110,7 +117,7 @@ def default_ports(
     elif pose == "gvhmr":
         from ..adapters.models import GVHMRPoseEstimator
 
-        pse = GVHMRPoseEstimator()
+        pse = GVHMRPoseEstimator(device=device)
     else:
         raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")
 
@@ -119,7 +126,7 @@ def default_ports(
     elif ball == "tracknet":
         from ..adapters.models import TrackNetBallTracker
 
-        blt = TrackNetBallTracker()
+        blt = TrackNetBallTracker(device=device)
     else:
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 

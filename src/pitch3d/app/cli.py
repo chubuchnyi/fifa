@@ -68,6 +68,7 @@ def run_dry_run(
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
     render: str = "fake", export: str = "fake", observer: str = "fake",
+    device: str = "cpu", detector_weights: str | None = None,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -75,13 +76,14 @@ def run_dry_run(
     same golden path runs entirely on fakes, fully real, or any mix (FR-2..28, ADR-0008). The
     dependency-free reals (``render="overlay"``, ``export="gltf"``) run here with no GPU; the heavy
     perception reals (rfdetr/bytetrack/keypoints/gvhmr/tracknet) raise an actionable extras error
-    at call time when their weights/extra are absent.
+    at call time when their weights/extra are absent. ``device`` (default ``"cpu"``) is forwarded to
+    every real adapter so the concept is validated here without a GPU; pass ``"cuda"`` elsewhere.
     """
     out_dir = Path(out_dir)
     ports = default_ports(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
-        observer=observer,
+        observer=observer, device=device, detector_weights=detector_weights,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -186,6 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--observer", default="fake", choices=["fake", "blender"],
                         help="scene observer; 'blender' renders real proxy SCENE_3D "
                              "($PITCH3D_BLENDER or 'blender' on PATH)")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
+                        help="inference device for real perception adapters "
+                             "(default: cpu, the local concept-validation profile)")
+    parser.add_argument("--detector-weights", default=None,
+                        help="optional RF-DETR weights path/identifier (else the base weights)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -202,6 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         render=args.render,
         export=args.export,
         observer=args.observer,
+        device=args.device,
+        detector_weights=args.detector_weights,
     )
 
 
