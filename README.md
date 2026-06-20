@@ -58,8 +58,13 @@ Heavy extras (`torch`, `gsplat`, `bpy`, …) are **declared but not installed**.
 
 ## Reproducibility & licenses
 
-- The core pins `numpy` to a compatible range so the scaffold runs anywhere; **exact**
-  pins for a reproducible build belong in a lockfile (`uv.lock` / `requirements.txt`).
+- `pyproject.toml` is the dependency **source of truth** (core declares `numpy` as a
+  compatible range). **Exact** transitive pins for a reproducible core live in the
+  compiled lockfiles — [`requirements.txt`](requirements.txt) (runtime) and
+  [`requirements-dev.txt`](requirements-dev.txt) (core + dev) — regenerated with
+  `pip-compile [--extra dev] --strip-extras pyproject.toml`. Install a frozen env with
+  `pip install -r requirements-dev.txt`. Heavy GPU/Blender extras lock **per-milestone**
+  (they can't resolve without CUDA/Blender), matching adapter isolation (ADR-0001).
 - Heavy adapter deps in `pyproject.toml` are **exact-pinned** with inline license notes.
   Per the TZ this is **internal / research** use, so GPL (Blender), AGPL (some detectors)
   and the SMPL/SMPL-X model licenses are acceptable (NFR-8).
