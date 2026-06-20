@@ -22,6 +22,7 @@ import numpy as np
 from ..core.correction.engine import make_offset
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
+from ..adapters.io import FFmpegIngestor
 from ..core.scene.layers import CorrectionTarget, TargetKind
 from .controller import Application
 from .wiring import build_app, default_ports
@@ -63,22 +64,30 @@ def _print_observation(obs: Observation, *, label: str) -> None:
 
 
 def run_dry_run(
-    *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str
+    *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str,
+    clip_path: str | None = None, detector: str = "fake",
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code."""
     out_dir = Path(out_dir)
-    ports = default_ports(out_dir=out_dir, n_subjects=n_subjects)
+    ports = default_ports(out_dir=out_dir, n_subjects=n_subjects, detector=detector)
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
     # 1) Project setup: register a clip as an episode the agent/CLI can reconstruct.
-    clip = _synthetic_clip(n_frames=n_frames)
+    #    --clip ingests a real file via ffprobe (M1 step 1); else a dependency-free synthetic clip.
+    if clip_path is not None:
+        clip = FFmpegIngestor().clip(clip_path, max_frames=n_frames)
+        print(f"== ingested {clip_path}: {clip.width}x{clip.height} @ {clip.fps:.3f}fps, "
+              f"{clip.n_frames} frame(s)")
+    else:
+        clip = _synthetic_clip(n_frames=n_frames)
+    n = clip.n_frames
     episode = app.register_clip(clip, name="demo episode")
     print(f"== registered {episode.id} ({episode.n_frames} frames) from {clip.uri}")
 
     # 2) Reconstruction: DETECT→TRACK→CALIBRATE→POSE→BALL, assemble the proposal scene.
-    scene_id = app.run_reconstruction(episode.id, on_ground=_airborne_on_ground(n_frames))
+    scene_id = app.run_reconstruction(episode.id, on_ground=_airborne_on_ground(n))
     scene = app.get_scene(scene_id)
-    mid_frame = int(scene.subjects[0].proposal.pose.frames[n_frames // 2])
+    mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
 
@@ -140,9 +149,14 @@ def main(argv: list[str] | None = None) -> int:
         description="Run the pitch3d dry-run (full golden path on fake adapters).",
     )
     parser.add_argument("--out-dir", default="out/dry-run", help="where artifacts are written")
-    parser.add_argument("--frames", type=int, default=12, help="synthetic clip length")
+    parser.add_argument("--frames", type=int, default=12,
+                        help="clip length (synthetic) or max frames sampled from --clip")
     parser.add_argument("--subjects", type=int, default=4, help="number of fake subjects")
     parser.add_argument("--format", default="json", help="export format (json is a real round-trip)")
+    parser.add_argument("--clip", default=None,
+                        help="ingest a real video via ffprobe (M1 step 1); default: synthetic clip")
+    parser.add_argument("--detector", default="fake", choices=["fake", "rfdetr"],
+                        help="detection adapter; 'rfdetr' needs the cv extra + weights + GPU")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -150,6 +164,8 @@ def main(argv: list[str] | None = None) -> int:
         n_frames=args.frames,
         n_subjects=args.subjects,
         export_format=args.format,
+        clip_path=args.clip,
+        detector=args.detector,
     )
 
 
