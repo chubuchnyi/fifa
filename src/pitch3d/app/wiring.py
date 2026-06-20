@@ -46,7 +46,7 @@ class AppPorts:
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
-    ball: str = "fake", render: str = "fake",
+    ball: str = "fake", render: str = "fake", export: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -56,8 +56,9 @@ def default_ports(
     ``calibrator``: ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``:
     ``"fake"`` or ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). ``ball``: ``"fake"`` or ``"tracknet"``
     (TrackNet 2D, ``ball`` extra). ``render``: ``"fake"`` or ``"overlay"`` (reproject the resolved
-    3D back onto per-frame PNGs — dependency-free, no extra). The real model adapters need their
-    extra (+ weights/GPU) at *call* time; importing them stays light.
+    3D back onto per-frame PNGs — dependency-free, no extra). ``export``: ``"fake"`` or ``"gltf"``
+    (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the ``export`` extra). The
+    real model adapters need their extra (+ weights/GPU) at *call* time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -130,6 +131,15 @@ def default_ports(
     else:
         raise ValueError(f"unknown render {render!r}; expected 'fake' or 'overlay'")
 
+    if export == "fake":
+        exp: Exporter = FakeExporter()
+    elif export == "gltf":
+        from ..adapters.export import GltfExporter
+
+        exp = GltfExporter()
+    else:
+        raise ValueError(f"unknown export {export!r}; expected 'fake' or 'gltf'")
+
     return AppPorts(
         detector=det,
         tracker=trk,
@@ -141,7 +151,7 @@ def default_ports(
         viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),
         observer=FakeSceneObserver(out_dir=out / "observations"),
         render=rnd,
-        exporter=FakeExporter(),
+        exporter=exp,
         cache=DiskCache(root=out / "cache"),
         queue=InProcessJobQueue(),
     )
