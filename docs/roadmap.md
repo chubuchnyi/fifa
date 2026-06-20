@@ -25,7 +25,7 @@ on fakes, glTF export path exists.
 | M0-8 Core tests green without GPU/Blender | `tests` | ✅ |
 | M0-9 Observation port + viewpoint math + scene summary (LLM feedback) | `core/ports`, `core/agent` | ✅ |
 | M0-10 MCP tool catalog (import-free) + `FakeSceneObserver` | `adapters/mcp`, `adapters/fakes` | ✅ |
-| M0-11 Live MCP `serve()` (needs `mcp` extra + app controller) | `adapters/mcp` | 🟡 |
+| M0-11 Live MCP `serve()` (needs `mcp` extra + app controller) | `adapters/mcp` | ✅ |
 
 **Artifact:** `python -m pitch3d.app.cli` runs source → stages(fakes) → scene → edit →
 propagate → render(fake) → export, and `pytest` is green. The LLM-feedback loop
@@ -43,8 +43,10 @@ split pattern (pure half unit-tested via an injected stub backend; heavy half la
 gated behind its extra). Each is selectable per-port — `default_ports(detector="rfdetr", …)` and
 the matching CLI flags (`--detector/--tracker/--calibrator/--pose/--ball/--render/--export`). The
 two dependency-free reals (overlay render, glTF/npz export) run end-to-end on a real clip today
-with no GPU; the heavy perception reals need their extra + weights at call time. Remaining for M1:
-the Blender SMPL proxy + bone/F-curve editing surface (step 10) and live MCP `serve()`.
+with no GPU; the heavy perception reals need their extra + weights at call time. The live MCP
+`serve()` is wired too — its tool→use-case→content-block dispatch is real and unit-tested on the
+fakes (the SDK stdio loop is lazy-imported, gated behind the `mcp` extra). Remaining for M1: the
+Blender SMPL proxy + bone/F-curve editing surface (step 10).
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
@@ -131,7 +133,7 @@ fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
 | A-3 `scene_summary` from the UX-4 attention list (text feedback) | M0 | `core/agent` | ✅ |
 | A-4 MCP `tool_catalog` (import-free, 12 use-cases as data) | M0 | `adapters/mcp` | ✅ |
 | A-5 `FakeSceneObserver` (stdlib PNGs, no renderer) | M0 | `adapters/fakes` | ✅ |
-| A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | 🟡 |
+| A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | ✅ dispatch (tool→use-case→text/image blocks) real + unit-tested on fakes; SDK stdio loop lazy-imported, gated behind the `mcp` extra |
 | A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | 🟡 reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` still ⬜ |
 | A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ⬜ |
 | A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/viewsynth` | ⬜ |
