@@ -179,9 +179,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--calibrator", default="fake", choices=["fake", "keypoints"],
                         help="field calibrator; 'keypoints' needs the cv extra + weights")
     parser.add_argument("--pose", default="fake", choices=["fake", "gvhmr"],
-                        help="pose estimator; 'gvhmr' needs the hmr extra + weights + GPU")
+                        help="pose estimator; 'gvhmr' live backend is an unwired GPU-bound stub "
+                             "(the pure root-grounding half is real; use 'fake')")
     parser.add_argument("--ball", default="fake", choices=["fake", "tracknet"],
-                        help="ball tracker; 'tracknet' needs the ball extra + weights")
+                        help="ball tracker; 'tracknet' live backend is an unwired stub "
+                             "(the pure threshold/gap-fill half is real; use 'fake')")
     parser.add_argument("--render", default="fake", choices=["fake", "overlay"],
                         help="render pass; 'overlay' is real + dependency-free (reprojection PNGs)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],

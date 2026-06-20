@@ -11,9 +11,11 @@ behind the optional ``hmr`` extra. Split so the *model-independent* logic is tes
   calibration, stacks the metric root, assembles the canonical :class:`SubjectMotion`, and
   applies geometric :meth:`refit` constraints (root nudges/locks/floor) deterministically.
   Numpy only; unit-tested via an injected backend.
-* :class:`GVHMRBackend` — the **heavy** half: runs the HMR network per tracklet. All torch/HMR
-  imports are lazy, so importing this module never pulls the heavy stack; it raises an
-  actionable error if the ``hmr`` extra is missing.
+* :class:`GVHMRBackend` — the **heavy** half: *not wired yet* (roadmap M1/P2.4) and GPU-bound.
+  GVHMR is a research repo, not a pip package, so the ``hmr`` extra ships only its substrate
+  (torch/smplx/chumpy) — not the network or its weights; :meth:`GVHMRBackend.estimate_bodies`
+  raises an actionable ``NotImplementedError`` pointing at ``--pose fake`` or an injected backend.
+  The pure half above is complete and tested, so the pose path runs end to end on the fake today.
 
 Swap it in via ``default_ports(pose="gvhmr")`` (wiring) — one fake replaced at a time,
 satisfying the very same ``PoseEstimator`` port test the fake passes (roadmap M1).
@@ -213,8 +215,13 @@ class GVHMRBackend:
     ) -> dict[int, RawBodyMotion]:
         self._load()
         raise NotImplementedError(
-            "wire GVHMR's per-tracklet SMPL-X output into RawBodyMotion (global_orient, "
-            "body_pose, betas); the root grounding + assembly is already done in the adapter."
+            "GVHMR inference is not wired yet (roadmap M1/P2.4) and is GPU-bound. Unlike the "
+            "rfdetr/bytetrack reals, GVHMR is a research repo (not a pip package), so the `hmr` "
+            "extra ships only its substrate (torch/smplx/chumpy, non-commercial SMPL-X) — not the "
+            "network or its weights — and it is the one stage that may not be CPU-viable even for "
+            "a single clip (ADR-0009). The pure half (root grounding + assembly + refit) is "
+            "complete and tested; inject an HMRBackend that yields per-tracklet SMPL-X params, or "
+            "keep the fake (`--pose fake`) until GVHMR is wired."
         )
 
     def _load(self) -> object:  # pragma: no cover - exercised only without the extra

@@ -39,7 +39,11 @@ either by flipping one string.
    `device`/`weights` imports no torch/cv2 — so the wiring is unit-tested with no GPU (`test_wiring`).
 5. **CPU is for the concept proof; GPU is production, reached by `--device cuda` with no code
    change.** GVHMR pose is flagged as the one stage that may not be CPU-viable even for a single
-   clip; it may require a GPU regardless (roadmap P2.4).
+   clip; it may require a GPU regardless (roadmap P2.4). *P2.4 finding:* the prerequisite is even
+   earlier — GVHMR (like TrackNet) is an unwired research repo, not a pip package, so the `hmr`
+   extra ships only its substrate (torch/smplx/chumpy) and **neither device runs it today**. Its
+   *pure* half (root-grounding + assembly + refit — the project's centerpiece) was nonetheless
+   CPU-validated on real ByteTrack tracks, so the device knob's value stands for the wired stages.
 6. **The RF-DETR class map is a runtime knob with the same adapter/root split as `device`.** The
    sports vocabulary (`{ball, goalkeeper, player, referee}`) needs a Roboflow-gated, fine-tuned
    checkpoint that is *not* freely downloadable; the model's **base** weights are COCO-pretrained
@@ -63,6 +67,9 @@ either by flipping one string.
   players/frame → ByteTrack (no learned weights/GPU) → 16 stable tracks + teams A/B, on a real
   broadcast clip. The sports checkpoint and TrackNet ball net stay future work (the latter's
   `ball` extra ships only torch — no weights/decoder — so it remains a documented stub).
+- **P2.4 validated the pose *pure* half on CPU**: real RF-DETR→ByteTrack tracks → 16 subjects
+  grounded onto the pitch in world metres via the field homography. GVHMR's network stays an
+  unwired GPU-bound stub (research repo, not pip), so `--pose gvhmr` raises an actionable error.
 
 **Negative / costs**
 - CPU inference is slow (especially HMR); the CPU profile is for validation, not throughput.

@@ -57,11 +57,13 @@ wired runtime knob — `default_ports(device=…)` / CLI `--device {cpu,cuda}` f
 real perception adapter, defaulting to **`cpu`** (the local concept-validation profile, ADR-0009);
 production flips to `--device cuda` with no code change. **P2.3 validated detection + tracking on
 CPU** on a real broadcast clip: RF-DETR's free COCO base weights → ~15–17 players/frame → ByteTrack
-→ 16 stable tracks clustered into teams A/B (HSV), no GPU and no learned tracker weights. Remaining
-for M1: GVHMR pose on CPU/GPU (P2.4, may be GPU-only even for one clip), wiring the TrackNet ball
-network (its `ball` extra ships only torch today — the live backend is still a stub), and the
-*interactive* in-Blender radar placement affordance (a GUI drag that maps onto a `ROOT_TRANSLATION`
-correction, step 10).
+→ 16 stable tracks clustered into teams A/B (HSV), no GPU and no learned tracker weights. **P2.4**
+found GVHMR is an unwired research repo (not pip-installable) and GPU-bound, but CPU-validated its
+*central* pure half — grounding 16 real tracks' world roots onto the pitch from the field
+homography (world metres, Z = pelvis height). Remaining for M1: wiring the actual GVHMR and TrackNet
+networks (their `hmr`/`ball` extras ship only substrate today — both live backends are stubs, GVHMR
+GPU-bound), and the *interactive* in-Blender radar placement affordance (a GUI drag that maps onto a
+`ROOT_TRANSLATION` correction, step 10).
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
@@ -69,7 +71,7 @@ correction, step 10).
 3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`) — 🟢 *CPU-validated (P2.3)*: `RFDETRDetector` (pure map/threshold/assembly, unit-tested) over an injected `RFDETRBackend` (torch/cv2/rfdetr, `cv` extra). The `--detector-classes {coco,sports}` knob picks the class map: `coco` (default — the free, downloadable base weights; person→player, sports_ball→ball) or `sports` (the Roboflow checkpoint via `--detector-weights`, which splits keepers/refs apart). Same adapter=production / root=validation default as `device` (ADR-0009). Real run on CPU detected ~15–17 players/frame on a broadcast clip.
 4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models` — 🟢 *CPU-validated (P2.3)*: `ByteTrackTracker` (pure association + appearance team clustering, unit-tested via injected stub); the live `ByteTrackBackend` (`cv` extra) needs **no learned weights or GPU** (supervision's ByteTrack + HSV torso sampling). Real run on CPU: detections → 16 stable tracks across 8 frames → teams A/B.
 5. **Field homography** — keypoint model + `findHomography` + temporal smoothing → world anchor. `adapters/models` — 🟡 *wired*: `KeypointFieldCalibrator` (pure numpy DLT homography + smoothing, unit-tested); live keypoint net needs the `cv` extra + weights.
-6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟡 *wired*: `GVHMRPoseEstimator` (pure homography root-grounding + geometric refit, unit-tested); live HMR needs the `hmr` extra + weights + GPU.
+6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟢 *pure half CPU-validated (P2.4)*: `GVHMRPoseEstimator` grounds each subject's world root on the pitch from the field homography + assembles SMPL-X `SubjectMotion` + applies geometric refit (numpy, unit-tested). Validated on CPU on REAL ByteTrack tracks — 16 subjects grounded into world metres (Z = pelvis height). The **live `GVHMRBackend` is an unwired, GPU-bound stub**: GVHMR is a research repo (not pip), so the `hmr` extra ships only torch/smplx/chumpy, not the network/weights; `estimate_bodies` raises an actionable `NotImplementedError` (use `--pose fake` or inject an `HMRBackend`).
 7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟡 *pure half only*: `TrackNetBallTracker` (threshold + linear gap-fill with honest zero-confidence fills, unit-tested) runs end to end on the fake. The **live `TrackNetBackend` is an unimplemented stub** — unlike the rfdetr/bytetrack reals, the `ball` extra ships only torch (no TrackNet weights/decoder), so `detect_ball` raises an actionable `NotImplementedError` (use `--ball fake` or inject a `BallDetectionBackend`) until the network is wired.
 8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration` — ✅
 9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — ✅ *all real, no GPU*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra) and the Blender proxy (`build_proxy_plan` → out-of-process `blender --background` → editable `.blend` / proxy `SCENE_3D` PNGs, Workbench/CPU). **Confidence highlighting** is real (`confidence_to_color` blends each marker toward a red warning colour as per-frame confidence drops; full confidence is a no-op so existing scenes render unchanged — UX-3/FR-16).
