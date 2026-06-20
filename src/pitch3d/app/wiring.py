@@ -46,15 +46,17 @@ class AppPorts:
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
+    ball: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
-    ``detector`` / ``tracker`` / ``calibrator`` / ``pose`` select real adapters so the fakes can
-    be swapped one at a time (roadmap M1). ``detector``: ``"fake"`` (default) or ``"rfdetr"``.
-    ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering). ``calibrator``:
-    ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``: ``"fake"`` or
-    ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). The real adapters need their extra (+ weights/GPU)
-    at *call* time; importing them stays light.
+    ``detector`` / ``tracker`` / ``calibrator`` / ``pose`` / ``ball`` select real adapters so the
+    fakes can be swapped one at a time (roadmap M1). ``detector``: ``"fake"`` (default) or
+    ``"rfdetr"``. ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering).
+    ``calibrator``: ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``:
+    ``"fake"`` or ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). ``ball``: ``"fake"`` or ``"tracknet"``
+    (TrackNet 2D, ``ball`` extra). The real adapters need their extra (+ weights/GPU) at *call*
+    time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -108,13 +110,22 @@ def default_ports(
     else:
         raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")
 
+    if ball == "fake":
+        blt: BallTracker = FakeBallTracker()
+    elif ball == "tracknet":
+        from ..adapters.models import TrackNetBallTracker
+
+        blt = TrackNetBallTracker()
+    else:
+        raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
+
     out = Path(out_dir)
     return AppPorts(
         detector=det,
         tracker=trk,
         calibrator=cal,
         pose=pse,
-        ball=FakeBallTracker(),
+        ball=blt,
         env=FakeEnvReconstructor(out_dir=out / "assets"),
         avatar=FakeAvatarBuilder(out_dir=out / "assets"),
         viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),

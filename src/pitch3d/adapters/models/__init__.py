@@ -14,13 +14,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ...core.ports.io import ClipRef, CropRef
-from ...core.ports.perception import BallTracker
 from ...core.ports.reconstruction import AvatarBuilder, EnvReconstructor
 from ...core.scene.assets import RenderAssetRef, SynthViewRef
 from ...core.scene.camera import CameraTrack
-from ...core.scene.motion import Ball2DTrack
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from .ball import TrackNetBackend, TrackNetBallTracker
 from .calibration import KeypointFieldCalibrator, PitchKeypointBackend
 from .detection import RFDETRBackend, RFDETRDetector
 from .pose import GVHMRBackend, GVHMRPoseEstimator
@@ -32,17 +31,6 @@ def _todo(what: str) -> NotImplementedError:
         f"{what} is not wired yet — install the `models` extra and implement it (roadmap M1). "
         "Use the matching fake in pitch3d.adapters.fakes for tests and the dry-run."
     )
-
-
-@dataclass
-class TrackNetBallTracker(BallTracker):
-    """TrackNet-class 2D ball tracker; 3D lift stays in core (FR-9)."""
-
-    def info(self) -> ModelInfo:
-        return ModelInfo(name="TrackNetV3", backend=Backend.LOCAL)
-
-    def track_ball(self, clip: ClipRef) -> Ball2DTrack:
-        raise _todo("TrackNet ball tracking")
 
 
 @dataclass
@@ -82,5 +70,6 @@ __all__ = [
     "RFDETRBackend",
     "RFDETRDetector",
     "SplatEnvReconstructor",
+    "TrackNetBackend",
     "TrackNetBallTracker",
 ]
