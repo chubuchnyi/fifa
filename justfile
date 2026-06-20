@@ -17,11 +17,7 @@ test:
 
 # Run the end-to-end dry-run pipeline on fake adapters.
 dryrun:
-    python3 -m pitch3d.app.cli --workdir out/dryrun
-
-# Dry-run that also exercises ViewSynthesizer seam B (amplify) and seam A (render).
-dryrun-viewsynth:
-    python3 -m pitch3d.app.cli --workdir out/dryrun-vs --amplify --render viewsynth
+    PYTHONPATH=src python3 -m pitch3d --out-dir out/dryrun
 
 # Static checks (best-effort; requires dev extras).
 lint:

@@ -39,12 +39,17 @@ docs/              # architecture.md, scene-schema.md, adr/*, risk-map.md, roadm
 ## Quickstart (no GPU, no Blender)
 
 ```bash
-# tests
-python3 -m pytest                       # or: just test
+# tests (pytest puts src/ on the path automatically — see pyproject `pythonpath`)
+python3 -m pytest                                       # or: just test
 
-# end-to-end dry-run on fake adapters
-python3 -m pitch3d.app.cli --workdir out/dryrun                      # or: just dryrun
-python3 -m pitch3d.app.cli --workdir out/vs --amplify --render viewsynth   # exercises VS seams A & B
+# end-to-end dry-run on fake adapters — no install, straight from the source tree:
+PYTHONPATH=src python3 -m pitch3d --out-dir out/dryrun   # or: just dryrun
+
+# …or install once (editable), then use the module or the console script:
+pip install -e .
+python3 -m pitch3d --out-dir out/dryrun                  # or: pitch3d-dryrun --out-dir out/dryrun
+
+# flags: --out-dir DIR   --frames N   --subjects N   --format json
 ```
 
 `numpy` is the only runtime dependency and is enough to run the tests and the dry-run.
