@@ -33,24 +33,32 @@ propagate → render(fake) → export, and `pytest` is green. The LLM-feedback l
 
 ---
 
-## M1 — Editable loop (the vertical slice) ⬜
+## M1 — Editable loop (the vertical slice) 🟡
 
 **Goal (TZ M1):** a 3D scene on a real clip that can be **edited**, with edits propagated.
 Proxy only — no photoreal yet. This is the first milestone that replaces fakes with real models.
+
+**Status:** every perception/render/export port now has its real adapter wired behind the same
+split pattern (pure half unit-tested via an injected stub backend; heavy half lazy-imported and
+gated behind its extra). Each is selectable per-port — `default_ports(detector="rfdetr", …)` and
+the matching CLI flags (`--detector/--tracker/--calibrator/--pose/--ball/--render/--export`). The
+two dependency-free reals (overlay render, glTF/npz export) run end-to-end on a real clip today
+with no GPU; the heavy perception reals need their extra + weights at call time. Remaining for M1:
+the Blender SMPL proxy + bone/F-curve editing surface (step 10) and live MCP `serve()`.
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)
 2. **Episode** select (manual range first; action-spotting later). `core/scene`, `app`
 3. **Detect** players/keepers/refs/ball per frame — RF-DETR adapter. `adapters/models` (replaces `FakeDetector`) — 🟡 *wired*: `RFDETRDetector` (pure map/threshold/assembly, unit-tested) over an injected `RFDETRBackend` (torch/cv2/rfdetr, `cv` extra). Live inference needs the extra + weights + GPU.
-4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models`
-5. **Field homography** — keypoint model + `findHomography` + temporal smoothing → world anchor. `adapters/models`
-6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models`
-7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration`
-8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration`
-9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/blender`
-10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar placement. `adapters/blender` ↔ `core/correction`
-11. **Propagate** — offset / interp / re-fit / smoothing with preview + undo (re-fit calls `PoseEstimator.refit`). `core/correction`
-12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export`
+4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models` — 🟡 *wired*: `ByteTrackTracker` (pure association + appearance team clustering, unit-tested via injected stub); live ByteTrack needs the `cv` extra.
+5. **Field homography** — keypoint model + `findHomography` + temporal smoothing → world anchor. `adapters/models` — 🟡 *wired*: `KeypointFieldCalibrator` (pure numpy DLT homography + smoothing, unit-tested); live keypoint net needs the `cv` extra + weights.
+6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟡 *wired*: `GVHMRPoseEstimator` (pure homography root-grounding + geometric refit, unit-tested); live HMR needs the `hmr` extra + weights + GPU.
+7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟡 *wired*: `TrackNetBallTracker` (pure threshold + linear gap-fill with honest zero-confidence fills, unit-tested); live TrackNet needs the `ball` extra.
+8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration` — ✅
+9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — 🟡 *reprojection overlay is real*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra, no GPU). The Blender SMPL proxy + confidence highlighting stay ⬜.
+10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar placement. `adapters/blender` ↔ `core/correction` — ⬜ (the correction engine + offset/keyframe/refit/smoothing tools are real in `core`; the Blender editing surface is not yet wired).
+11. **Propagate** — offset / interp / re-fit / smoothing with preview + undo (re-fit calls `PoseEstimator.refit`). `core/correction` — ✅
+12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export` — 🟡 *wired*: `GltfExporter` — SMPL-X `.npz` (resolved per subject) + canonical JSON are real (numpy/stdlib, no extra); glTF/GLB assembly (Z-up→Y-up) is real and unit-tested, the `pygltflib` serialization gated behind the `export` extra.
 
 **Exit criteria (TZ AC-1, AC-2, AC-3):** reprojection overlay matches the source on wide shots;
 operator fixes a pose and propagates it three ways with preview+undo; ball/player curves edit and
@@ -124,7 +132,7 @@ fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
 | A-4 MCP `tool_catalog` (import-free, 12 use-cases as data) | M0 | `adapters/mcp` | ✅ |
 | A-5 `FakeSceneObserver` (stdlib PNGs, no renderer) | M0 | `adapters/fakes` | ✅ |
 | A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | 🟡 |
-| A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | ⬜ |
+| A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | 🟡 reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` still ⬜ |
 | A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ⬜ |
 | A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/viewsynth` | ⬜ |
 | A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ⬜ |

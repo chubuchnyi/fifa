@@ -4,11 +4,15 @@ Offline desktop tool that reconstructs an **editable, photorealistic 3D football
 episode** from a **single broadcast camera**, with the emphasis on pose estimation
 and easy manual correction that **propagates across frames**.
 
-> **Status: architecture scaffold.** This repository contains the *architecture* —
-> typed scene model, port contracts, the correction engine, fake adapters, and one
-> end-to-end dry-run. **No heavy ML/CV/render/generative model is implemented**;
-> every real adapter is an honest stub (`NotImplementedError`). See
-> [`docs/architecture.md`](docs/architecture.md).
+> **Status: architecture scaffold + M1 adapters wired.** The *architecture* — typed scene
+> model, port contracts, the correction engine, fakes, and an end-to-end dry-run — is complete,
+> and the M1 perception/render/export ports now carry real adapters. Each real adapter is split
+> the same way: a **pure half** (canonical-type mapping + maths) unit-tested with **no GPU** via
+> an injected stub backend, and a **heavy half** (inference/serialization) lazy-imported and gated
+> behind its optional extra with an actionable install error. The dependency-free reals — the
+> reprojection-overlay `RenderPass` and the SMPL-X-`.npz`/JSON exporter — run the whole golden path
+> on a real clip today with no GPU/Blender. See [`docs/roadmap.md`](docs/roadmap.md) for per-step
+> state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).
 Source of truth for the *shape* of this deliverable: [`CLAUDE_CODE_architecture_task.md`](CLAUDE_CODE_architecture_task.md).
@@ -50,7 +54,12 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --out-dir out/dryrun
 
-# flags: --out-dir DIR   --frames N   --subjects N   --format json
+# flags: --out-dir DIR  --frames N  --subjects N  --format json|smplx_npz|gltf|glb
+#        --clip path/to.mp4                       # real ingest via ffprobe (else a synthetic clip)
+#        per-port adapter swap (fake default | real): --detector rfdetr  --tracker bytetrack
+#        --calibrator keypoints  --pose gvhmr  --ball tracknet  --render overlay  --export gltf
+#   e.g. fully-real-but-no-GPU render + export path:
+#        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --render overlay --export gltf --format smplx_npz
 ```
 
 `numpy` is the only runtime dependency and is enough to run the tests and the dry-run.

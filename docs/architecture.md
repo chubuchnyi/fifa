@@ -96,12 +96,13 @@ src/pitch3d/
                     # PoseEstimator(+refit), BallTracker, EnvReconstructor, AvatarBuilder,
                     # ViewSynthesizer (seams A&B), RenderPass, SceneObserver, Exporter, Cache, JobQueue
   adapters/
-    models/         # real-model adapters behind ports: RF-DETR detection wired (cv extra), rest stubs
+    models/         # real-model adapters behind ports: detect/track/calibrate/pose/ball all wired
+                    # (split: pure half unit-tested via injected stub; heavy half gated by extra)
     viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
     blender/        # bpy adapter (proxy I/O, gizmo/F-curve bridge) — isolated stubs
-    render/         # SplatAvatarRenderPass + ViewSynthRenderPass (wraps VS seam A) — stubs
+    render/         # ReprojectionOverlayRenderPass wired (numpy+stdlib, no GPU); splat/VS-seam-A stubs
     mcp/            # LLM control surface: tool catalog (pure) + serve() stub (driving adapter, ADR-0008)
-    export/         # glTF/USD/FBX/Alembic/JSON + three.js viewer — stubs
+    export/         # GltfExporter wired: SMPL-X npz + JSON real; glTF/GLB gated (export extra); USD/FBX/Alembic stubs
     fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams),
                     # FakeSceneObserver (stdlib PNG snapshots), in-proc queue, cache
   app/              # wiring (composition) + CLI dry-run (source → … → export)
