@@ -8,9 +8,11 @@ GPU**:
   linearly interpolates the 2D position across missed (occluded) frames so the core ballistic
   lift gets a dense track, and flags every filled frame at confidence 0 (drift surfaced
   honestly, R-6). Numpy only; unit-tested via an injected backend.
-* :class:`TrackNetBackend` — the **heavy** half: runs the heatmap network per frame. All torch
-  imports are lazy, so importing this module never pulls the heavy stack; it raises an
-  actionable error if the ``ball`` extra is missing.
+* :class:`TrackNetBackend` — the **heavy** half: *not wired yet* (roadmap M1). Unlike the
+  rfdetr/bytetrack reals, the ``ball`` extra ships only torch (no TrackNet weights/decoder), so
+  the live network is a stub: :meth:`TrackNetBackend.detect_ball` raises ``NotImplementedError``
+  pointing at ``--ball fake`` or an injected backend. The pure threshold/gap-fill half above is
+  complete and tested, so the ball path runs end to end on the fake today.
 
 The 2D→3D ballistic lift stays in the core (``orchestration.ball_lift``), not here (FR-9).
 Swap it in via ``default_ports(ball="tracknet")`` (wiring) — one fake replaced at a time,
@@ -158,8 +160,11 @@ class TrackNetBackend:
     def detect_ball(self, clip: ClipRef) -> RawBallDetections:  # pragma: no cover - heavy path
         self._load()
         raise NotImplementedError(
-            "wire TrackNet's per-frame heatmap-peak output into RawBallDetections "
-            "(points_xy, scores); the threshold + gap-fill is already done in the adapter."
+            "TrackNet inference is not wired yet (roadmap M1): unlike the rfdetr/bytetrack "
+            "reals, the `ball` extra ships only torch — no TrackNet weights/decoder — so this "
+            "backend cannot run even once the extra is installed. The pure half (threshold + "
+            "gap-fill) is complete and tested; inject a BallDetectionBackend that yields your "
+            "own per-frame heatmap peaks, or keep the fake (`--ball fake`) until it is wired."
         )
 
     def _load(self) -> object:  # pragma: no cover - exercised only without the extra

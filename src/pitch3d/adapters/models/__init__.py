@@ -21,7 +21,7 @@ from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .ball import TrackNetBackend, TrackNetBallTracker
 from .calibration import KeypointFieldCalibrator, PitchKeypointBackend
-from .detection import RFDETRBackend, RFDETRDetector
+from .detection import DETECTOR_CLASS_MAPS, RFDETRBackend, RFDETRDetector
 from .pose import GVHMRBackend, GVHMRPoseEstimator
 from .tracking import ByteTrackBackend, ByteTrackTracker
 
@@ -60,6 +60,7 @@ class ApiAvatarBuilder(AvatarBuilder):
 
 
 __all__ = [
+    "DETECTOR_CLASS_MAPS",
     "ApiAvatarBuilder",
     "ByteTrackBackend",
     "ByteTrackTracker",

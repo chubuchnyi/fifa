@@ -40,6 +40,17 @@ either by flipping one string.
 5. **CPU is for the concept proof; GPU is production, reached by `--device cuda` with no code
    change.** GVHMR pose is flagged as the one stage that may not be CPU-viable even for a single
    clip; it may require a GPU regardless (roadmap P2.4).
+6. **The RF-DETR class map is a runtime knob with the same adapter/root split as `device`.** The
+   sports vocabulary (`{ball, goalkeeper, player, referee}`) needs a Roboflow-gated, fine-tuned
+   checkpoint that is *not* freely downloadable; the model's **base** weights are COCO-pretrained
+   and download on first load. So `default_ports(detector_classes=...)` / CLI
+   `--detector-classes {coco,sports}` selects the map: `coco` (person→player, sports_ball→ball —
+   correct labels on free weights, what the local profile validates) or `sports` (paired with a
+   `--detector-weights <sports.pth>` checkpoint, which splits keepers/refs apart). The adapter
+   dataclass defaults to the `sports` map (production intent); the composition root defaults to
+   `coco` — exactly mirroring `device` (adapter `cuda`, root `cpu`). COCO carries no
+   goalkeeper/referee notion, so every person collapses to `player` under `coco` — an accepted
+   limitation of validating on free weights, lifted by the sports checkpoint.
 
 ## Consequences
 
@@ -48,6 +59,10 @@ either by flipping one string.
   validated locally with no GPU.
 - The LLM and the human drive the same device/weights choice (ADR-0008): one knob in one seam.
 - No dead CLI flags — every flag maps to a field that exists today.
+- **P2.3 validated this on CPU** with only free weights: RF-DETR base (COCO map) → ~15–17
+  players/frame → ByteTrack (no learned weights/GPU) → 16 stable tracks + teams A/B, on a real
+  broadcast clip. The sports checkpoint and TrackNet ball net stay future work (the latter's
+  `ball` extra ships only torch — no weights/decoder — so it remains a documented stub).
 
 **Negative / costs**
 - CPU inference is slow (especially HMR); the CPU profile is for validation, not throughput.

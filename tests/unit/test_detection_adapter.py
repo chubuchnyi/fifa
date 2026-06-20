@@ -14,6 +14,7 @@ import pytest
 
 from pitch3d.adapters.fakes import FakeDetector
 from pitch3d.adapters.models.detection import (
+    COCO_BASE_CLASSES,
     DetectionBackend,
     RawFrameDetections,
     RFDETRBackend,
@@ -99,6 +100,19 @@ def test_rfdetr_threshold_is_configurable():
     # floor 0.75 is above the referee's 0.7 (drops) but below the keeper's 0.8 (kept)
     items = _rfdetr_with_stub(frames=(0,), threshold=0.75).detect(_clip(frames=(0,))).frames[0].items
     assert sorted(d.cls for d in items) == ["ball", "goalkeeper", "player"]  # 0.85, 0.8, 0.9
+
+
+def test_rfdetr_coco_base_map_collapses_persons_to_player():
+    # RF-DETR's free base weights speak COCO (person=1, sports ball=37). The "coco" map turns
+    # every person into "player" (COCO can't tell roles apart) and drops non-football ids (dog=18).
+    boxes = np.array([[0, 0, 1, 2], [3, 0, 4, 2], [6, 0, 7, 2], [9, 0, 10, 2]], dtype=float)
+    ids = np.array([1, 37, 1, 18])        # person, sports ball, person, dog
+    scores = np.array([0.9, 0.8, 0.7, 0.95])
+    det = RFDETRDetector(
+        backend=_StubBackend({0: (boxes, ids, scores)}), class_map=COCO_BASE_CLASSES
+    )
+    items = det.detect(_clip(frames=(0,))).frames[0].items
+    assert sorted(d.cls for d in items) == ["ball", "player", "player"]  # dog dropped
 
 
 def test_rfdetr_handles_empty_frame():

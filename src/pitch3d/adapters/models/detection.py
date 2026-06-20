@@ -30,6 +30,19 @@ from ...core.scene.provenance import Backend, ModelInfo
 #: Verify against the exact weights in use; override via ``RFDETRDetector(class_map=...)``.
 ROBOFLOW_SPORTS_CLASSES: dict[int, str] = {0: "ball", 1: "goalkeeper", 2: "player", 3: "referee"}
 
+#: RF-DETR's *base* checkpoint is COCO-pretrained (91-class, 1-indexed): person=1, sports ball=37.
+#: COCO has no goalkeeper/referee notion, so every person collapses to "player" — enough to
+#: validate the whole pipeline on **freely downloadable** weights (the sports checkpoint is
+#: Roboflow-gated). Pass the sports weights via ``--detector-weights`` to split the roles apart.
+COCO_BASE_CLASSES: dict[int, str] = {1: "player", 37: "ball"}
+
+#: Named class maps selectable at the composition root (``default_ports(detector_classes=...)``):
+#: ``"sports"`` pairs with a fine-tuned sports checkpoint, ``"coco"`` with the free base weights.
+DETECTOR_CLASS_MAPS: dict[str, dict[int, str]] = {
+    "sports": ROBOFLOW_SPORTS_CLASSES,
+    "coco": COCO_BASE_CLASSES,
+}
+
 
 @dataclass
 class RawFrameDetections:

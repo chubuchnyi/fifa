@@ -60,11 +60,12 @@ python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --
 #        per-port adapter swap (fake default | real): --detector rfdetr  --tracker bytetrack
 #        --calibrator keypoints  --pose gvhmr  --ball tracknet  --render overlay  --export gltf
 #        --observer blender                      # real proxy SCENE_3D via blender --background (CPU)
-#        --device cpu|cuda  --detector-weights PATH  # real perception on CPU (validation) or GPU (ADR-0009)
+#        --device cpu|cuda  --detector-classes coco|sports  --detector-weights PATH  # CPU validation vs GPU prod (ADR-0009)
 #   e.g. fully-real-but-no-GPU render + export path:
 #        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --render overlay --export gltf --format smplx_npz
-#   e.g. real RF-DETR detector on CPU on a real clip (needs `pip install '.[cv]'` + weights):
-#        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --frames 2 --detector rfdetr --device cpu --render overlay
+#   e.g. real RF-DETR + ByteTrack on CPU on a real clip (needs `pip install '.[cv]'`; the COCO base
+#   weights auto-download — yields players + teams A/B, no GPU; `--ball tracknet` is still a stub):
+#        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --frames 6 --detector rfdetr --tracker bytetrack --device cpu --render overlay
 #   e.g. real Blender proxy SCENE_3D feedback (needs a Blender binary, no GPU):
 #        PITCH3D_BLENDER=/path/to/blender PYTHONPATH=src python3 -m pitch3d --observer blender
 ```

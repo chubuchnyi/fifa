@@ -8,6 +8,8 @@ each backend's ``_load``), so this runs green with no torch/cv2/GPU (the AC-7 di
 
 from __future__ import annotations
 
+import pytest
+
 from pitch3d.adapters.models import (
     ByteTrackTracker,
     GVHMRPoseEstimator,
@@ -15,6 +17,7 @@ from pitch3d.adapters.models import (
     RFDETRDetector,
     TrackNetBallTracker,
 )
+from pitch3d.adapters.models.detection import COCO_BASE_CLASSES, ROBOFLOW_SPORTS_CLASSES
 from pitch3d.app.wiring import default_ports
 
 
@@ -56,3 +59,20 @@ def test_detector_weights_path_is_forwarded():
 
 def test_detector_weights_default_to_none():
     assert default_ports(detector="rfdetr").detector.weights is None
+
+
+def test_detector_classes_default_is_the_coco_validation_profile():
+    # Mirrors the device knob: the adapter dataclass defaults to the sports map (production
+    # intent), but the composition root defaults to "coco" — the map that pairs with the free,
+    # downloadable base weights, so labels are correct without a Roboflow-gated checkpoint.
+    assert default_ports(detector="rfdetr").detector.class_map == COCO_BASE_CLASSES
+
+
+def test_detector_classes_sports_is_forwarded():
+    det = default_ports(detector="rfdetr", detector_classes="sports").detector
+    assert det.class_map == ROBOFLOW_SPORTS_CLASSES
+
+
+def test_unknown_detector_classes_rejected():
+    with pytest.raises(ValueError, match="unknown detector_classes"):
+        default_ports(detector="rfdetr", detector_classes="nfl")

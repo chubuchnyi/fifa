@@ -68,7 +68,7 @@ def run_dry_run(
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
     render: str = "fake", export: str = "fake", observer: str = "fake",
-    device: str = "cpu", detector_weights: str | None = None,
+    device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -84,6 +84,7 @@ def run_dry_run(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
         observer=observer, device=device, detector_weights=detector_weights,
+        detector_classes=detector_classes,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -193,6 +194,9 @@ def main(argv: list[str] | None = None) -> int:
                              "(default: cpu, the local concept-validation profile)")
     parser.add_argument("--detector-weights", default=None,
                         help="optional RF-DETR weights path/identifier (else the base weights)")
+    parser.add_argument("--detector-classes", default="coco", choices=["coco", "sports"],
+                        help="RF-DETR class map: 'coco' (free base weights, person->player; "
+                             "default) or 'sports' (Roboflow checkpoint via --detector-weights)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -211,6 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         observer=args.observer,
         device=args.device,
         detector_weights=args.detector_weights,
+        detector_classes=args.detector_classes,
     )
 
 

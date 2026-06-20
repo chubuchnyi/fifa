@@ -47,7 +47,7 @@ def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
     ball: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
-    device: str = "cpu", detector_weights: str | None = None,
+    device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -68,6 +68,11 @@ def default_ports(
     default stays ``"cuda"`` (production intent) — the composition root is the seam that picks
     the deployment profile. ``detector_weights`` is an optional RF-DETR weights path (the only
     adapter exposing a user-settable weights path today; others source weights in-backend).
+    ``detector_classes`` selects the RF-DETR class map: ``"coco"`` (default — the validation
+    profile, pairing the free COCO base weights' ids with the vocabulary, person→"player") or
+    ``"sports"`` (the fine-tuned Roboflow checkpoint passed via ``detector_weights``, which splits
+    players/goalkeepers/referees). Same adapter-vs-root split as ``device``: the adapter dataclass
+    defaults to the sports map (production intent), the root to ``"coco"`` (what runs for free).
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -88,9 +93,17 @@ def default_ports(
     if detector == "fake":
         det: Detector = FakeDetector(n_subjects=n_subjects)
     elif detector == "rfdetr":
-        from ..adapters.models import RFDETRDetector
+        from ..adapters.models import DETECTOR_CLASS_MAPS, RFDETRDetector
 
-        det = RFDETRDetector(device=device, weights=detector_weights)
+        if detector_classes not in DETECTOR_CLASS_MAPS:
+            raise ValueError(
+                f"unknown detector_classes {detector_classes!r}; "
+                f"expected one of {sorted(DETECTOR_CLASS_MAPS)}"
+            )
+        det = RFDETRDetector(
+            device=device, weights=detector_weights,
+            class_map=dict(DETECTOR_CLASS_MAPS[detector_classes]),
+        )
     else:
         raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")
 
