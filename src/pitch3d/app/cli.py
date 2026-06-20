@@ -65,11 +65,23 @@ def _print_observation(obs: Observation, *, label: str) -> None:
 
 def run_dry_run(
     *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str,
-    clip_path: str | None = None, detector: str = "fake",
+    clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
+    calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
+    render: str = "fake", export: str = "fake",
 ) -> int:
-    """Drive the full reconstruction→edit→resolve→render→export path; return an exit code."""
+    """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
+
+    Each adapter argument selects the fake (default, dependency-free) or its real adapter, so the
+    same golden path runs entirely on fakes, fully real, or any mix (FR-2..28, ADR-0008). The
+    dependency-free reals (``render="overlay"``, ``export="gltf"``) run here with no GPU; the heavy
+    perception reals (rfdetr/bytetrack/keypoints/gvhmr/tracknet) raise an actionable extras error
+    at call time when their weights/extra are absent.
+    """
     out_dir = Path(out_dir)
-    ports = default_ports(out_dir=out_dir, n_subjects=n_subjects, detector=detector)
+    ports = default_ports(
+        out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
+        calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
+    )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
     # 1) Project setup: register a clip as an episode the agent/CLI can reconstruct.
@@ -157,6 +169,18 @@ def main(argv: list[str] | None = None) -> int:
                         help="ingest a real video via ffprobe (M1 step 1); default: synthetic clip")
     parser.add_argument("--detector", default="fake", choices=["fake", "rfdetr"],
                         help="detection adapter; 'rfdetr' needs the cv extra + weights + GPU")
+    parser.add_argument("--tracker", default="fake", choices=["fake", "bytetrack"],
+                        help="tracking adapter; 'bytetrack' needs the cv extra")
+    parser.add_argument("--calibrator", default="fake", choices=["fake", "keypoints"],
+                        help="field calibrator; 'keypoints' needs the cv extra + weights")
+    parser.add_argument("--pose", default="fake", choices=["fake", "gvhmr"],
+                        help="pose estimator; 'gvhmr' needs the hmr extra + weights + GPU")
+    parser.add_argument("--ball", default="fake", choices=["fake", "tracknet"],
+                        help="ball tracker; 'tracknet' needs the ball extra + weights")
+    parser.add_argument("--render", default="fake", choices=["fake", "overlay"],
+                        help="render pass; 'overlay' is real + dependency-free (reprojection PNGs)")
+    parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
+                        help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -166,6 +190,12 @@ def main(argv: list[str] | None = None) -> int:
         export_format=args.format,
         clip_path=args.clip,
         detector=args.detector,
+        tracker=args.tracker,
+        calibrator=args.calibrator,
+        pose=args.pose,
+        ball=args.ball,
+        render=args.render,
+        export=args.export,
     )
 
 

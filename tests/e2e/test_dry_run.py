@@ -28,6 +28,26 @@ def test_dry_run_completes_and_exports(tmp_path):
     assert not scene.corrections  # export is the resolved scene, stack baked empty
 
 
+def test_dry_run_drives_real_render_and_export(tmp_path):
+    # The same golden path, but with the dependency-free *real* adapters wired in (no GPU):
+    # the reprojection-overlay render pass and the glTF exporter's SMPL-X npz path.
+    out = tmp_path / "out"
+    rc = run_dry_run(
+        out_dir=out, n_frames=8, n_subjects=3, export_format="smplx_npz",
+        render="overlay", export="gltf",
+    )
+    assert rc == 0
+
+    frames = sorted(out.glob("render/**/frame_*.png"))
+    assert len(frames) == 8  # one real reprojection PNG per frame
+    assert frames[0].read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"  # genuine PNG, not a placeholder
+
+    npzs = sorted((out / "export" / "scene.smplx_npz").glob("subject_*.npz"))
+    assert len(npzs) == 3  # one resolved SMPL-X animation per subject
+    data = np.load(npzs[0])
+    assert data["transl"].shape[1] == 3 and data["body_model"].item() == "SMPL-X"
+
+
 def test_dry_run_is_deterministic(tmp_path):
     run_dry_run(out_dir=tmp_path / "a", n_frames=8, n_subjects=3, export_format="json")
     run_dry_run(out_dir=tmp_path / "b", n_frames=8, n_subjects=3, export_format="json")
