@@ -11,6 +11,11 @@ setup:
     .venv/bin/pip install -U pip
     .venv/bin/pip install -e ".[dev]"
 
+# Provision a rented GPU box: CUDA torch + real adapters + dev, then verify the GPU.
+# Override the CUDA build / extras via env (see docs/cloud-dev.md): PITCH3D_CUDA=cu118 ...
+cloud-setup:
+    ./scripts/cloud_setup.sh
+
 # Run the core test suite (no GPU, no Blender required).
 test:
     python3 -m pytest

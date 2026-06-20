@@ -77,6 +77,10 @@ python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --
 `numpy` is the only runtime dependency and is enough to run the tests and the dry-run.
 Heavy extras (`torch`, `gsplat`, `bpy`, …) are **declared but not installed**.
 
+Moving development to a rented GPU box? [`scripts/cloud_setup.sh`](scripts/cloud_setup.sh) installs
+a CUDA `torch` + the wired real adapters and verifies the GPU; [`docs/cloud-dev.md`](docs/cloud-dev.md)
+is the spin-up → verify → `--device cuda` golden-path checklist (ADR-0009).
+
 ## Reproducibility & licenses
 
 - `pyproject.toml` is the dependency **source of truth** (core declares `numpy` as a
@@ -96,3 +100,4 @@ Heavy extras (`torch`, `gsplat`, `bpy`, …) are **declared but not installed**.
 2. [`docs/scene-schema.md`](docs/scene-schema.md) — the canonical scene model.
 3. [`docs/adr/`](docs/adr/) — the decisions and why (0001–0007).
 4. [`docs/roadmap.md`](docs/roadmap.md) — M0→M3 plan and the M1 vertical slice.
+5. [`docs/cloud-dev.md`](docs/cloud-dev.md) — provisioning a GPU box for `--device cuda` development.
