@@ -1,9 +1,11 @@
-"""Real render passes — honest stubs (FR-14, UX-3, roadmap M2).
+"""Real render passes (FR-14, UX-3).
 
-Two implementations both satisfy :class:`RenderPass`: a splat/avatar pass for a free camera,
-and a ViewSynthesizer-seam-A pass that wraps :meth:`ViewSynthesizer.render_orbit` for limited
-orbits (video, not editable). Importable now; ``render`` raises ``NotImplementedError``. Use
-:class:`pitch3d.adapters.fakes.FakeRenderPass` for tests and the dry-run.
+Three implementations satisfy :class:`RenderPass`. **Wired now:**
+:class:`ReprojectionOverlayRenderPass` — a Blender-free pass that reprojects the resolved 3D
+scene back onto per-frame PNGs (pure numpy + stdlib), so the mono pipeline is visually
+inspectable today. **Stubs (roadmap M2):** a splat/avatar pass for a free camera, and a
+ViewSynthesizer-seam-A pass wrapping :meth:`ViewSynthesizer.render_orbit` for limited orbits
+(video, not editable). Use :class:`pitch3d.adapters.fakes.FakeRenderPass` for the no-IO dry-run.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from ...core.ports.render import RenderPass, RenderQuality, RenderResult
 from ...core.ports.view_synthesizer import ViewSynthesizer
 from ...core.scene.camera import CameraTrack
 from ...core.scene.scene import Scene
+from .overlay import ReprojectionOverlayRenderPass
 
 
 @dataclass
@@ -40,4 +43,8 @@ class ViewSynthOrbitRenderPass(RenderPass):
         )
 
 
-__all__ = ["SplatAvatarRenderPass", "ViewSynthOrbitRenderPass"]
+__all__ = [
+    "ReprojectionOverlayRenderPass",
+    "SplatAvatarRenderPass",
+    "ViewSynthOrbitRenderPass",
+]

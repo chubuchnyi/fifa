@@ -46,7 +46,7 @@ class AppPorts:
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
-    ball: str = "fake",
+    ball: str = "fake", render: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -55,8 +55,9 @@ def default_ports(
     ``"rfdetr"``. ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering).
     ``calibrator``: ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``:
     ``"fake"`` or ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). ``ball``: ``"fake"`` or ``"tracknet"``
-    (TrackNet 2D, ``ball`` extra). The real adapters need their extra (+ weights/GPU) at *call*
-    time; importing them stays light.
+    (TrackNet 2D, ``ball`` extra). ``render``: ``"fake"`` or ``"overlay"`` (reproject the resolved
+    3D back onto per-frame PNGs — dependency-free, no extra). The real model adapters need their
+    extra (+ weights/GPU) at *call* time; importing them stays light.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -120,6 +121,15 @@ def default_ports(
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 
     out = Path(out_dir)
+    if render == "fake":
+        rnd: RenderPass = FakeRenderPass(out_dir=out / "render")
+    elif render == "overlay":
+        from ..adapters.render import ReprojectionOverlayRenderPass
+
+        rnd = ReprojectionOverlayRenderPass(out_dir=out / "render")
+    else:
+        raise ValueError(f"unknown render {render!r}; expected 'fake' or 'overlay'")
+
     return AppPorts(
         detector=det,
         tracker=trk,
@@ -130,7 +140,7 @@ def default_ports(
         avatar=FakeAvatarBuilder(out_dir=out / "assets"),
         viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),
         observer=FakeSceneObserver(out_dir=out / "observations"),
-        render=FakeRenderPass(out_dir=out / "render"),
+        render=rnd,
         exporter=FakeExporter(),
         cache=DiskCache(root=out / "cache"),
         queue=InProcessJobQueue(),
