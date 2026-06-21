@@ -27,3 +27,8 @@ samples/
 *.pt
 *.onnx
 *.safetensors
+*.pkl
+
+# Licensed body models — must NOT enter the public repo (non-commercial MPI SMPL-X
+# license). Local downloads/model workspace: the saved download page + the 830 MB model.
+/SMPL-X/
