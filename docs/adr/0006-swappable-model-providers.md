@@ -33,6 +33,12 @@ NFR-7 requires us to record **what produced each artifact** for reproducibility.
 
 **Positive**
 - Vendor-neutral: self-hosted ↔ API is an adapter swap, no core change (C4, NFR-6).
+- The swap is reachable **without editing the wiring**: a heavy backend (a vendored GVHMR/
+  TrackNet/keypoint network) is injected into its real adapter by **dotted path** from the
+  composition root and the CLI (`--pose-backend`/`--ball-backend`/`--calibrator-backend
+  pkg.module:Factory`, resolved by `app.wiring._resolve_backend`). The factory lives in the
+  on-box engineer's own code, so the research network stays out of the core tree (ADR-0001);
+  the path is protocol-guarded at startup and requires its real adapter to be selected.
 - License and cost are visible in the UI and the run log (UX-7, NFR-8) — important given SMPL-X /
   AGPL constraints and per-call API spend.
 - Every artifact is reproducible: the run log says exactly which model/version/params made it (NFR-7).

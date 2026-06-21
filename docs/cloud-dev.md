@@ -22,6 +22,24 @@ So the *runnable* real pipeline on a fresh GPU box today is **real detection/tra
 the dependency-free reals** (overlay render, top-down radar, SMPL-X/glTF export) — none of
 which need a GPU, but all of which run end-to-end on the GPU box on a real clip.
 
+### Wiring a GPU-bound backend on the box (config, not fork)
+
+Once you *have* a vendored GVHMR/TrackNet/keypoint network on the box, you inject it into the
+real adapter by **dotted path** — no fork of the wiring (ADR-0006). Point the matching flag at a
+zero-arg factory (or class) that returns an object implementing the stage's backend protocol:
+
+```bash
+PYTHONPATH=src python -m pitch3d --clip clip.mp4 --device cuda \
+  --pose gvhmr --pose-backend my_lab.gvhmr:Backend                 # HMRBackend.estimate_bodies
+#  --ball tracknet --ball-backend my_lab.tracknet:Backend          # BallDetectionBackend.detect_ball
+#  --calibrator keypoints --calibrator-backend my_lab.kp:Backend   # KeypointBackend.detect_keypoints
+```
+
+The factory module lives in *your* code (anywhere on `PYTHONPATH`), keeping the research network
+out of the core tree (ADR-0001). The override is validated at startup — the path must import and
+the object must satisfy the protocol — and a `--*-backend` without its real adapter (e.g.
+`--pose-backend` while `--pose fake`) is rejected rather than silently ignored.
+
 ## Box spec
 
 | Resource | Recommended | Why |

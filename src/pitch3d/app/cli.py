@@ -69,6 +69,8 @@ def run_dry_run(
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
     render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
+    pose_backend: str | None = None, ball_backend: str | None = None,
+    calibrator_backend: str | None = None,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -84,7 +86,8 @@ def run_dry_run(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
         observer=observer, device=device, detector_weights=detector_weights,
-        detector_classes=detector_classes,
+        detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
+        calibrator_backend=calibrator_backend,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -199,6 +202,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--detector-classes", default="coco", choices=["coco", "sports"],
                         help="RF-DETR class map: 'coco' (free base weights, person->player; "
                              "default) or 'sports' (Roboflow checkpoint via --detector-weights)")
+    parser.add_argument("--pose-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own HMRBackend by dotted path (on-box GVHMR "
+                             "wiring, no fork); requires --pose gvhmr")
+    parser.add_argument("--ball-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own BallDetectionBackend (TrackNet); "
+                             "requires --ball tracknet")
+    parser.add_argument("--calibrator-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own KeypointBackend; "
+                             "requires --calibrator keypoints")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -218,6 +230,9 @@ def main(argv: list[str] | None = None) -> int:
         device=args.device,
         detector_weights=args.detector_weights,
         detector_classes=args.detector_classes,
+        pose_backend=args.pose_backend,
+        ball_backend=args.ball_backend,
+        calibrator_backend=args.calibrator_backend,
     )
 
 

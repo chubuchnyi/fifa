@@ -8,8 +8,10 @@ GPU/Blender/models; swapping a real adapter is a one-line change here.
 
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from ..core.ports.cache import Cache
 from ..core.ports.export import Exporter
@@ -43,11 +45,43 @@ class AppPorts:
     model_version: str = "fake-0"
 
 
+def _resolve_backend(spec: str, protocol: Any) -> Any:
+    """Import + instantiate a bring-your-own heavy backend from a dotted path (ADR-0006).
+
+    ``spec`` is ``"package.module:Factory"`` (or ``"package.module.Factory"``) naming a
+    zero-arg-constructible class or factory returning an object that satisfies ``protocol`` (one
+    of the runtime-checkable backend protocols — ``HMRBackend``/``BallDetectionBackend``/
+    ``KeypointBackend``). This is the seam that lets a workstation/GPU box inject a vendored
+    GVHMR/TrackNet/keypoint network into the real adapter **without forking the wiring** — the
+    research code stays out of the core tree (ADR-0001). Raises ``ValueError`` with an actionable
+    message on a bad path or a backend that does not implement the protocol.
+    """
+    module_name, sep, attr = spec.partition(":")
+    if not sep:
+        module_name, _, attr = spec.rpartition(".")
+    if not module_name or not attr:
+        raise ValueError(
+            f"backend spec {spec!r} must be 'package.module:Factory' (or 'package.module.Factory')"
+        )
+    try:
+        factory = getattr(importlib.import_module(module_name), attr)
+    except (ImportError, AttributeError) as exc:
+        raise ValueError(f"cannot import backend {spec!r}: {exc}") from exc
+    backend = factory() if callable(factory) else factory
+    if not isinstance(backend, protocol):
+        raise ValueError(
+            f"backend {spec!r} does not implement {protocol.__name__} (missing its method)"
+        )
+    return backend
+
+
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
     ball: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
+    pose_backend: str | None = None, ball_backend: str | None = None,
+    calibrator_backend: str | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -73,6 +107,12 @@ def default_ports(
     ``"sports"`` (the fine-tuned Roboflow checkpoint passed via ``detector_weights``, which splits
     players/goalkeepers/referees). Same adapter-vs-root split as ``device``: the adapter dataclass
     defaults to the sports map (production intent), the root to ``"coco"`` (what runs for free).
+
+    ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` inject a bring-your-own heavy
+    backend by dotted path (``"package.module:Factory"``) into the matching real adapter — the
+    on-box seam for wiring a vendored GVHMR/TrackNet/keypoint network without forking this wiring
+    (ADR-0006, see :func:`_resolve_backend`). Each requires its real adapter to be selected (e.g.
+    ``pose_backend`` needs ``pose="gvhmr"``); pairing one with ``"fake"`` raises.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -117,29 +157,49 @@ def default_ports(
         raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
 
     if calibrator == "fake":
+        if calibrator_backend:
+            raise ValueError("calibrator_backend requires --calibrator keypoints")
         cal: FieldCalibrator = FakeFieldCalibrator()
     elif calibrator == "keypoints":
         from ..adapters.models import KeypointFieldCalibrator
+        from ..adapters.models.calibration import KeypointBackend
 
-        cal = KeypointFieldCalibrator(device=device)
+        cal = KeypointFieldCalibrator(
+            device=device,
+            backend=_resolve_backend(calibrator_backend, KeypointBackend)
+            if calibrator_backend else None,
+        )
     else:
         raise ValueError(f"unknown calibrator {calibrator!r}; expected 'fake' or 'keypoints'")
 
     if pose == "fake":
+        if pose_backend:
+            raise ValueError("pose_backend requires --pose gvhmr")
         pse: PoseEstimator = FakePoseEstimator()
     elif pose == "gvhmr":
         from ..adapters.models import GVHMRPoseEstimator
+        from ..adapters.models.pose import HMRBackend
 
-        pse = GVHMRPoseEstimator(device=device)
+        pse = GVHMRPoseEstimator(
+            device=device,
+            backend=_resolve_backend(pose_backend, HMRBackend) if pose_backend else None,
+        )
     else:
         raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")
 
     if ball == "fake":
+        if ball_backend:
+            raise ValueError("ball_backend requires --ball tracknet")
         blt: BallTracker = FakeBallTracker()
     elif ball == "tracknet":
         from ..adapters.models import TrackNetBallTracker
+        from ..adapters.models.ball import BallDetectionBackend
 
-        blt = TrackNetBallTracker(device=device)
+        blt = TrackNetBallTracker(
+            device=device,
+            backend=_resolve_backend(ball_backend, BallDetectionBackend)
+            if ball_backend else None,
+        )
     else:
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 
