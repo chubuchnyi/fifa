@@ -101,3 +101,4 @@ is the spin-up → verify → `--device cuda` golden-path checklist (ADR-0009).
 3. [`docs/adr/`](docs/adr/) — the decisions and why (0001–0007).
 4. [`docs/roadmap.md`](docs/roadmap.md) — M0→M3 plan and the M1 vertical slice.
 5. [`docs/cloud-dev.md`](docs/cloud-dev.md) — provisioning a GPU box for `--device cuda` development.
+6. [`docs/runpod-runbook.md`](docs/runpod-runbook.md) — concrete RunPod spin-up runbook (MCP / `runpodctl`, SSH, cost control).

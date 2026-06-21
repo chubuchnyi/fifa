@@ -4,7 +4,9 @@ A reproducible path for moving MVP development onto a rented GPU machine. The lo
 profile stays CPU-only (ADR-0009: `device` is a runtime knob; `--device cpu` is the
 validation default, `--device cuda` the production target — **zero code change** to
 switch). This page is the "spin up → clone → verify GPU → golden path on `--device cuda`"
-checklist; [`scripts/cloud_setup.sh`](../scripts/cloud_setup.sh) does the install half.
+checklist; [`scripts/cloud_setup.sh`](../scripts/cloud_setup.sh) does the install half. For the
+concrete **RunPod** provisioning steps (MCP / `runpodctl`, the Community-vs-Secure placement
+lesson, SSH-key wiring, and stop-to-save-cost), follow the [RunPod runbook](runpod-runbook.md).
 
 ## What a GPU box buys you (and what it doesn't)
 
