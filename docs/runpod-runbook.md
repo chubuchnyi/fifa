@@ -94,17 +94,29 @@ ask; clone into it so work survives stop/start.
   not an MCP limitation. First connect, pass `-o StrictHostKeyChecking=accept-new` to skip the
   host-key prompt.
 
-## 4. On the box
+## 4. On the box — get the source via GitHub (reproducible)
+
+The repo `chubuchnyi/fifa` is **public**, so the box clones over **HTTPS with no auth** — no
+key to inject, no secret on an ephemeral box. The box's working copy is then a real checkout at
+a known SHA (reproducible), and updates are a `git pull` — *not* an ad-hoc rsync of someone's
+dirty tree.
 
 ```bash
-git clone git@github.com:chubuchnyi/fifa.git && cd fifa     # SSH remote; repo is "fifa"
-./scripts/cloud_setup.sh                                    # CUDA torch + reals + verify GPU
+git clone https://github.com/chubuchnyi/fifa.git && cd fifa   # public → no key needed
+./scripts/cloud_setup.sh                                      # CUDA torch + reals + verify GPU
+# (weights + clips are git-ignored, so they are NOT in the clone: RF-DETR base auto-downloads
+#  on first run; scp a clip up — see cloud-dev.md. The repo is just the reproducible *source*.)
 PYTHONPATH=src python -m pitch3d --clip clip.mp4 --frames 6 \
   --detector rfdetr --tracker bytetrack --device cuda \
   --render overlay --export gltf --format smplx_npz --out-dir out/cuda
-# push work back (dedicated GitHub key):
-GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519_gh_chubuchnyi" git push -u origin main
 ```
+
+**Reproducible dev loop:** commit + `git push` from the **local** box (the source of truth),
+then `git pull` on the GPU box — the box runs the exact pushed SHA; artifacts come back via `scp`.
+Pulling needs no auth (public). Only if you also want to *commit from the box* do you need a
+write credential there — add a dedicated GitHub **deploy key** (write) for `fifa` rather than
+copying your personal key onto an ephemeral host, then:
+`GIT_SSH_COMMAND="ssh -i ~/.ssh/<box-deploy-key>" git push`.
 
 ## 5. Cost — stop the box when idle
 
