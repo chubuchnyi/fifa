@@ -32,3 +32,6 @@ samples/
 # Licensed body models — must NOT enter the public repo (non-commercial MPI SMPL-X
 # license). Local downloads/model workspace: the saved download page + the 830 MB model.
 /SMPL-X/
+
+# Datasets (large / gated; live outside git — e.g. WorldPose annotations + footage).
+/data/
