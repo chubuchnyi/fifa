@@ -4,65 +4,48 @@ Why this exists: the pose bake-off (``docs/pose-bakeoff-runbook.md``) is blocked
 WorldPose *frames* (we hold the Light annotations, not the video). This module
 generates a scene we fully control — a virtual broadcast camera, ``N`` articulated
 subjects on the pitch, and **perfect ground truth** (GT camera ``K, R, t``; per-frame
-per-subject world 3D joints in metres; their 2D projections; bboxes; and the GT
-image→world homography). It is numpy-only — no Blender, no GPU, no asset — so it lets
-us build and unit-test the whole bake-off harness *before* any real footage arrives.
+per-subject world 3D joints in metres; their 2D projections; bboxes; the GT image→world
+homography; and the GT SMPL-X-style articulation that produced the joints). It is
+numpy-only — no Blender, no GPU, no asset — so it lets us build and unit-test the whole
+bake-off harness *before* any real footage arrives.
 
-What it is NOT: photoreal pixels. The articulated body here is a fixed placeholder
-skeleton (see :data:`CANONICAL_SKELETON`), not a SMPL-X mesh, so this validates the
-*geometry / grounding / metric* path, not a pose network's robustness to real pixels.
-Two seams make it swap cleanly later: the placeholder forward-kinematics is replaced by
-SMPL-X FK on the box, and RGB rendering bolts onto the same camera + world joints via
-Blender (M2). Conventions match the core scene model: right-handed, **Z-up, metres**,
-pitch plane ``Z = 0``, camera extrinsics world→camera (``X_c = R @ X_w + t``).
+Crucially, the GT joints are generated *through the FK seam* (:class:`PlaceholderJointModel`):
+the subjects' world joints are ``camera_to_world(root_cam + FK(global_orient, body_pose))``.
+So a "perfect" pose backend — one that returns :attr:`SyntheticScene.gt_global_orient` /
+``gt_body_pose`` / ``gt_betas`` — reconstructs the GT exactly (MPJPE → 0), and the GT camera
+does real work placing the camera-space prediction into the world (condition A).
+
+What it is NOT: photoreal pixels, nor a SMPL-X mesh (the articulated body is the fixed
+placeholder skeleton in :mod:`pitch3d.eval.bodymodel`). It validates the *geometry / grounding
+/ metric* path, not a pose network's robustness to real pixels. Two seams swap cleanly later:
+the placeholder FK is replaced by SMPL-X FK on the box, and RGB rendering bolts onto the same
+camera + world joints via Blender (M2). Conventions match the core scene model: right-handed,
+**Z-up, metres**, pitch plane ``Z = 0``, camera extrinsics world→camera (``X_c = R @ X_w + t``).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from ..core.scene.camera import CameraIntrinsics
 from ..core.scene.field import FieldCalibration
-
-#: Placeholder body joints in a local frame (pelvis at origin; x-right, y-forward, z-up),
-#: metres. Feet sit at ``z = -0.90`` so a pelvis grounded at ~0.92 m puts them on the plane.
-JOINT_NAMES: tuple[str, ...] = (
-    "pelvis", "spine", "neck", "head",
-    "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
-    "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle",
+from .bodymodel import (
+    CANONICAL_SKELETON,
+    JOINT_NAMES,
+    JointModel,
+    PlaceholderJointModel,
+    _rotmat_to_aa,
 )
 
-CANONICAL_SKELETON: np.ndarray = np.array(
-    [
-        [0.00, 0.0, 0.00],   # pelvis
-        [0.00, 0.0, 0.25],   # spine
-        [0.00, 0.0, 0.50],   # neck
-        [0.00, 0.0, 0.62],   # head
-        [0.17, 0.0, 0.45],   # l_shoulder
-        [-0.17, 0.0, 0.45],  # r_shoulder
-        [0.21, 0.0, 0.22],   # l_elbow
-        [-0.21, 0.0, 0.22],  # r_elbow
-        [0.23, 0.0, -0.02],  # l_wrist
-        [-0.23, 0.0, -0.02],  # r_wrist
-        [0.09, 0.0, -0.06],  # l_hip
-        [-0.09, 0.0, -0.06],  # r_hip
-        [0.10, 0.0, -0.50],  # l_knee
-        [-0.10, 0.0, -0.50],  # r_knee
-        [0.11, 0.0, -0.90],  # l_ankle
-        [-0.11, 0.0, -0.90],  # r_ankle
-    ],
-    dtype=float,
-)
-
-#: Per-joint articulation axis (local +Y swing): arms and legs swing out of phase so
-#: Local MPJPE is exercised. Amplitude in metres, modulated by a per-frame sine.
-_SWAY = np.zeros_like(CANONICAL_SKELETON)
-_SWAY[[6, 8], 1] = (0.06, 0.10)     # l_elbow, l_wrist forward
-_SWAY[[7, 9], 1] = (-0.06, -0.10)   # r_elbow, r_wrist back
-_SWAY[[12, 14], 1] = (-0.06, -0.10)  # l_knee, l_ankle back
-_SWAY[[13, 15], 1] = (0.06, 0.10)   # r_knee, r_ankle forward
+#: Per-joint swing amplitude (rad) about the local x-axis, modulated by a per-frame sine.
+#: Arms and the contralateral legs swing out of phase so Local MPJPE is exercised.
+_BODY_SWING: np.ndarray = np.zeros(CANONICAL_SKELETON.shape[0])
+_BODY_SWING[[6, 8]] = (0.15, 0.25)      # l_elbow, l_wrist  (forward)
+_BODY_SWING[[7, 9]] = (-0.15, -0.25)    # r_elbow, r_wrist  (back)
+_BODY_SWING[[12, 14]] = (-0.15, -0.25)  # l_knee,  l_ankle  (contralateral to the left arm)
+_BODY_SWING[[13, 15]] = (0.15, 0.25)    # r_knee,  r_ankle
 
 
 def _look_at(center: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -95,7 +78,7 @@ def _rot_z(yaw: np.ndarray) -> np.ndarray:
 
 @dataclass
 class SyntheticScene:
-    """A fully-known synthetic broadcast scene: GT camera + world/image joints + bboxes.
+    """A fully-known synthetic broadcast scene: GT camera + world/image joints + GT articulation.
 
     Attributes:
         intrinsics: Shared pinhole intrinsics.
@@ -106,7 +89,12 @@ class SyntheticScene:
         joints_image: GT joint projections in pixels, shape ``(T, N, J, 2)``.
         boxes_xyxy: GT per-subject bounding boxes (px, clipped to frame), shape ``(T, N, 4)``.
         pelvis_height_m: World Z of the grounded pelvis (joint 0).
+        gt_global_orient: GT camera-space root orientation (axis-angle), shape ``(T, N, 3)`` —
+            what a perfect HMR backend would emit.
+        gt_body_pose: GT per-joint articulation (axis-angle), shape ``(T, N, J, 3)``.
+        gt_betas: GT per-subject shape coefficients, shape ``(N, B)`` (placeholder: zeros).
         joint_names: Names aligned with the ``J`` axis.
+        joint_model: The FK that produced the joints (the harness must use the same one).
     """
 
     intrinsics: CameraIntrinsics
@@ -117,7 +105,11 @@ class SyntheticScene:
     joints_image: np.ndarray
     boxes_xyxy: np.ndarray
     pelvis_height_m: float
+    gt_global_orient: np.ndarray
+    gt_body_pose: np.ndarray
+    gt_betas: np.ndarray
     joint_names: tuple[str, ...] = JOINT_NAMES
+    joint_model: JointModel = field(default_factory=PlaceholderJointModel)
 
     @property
     def n_frames(self) -> int:
@@ -170,8 +162,9 @@ def generate_scene(
 
     The camera sits behind the ``-Y`` sideline, elevated, looking at the pitch centre.
     Subjects start at random central pitch positions, walk in a straight line, and swing
-    their limbs sinusoidally (so root-relative articulation is non-trivial). All outputs
-    are pure functions of ``seed``.
+    their limbs sinusoidally (so root-relative articulation is non-trivial). The GT joints
+    are produced *through the FK seam* so a perfect backend scores zero. All outputs are
+    pure functions of ``seed``.
     """
     width, height = image_size
     rng = np.random.default_rng(seed)
@@ -187,16 +180,37 @@ def generate_scene(
     yaw = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
     phase = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
 
-    period = max(n_frames, 2)
-    sway = np.sin(2.0 * np.pi * frames[:, None] / period + phase[None, :])  # (T, N)
-    local = CANONICAL_SKELETON[None, None] + _SWAY[None, None] * sway[..., None, None]
-    rotated = np.einsum("nij,tnkj->tnki", _rot_z(yaw), local)  # (T, N, J, 3)
+    joint_model = PlaceholderJointModel()
+    n_joints = joint_model.skeleton.shape[0]
 
-    root_xy = start_xy[None] + velocity[None] * frames[:, None, None]  # (T, N, 2)
-    root = np.concatenate(
+    # World root path: pelvis walks in a straight line at a constant grounded height.
+    root_xy = start_xy[None] + velocity[None] * frames[:, None, None]      # (T, N, 2)
+    root_world = np.concatenate(
         [root_xy, np.full((n_frames, n_subjects, 1), pelvis_height_m)], axis=-1
     )
-    joints_world = root[:, :, None, :] + rotated
+
+    # GT articulation: camera-space root orientation R_cam @ R_z(yaw) → axis-angle, + limb swing.
+    rot_cam_yaw = np.einsum("ij,njk->nik", rotation, _rot_z(yaw))          # (N, 3, 3)
+    global_orient_n = _rotmat_to_aa(rot_cam_yaw)                           # (N, 3)
+    gt_global_orient = np.broadcast_to(
+        global_orient_n[None], (n_frames, n_subjects, 3)
+    ).copy()
+    period = max(n_frames, 2)
+    sway = np.sin(2.0 * np.pi * frames[:, None] / period + phase[None, :])  # (T, N)
+    gt_body_pose = np.zeros((n_frames, n_subjects, n_joints, 3))
+    gt_body_pose[..., 0] = _BODY_SWING[None, None, :] * sway[:, :, None]    # swing about local x
+    gt_betas = np.zeros((n_subjects, 10))
+
+    # FK → camera-space root-relative joints, place at the GT root through the GT camera.
+    flat = n_frames * n_subjects
+    fk_cam = joint_model.joints(
+        gt_global_orient.reshape(flat, 3),
+        gt_body_pose.reshape(flat, n_joints, 3),
+        gt_betas[0],
+    ).reshape(n_frames, n_subjects, n_joints, 3)
+    root_cam = root_world @ rotation.T + translation                      # world_to_camera(root)
+    joints_cam = root_cam[:, :, None, :] + fk_cam
+    joints_world = (joints_cam - translation) @ rotation                  # camera_to_world
 
     scene = SyntheticScene(
         intrinsics=intrinsics,
@@ -207,6 +221,10 @@ def generate_scene(
         joints_image=np.zeros(joints_world.shape[:-1] + (2,)),
         boxes_xyxy=np.zeros((n_frames, n_subjects, 4)),
         pelvis_height_m=pelvis_height_m,
+        gt_global_orient=gt_global_orient,
+        gt_body_pose=gt_body_pose,
+        gt_betas=gt_betas,
+        joint_model=joint_model,
     )
     scene.joints_image = scene.project(joints_world)
     u, v = scene.joints_image[..., 0], scene.joints_image[..., 1]

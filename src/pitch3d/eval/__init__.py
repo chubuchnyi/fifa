@@ -7,17 +7,26 @@ harness can be built and tested before WorldPose frames are obtained. See
 
 from __future__ import annotations
 
-from .harness import evaluate, place_under_gt_camera
+from .bodymodel import (
+    CANONICAL_SKELETON,
+    JOINT_NAMES,
+    JointModel,
+    PlaceholderJointModel,
+)
+from .harness import evaluate, place_under_gt_camera, run_backend
 from .metrics import mpjpe_global, mpjpe_local
-from .synthetic import CANONICAL_SKELETON, JOINT_NAMES, SyntheticScene, generate_scene
+from .synthetic import SyntheticScene, generate_scene
 
 __all__ = [
     "CANONICAL_SKELETON",
     "JOINT_NAMES",
+    "JointModel",
+    "PlaceholderJointModel",
     "SyntheticScene",
     "generate_scene",
     "mpjpe_global",
     "mpjpe_local",
     "evaluate",
     "place_under_gt_camera",
+    "run_backend",
 ]

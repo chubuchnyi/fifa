@@ -48,7 +48,7 @@ of the public repo.
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
 | **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video**. **The full WorldPose video unblocks B1 *and* the B2 bake-off — one asset, two payoffs (highest-leverage acquisition).** **Acquisition stalled 2026-06-22 — gated behind a FIFA content-licence form (worldpose.ait.ethz.ch), NOT a missing mirror: challenge registration does *not* grant frames; test GT held out. No drop-in replacement; verified alternatives in [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) §0a — SoccerNet (NDA) is the B1 path (real broadcast + GT pitch calibration; no 3D-pose GT).** |
-| **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box) — ready for real frames.** B3 wiring may proceed on this backbone now |
+| **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness + FK seam + backend-driven condition-A pass now built & unit-tested (`pitch3d.eval`, pure/no-box) — oracle backend scores ~0, ready for real frames.** B3 wiring may proceed on this backbone now |
 | **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
@@ -66,9 +66,12 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   `TrackingBackend` protocol was already `@runtime_checkable` and `ByteTrackTracker` already took
   `backend=`, so it was a 4-line symmetric wiring + tests.
 - **Bug2** mypy triage: fix the safe ones, document the rest.
-- **Bake-off harness (pure):** synthetic broadcast-soccer GT + MPJPE metrics + condition-A
-  placement built & tested in `pitch3d.eval` (numpy-only, no box/asset, +14 tests → 229).
-  Lets us build & validate the bake-off geometry before WorldPose frames exist. ✅ done.
+- **Bake-off harness (pure):** synthetic broadcast-soccer GT + MPJPE metrics + the FK seam
+  (`JointModel`/`PlaceholderJointModel`) + a backend-driven condition-A pass (`run_backend`)
+  built & tested in `pitch3d.eval` (numpy-only, no box/asset, +19 tests → 234). GT is generated
+  *through* the FK seam over the same `HMRBackend` contract the product uses, so an oracle
+  backend scores ~0 and a zero-pose backend gives the Local-MPJPE floor. Real SMPL-X FK and
+  condition B (PnLCalib) are the box-gated swaps behind the same seam. ✅ done.
 
 ### Phase B — Calibration data & honest evaluation (needs asset / box)
 - **B1** acquire a landscape 16:9 broadcast clip *or* a WorldPose video.

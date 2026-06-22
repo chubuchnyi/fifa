@@ -22,15 +22,70 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..core.ports.io import ClipRef
+from ..core.ports.perception import Tracklet, Tracks
 from .metrics import mpjpe_global, mpjpe_local
 
 if TYPE_CHECKING:
+    from ..adapters.models.pose import HMRBackend
     from .synthetic import SyntheticScene
 
 
 def place_under_gt_camera(scene: SyntheticScene, joints_cam: np.ndarray) -> np.ndarray:
     """Condition A: place camera-space joints ``(..., 3)`` into world via the GT camera."""
     return scene.camera_to_world(joints_cam)
+
+
+def _clip_and_tracks(scene: SyntheticScene) -> tuple[ClipRef, Tracks]:
+    """Wrap the synthetic GT as the ``ClipRef`` + ``Tracks`` an ``HMRBackend`` consumes.
+
+    Each subject ``n`` becomes a player tracklet with ``track_id = n`` carrying the GT boxes,
+    so the backend's per-crop contract is exercised exactly as in the product.
+    """
+    clip = ClipRef(
+        source_id="synthetic",
+        uri="memory://synthetic",
+        frames=scene.frames,
+        width=scene.intrinsics.width,
+        height=scene.intrinsics.height,
+        fps=25.0,
+    )
+    tracklets = [
+        Tracklet(
+            track_id=n,
+            frames=scene.frames,
+            bboxes_xyxy=scene.boxes_xyxy[:, n],
+            cls="player",
+        )
+        for n in range(scene.n_subjects)
+    ]
+    return clip, Tracks(tracklets=tracklets)
+
+
+def run_backend(
+    scene: SyntheticScene, backend: HMRBackend, root_joint: int = 0
+) -> dict[str, float]:
+    """Run an HMR backend over the synthetic scene → condition-A Global/Local MPJPE grid.
+
+    The backend yields camera-space SMPL-X articulation per subject (the
+    :class:`~pitch3d.adapters.models.pose.RawBodyMotion` contract); the harness runs the scene's
+    FK to joints, places them at the GT root through the **GT camera** (condition A — isolates
+    pose-net / articulation quality), and scores against GT. A backend returning the scene's GT
+    params scores ~0; a zero-pose backend gives the finite Local-MPJPE sanity floor.
+
+    Assumes the backend returns one :class:`RawBodyMotion` per tracklet whose ``frames`` match
+    the scene's (true for the synthetic fixtures); real WorldPose alignment is the product's job.
+    """
+    clip, tracks = _clip_and_tracks(scene)
+    bodies = backend.estimate_bodies(clip, tracks)
+    jm = scene.joint_model
+    pred = np.empty_like(scene.joints_world)
+    for n, tl in enumerate(tracks.tracklets):
+        raw = bodies[tl.track_id]
+        fk_cam = jm.joints(raw.global_orient, raw.body_pose, raw.betas)   # (T, J, 3)
+        root_cam = scene.world_to_camera(scene.root_world[:, n])          # (T, 3)
+        pred[:, n] = scene.camera_to_world(root_cam[:, None, :] + fk_cam)
+    return evaluate(pred, scene.joints_world, root_joint)
 
 
 def evaluate(pred_world: np.ndarray, gt_world: np.ndarray, root_joint: int = 0) -> dict[str, float]:
