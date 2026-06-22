@@ -39,3 +39,7 @@ samples/
 # Box-local heavy/GPL backend glue injected via the ADR-0006 dotted-path seam
 # (e.g. PnLCalib calibrator) — lives on the GPU box, must NOT enter the public repo.
 /backends/
+
+# Throwaway box-management / validation helpers (underscore-prefixed) — they reach into
+# RunPod / local secrets and are not part of the public repo.
+/scripts/_*
