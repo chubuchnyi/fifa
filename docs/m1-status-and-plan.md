@@ -53,15 +53,15 @@ of the public repo.
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
 | **Bug2** | Bug (typing debt) | ~35 mypy errors repo-wide (project doesn't gate on mypy) | ✅ partial | triage + fix cheap ones |
-| **T2** | Ticket (quality) | Foot-plane anchoring in `_ground_root` (root Z is a fixed 0.92 m constant today) | ✅ pure geometry | memory: SMART's single biggest quality jump |
+| **T2** | Ticket (quality) | Foot-plane anchoring in `_ground_root` (root Z is a fixed 0.92 m constant today) | ❌ coupled to B3 | re-scoped 2026-06-22 — see design note below. The quality jump needs SMPL-X FK (foot→pelvis offset) from the heavy backend; not faithfully doable in the pure half |
 | **T3** | Ticket (consistency) | `--tracker-backend` flag absent though the adapter supports `TrackingBackend` injection | ✅ low value | default ByteTrack is real, so not blocking; pure symmetry with pose/ball/calibrator seams |
 
 ## Phased plan
 
-### Phase A — Geometry & cheap wins (autonomous, no box) ← executing now
+### Phase A — Cheap wins & honest scoping (autonomous, no box) ← executing now
 The pure-core, unit-testable work that needs no GPU and no external asset:
-- **T2** foot-plane anchoring in `_ground_root` — highest *local* quality leverage.
-- **Bug1** typing: `object` → `PoseEstimator | None` / `ClipRef | None` (TYPE_CHECKING guard).
+- **Bug1** typing: `object` → `PoseEstimator | None` / `ClipRef | None` (TYPE_CHECKING guard). ✅ done.
+- **T2** investigated → re-scoped to Phase C (its quality core needs FK from B3; see design note).
 - **T3** thread a `--tracker-backend` seam for symmetry (only if clean and cheap).
 - **Bug2** mypy triage: fix the safe ones, document the rest.
 
@@ -73,7 +73,33 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose (research, autonomous).
 - **B3** wire the chosen pose backend + ball TrackNet live on the box (box-local, like PnLCalib).
+- **T2** foot-plane anchoring — implement alongside B3, once the backend yields foot/pelvis joints.
 - Then: bundle-adjust pose with player keypoints, not field lines alone.
+
+## Design note — T2 foot-plane anchoring (why it's coupled to B3)
+
+`GVHMRPoseEstimator._ground_root` (pose.py) projects each tracklet's bbox foot point to world
+XY via the homography (correct, anti-slide via path smoothing) and sets **root Z to a fixed
+0.92 m** nominal pelvis height for every subject and every frame. The real "foot-plane anchor"
+(SMART's biggest jump) makes the **feet** sit on the plane and derives the **per-frame pelvis
+height** from the actual articulation — i.e. the vertical foot→pelvis offset, which varies with
+crouch/run/jump/slide.
+
+That offset is a forward-kinematics quantity: it needs SMPL-X joint *positions*, not just the
+axis-angle articulation. The pure half doesn't have them — `RawBodyMotion` carries only
+`global_orient` / `body_pose` / `betas`, and `FieldCalibration` exposes only a ground homography
+(no full camera / vertical vanishing point, so single-view height metrology from the bbox isn't
+available either). So the honest options are:
+
+1. **Backend supplies it (preferred):** extend `RawBodyMotion` with a per-frame `pelvis_above_foot`
+   (or the foot/pelvis joint Z) that the heavy backend computes from the SMPL-X mesh; `_ground_root`
+   then anchors `root_z = plane_z + pelvis_above_foot` and falls back to the 0.92 m constant when
+   absent. Byte-identical on the fake; the quality jump arrives with B3.
+2. **Richer calibration:** keep PnLCalib's full camera (not just the homography) so heights can be
+   measured — larger change, and still inferior to (1) for articulated subjects.
+
+Decision: do **not** ship a pure-half heuristic now (it would be unvalidatable without B1 data and
+would fake precision we don't have). Implement (1) together with B3.
 
 ### Phase D — Polish & observer
 - Finish **Bug2** mypy debt; tighten the seams.
