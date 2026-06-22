@@ -140,10 +140,19 @@ the splat/avatar path.
 | M3-5 Confidence map + "needs attention" prioritization UI | `adapters/blender`, `core/scene` |
 | M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
 | M3-7 Web export (three.js / R3F) | `adapters/export` |
+| **M3-8 Learned motion-prior smoothing (option)** — a motion-prior model (e.g. NVIDIA **MotionBricks**, SIGGRAPH 2026) as a learned alternative to moving-average, behind the existing `smoothing`/`refit` Correction seam | `adapters/models` ↔ `core/correction` |
 
 **Exit criteria (TZ AC-5b, AC-6, AC-7):** seam B emits N synthetic views accepted by
 reconstruction as multi-view input; export + three.js viewer open externally without scale/coord
 loss; core still passes tests with fakes (incl. `FakeViewSynthesizer`) **without GPU/Blender**.
+
+**On M3-8 (option, not committed):** MotionBricks is a *generative* motion model
+(constraints→motion), not a from-video estimator — it cannot replace the HMR backend (B2 pick
+stays SMPLest-X + SMART), only serve as a denoising **prior** for jittery / occluded broadcast
+tracks, injected behind the `smoothing`/`refit` port (ADR-0006) so it stays an isolated swap.
+Open before adopting: NVIDIA-research **licence** (likely non-commercial), **SMPL-X** in/out
+compatibility, and zero-shot coverage of football-specific motion (kick, sprint-with-ball).
+Tracked as research, off the M1 critical path.
 
 ---
 
