@@ -4,6 +4,10 @@ Maps the TZ milestones (§10) to concrete packages/tickets. **Mono through every
 Each milestone ends with a **working end-to-end artifact on one real clip**. Real multi-camera
 (M4) is out of scope — only the data-model seam exists.
 
+> **Positioning & competitors:** [`competitive-landscape.md`](competitive-landscape.md) — where we
+> sit vs. commercial/academic systems, the honest moat (combination + single-broadcast-cam framing,
+> not any single pillar), and the multi-sport (tennis → basketball → hockey) extension plan.
+
 Legend: ✅ exists in this scaffold · 🟡 stub/contract only · ⬜ not started.
 
 ---
