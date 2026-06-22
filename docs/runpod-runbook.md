@@ -7,6 +7,11 @@ GPU box buys, box spec, gotchas) and [`../scripts/cloud_setup.sh`](../scripts/cl
 on-box installer. Tie-in with the north-star (ADR-0008): the same agent can drive **two** MCP layers
 — RunPod MCP manages the *box*, pitch3d's own `serve()` manages the *scene* on it.
 
+For the **full heavy-model bring-up** (sizing/growing the disk for the whole stack, secure gated-token
+handling, and installing every model repo + weight + dataset onto the persistent volume), follow
+[`runpod-agent-setup.md`](runpod-agent-setup.md) — a self-contained runbook meant to be executed by an
+agent running *on* the box. This file (provisioning) is its prerequisite.
+
 ## 0. One-time local setup
 
 ```bash
