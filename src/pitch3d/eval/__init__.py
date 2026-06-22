@@ -14,7 +14,13 @@ from .bodymodel import (
     PlaceholderJointModel,
     SmplxJointModel,
 )
-from .harness import evaluate, place_under_gt_camera, run_backend
+from .harness import (
+    evaluate,
+    place_under_gt_camera,
+    run_backend,
+    run_backend_grounded,
+    run_conditions,
+)
 from .metrics import mpjpe_global, mpjpe_local
 from .synthetic import SyntheticScene, generate_scene
 
@@ -31,4 +37,6 @@ __all__ = [
     "evaluate",
     "place_under_gt_camera",
     "run_backend",
+    "run_backend_grounded",
+    "run_conditions",
 ]
