@@ -128,7 +128,10 @@ Candidates (same seam, swap the backend):
 - Off-the-shelf **global** HMR on WorldPose: **metres** (GLAMR ~18.9 m, SLAHMR ~8.3 m). If condition
   **B** lands in metres, that's *expected* for un-tuned global HMR — the recipe, not the backbone, is
   what buys the jump.
-- **SMART** recipe (depth-supervised FT + foot-anchor + 2-pass smoothing): **~0.32 m** Global.
+- **SMART** recipe (depth-supervised FT + foot-anchor + 2-pass smoothing): **Global ~0.324 m /
+  Local ~0.054 m** on WorldPose — now a *published, benchmarked* paper (arXiv 2605.31551; FIFA-Light
+  score ~0.59–0.65, ≈rank 6). This is the **baseline-to-beat**; the live **FIFA Skeletal-Light 2026**
+  leaderboard (Codabench 11681/11682 + starter kit) scores our exact metric (Global+Local MPJPE, no PA).
 - Calibration ablation (Global MPJPE): field-markings-only **548 mm** vs +player-keypoint bundle-
   adjust **80 mm** (≈7×). Expect a large **A→B** gap until PnLCalib gets player-keypoint BA.
 
