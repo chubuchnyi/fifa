@@ -35,7 +35,7 @@ of the public repo.
 | Stage | CLI | Pure half | Live half | Notes |
 |---|---|---|---|---|
 | **Detector** | `--detector rfdetr` | n/a | ✅ built-in (RF-DETR, Apache-2.0) | needs `cv` extra + weights + GPU; no injection seam needed (permissive, in-core) |
-| **Tracker** | `--tracker bytetrack` | n/a | ✅ built-in (ByteTrack, MIT) + team clustering | adapter exposes a `TrackingBackend` injection seam, but CLI doesn't thread it → see **T3** |
+| **Tracker** | `--tracker bytetrack` | n/a | ✅ built-in (ByteTrack, MIT) + team clustering | `--tracker-backend` threads the `TrackingBackend` injection seam (T3 ✅), symmetric with pose/ball/calibrator |
 | **Calibrator** | `--calibrator keypoints` | ✅ DLT + RANSAC + confidence-weighted solve (core) | ✅ injected PnLCalib HRNet (box-local) | validated messi 3.87 m → 0.36 m; `--calibrator-backend` ✓ |
 | **Pose** | `--pose gvhmr` | ✅ root-grounding + constraint refit (core) | ❌ `NotImplementedError` stub | `--pose-backend` seam exists; no box-local backend written yet |
 | **Ball** | `--ball tracknet` | ✅ threshold + gap-fill (core) | ❌ `NotImplementedError` stub | `--ball-backend` seam exists; no box-local backend written yet |
@@ -54,7 +54,7 @@ of the public repo.
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
 | **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→22 via safe fixes; rest documented below |
 | **T2** | Ticket (quality) | Foot-plane anchoring in `_ground_root` (root Z is a fixed 0.92 m constant today) | ❌ coupled to B3 | re-scoped 2026-06-22 — see design note below. The quality jump needs SMPL-X FK (foot→pelvis offset) from the heavy backend; not faithfully doable in the pure half |
-| **T3** | Ticket (consistency) | `--tracker-backend` flag absent though the adapter supports `TrackingBackend` injection | ✅ low value | default ByteTrack is real, so not blocking; pure symmetry with pose/ball/calibrator seams |
+| **T3** | Ticket (consistency) | ~~`--tracker-backend` flag absent though the adapter supports `TrackingBackend` injection~~ | ✅ **done** (09ef3f9) | flag now threads the seam; +1 injection +1 guard test (213→215). Symmetric with pose/ball/calibrator |
 
 ## Phased plan
 
@@ -62,7 +62,9 @@ of the public repo.
 The pure-core, unit-testable work that needs no GPU and no external asset:
 - **Bug1** typing: `object` → `PoseEstimator | None` / `ClipRef | None` (TYPE_CHECKING guard). ✅ done.
 - **T2** investigated → re-scoped to Phase C (its quality core needs FK from B3; see design note).
-- **T3** thread a `--tracker-backend` seam for symmetry (only if clean and cheap).
+- **T3** thread a `--tracker-backend` seam for symmetry (only if clean and cheap). ✅ done — the
+  `TrackingBackend` protocol was already `@runtime_checkable` and `ByteTrackTracker` already took
+  `backend=`, so it was a 4-line symmetric wiring + tests.
 - **Bug2** mypy triage: fix the safe ones, document the rest.
 
 ### Phase B — Calibration data & honest evaluation (needs asset / box)
