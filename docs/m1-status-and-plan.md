@@ -47,8 +47,8 @@ of the public repo.
 
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
-| **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video** |
-| **B2** | Blocker (decision) | Pose-model pick — research **done**: recommend **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback), recorded in memory | ✅ research done | remaining: (1) user sign-off on the revised pick, (2) empirical WorldPose bake-off — box-gated (Phase C/B3) |
+| **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video**. **The full WorldPose video unblocks B1 *and* the B2 bake-off — one asset, two payoffs (highest-leverage acquisition).** |
+| **B2** | Blocker (decision) | Pose-model pick — research **done**: recommend **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback), recorded in memory | ✅ research done | remaining: (1) user sign-off on the revised pick, (2) empirical WorldPose bake-off. Procedure now documented → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Gated on **box _and_ WorldPose frames** (Light = annotations-only; per-crop HMR needs pixels — same video as B1) |
 | **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
@@ -73,7 +73,10 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 - Evaluate PnLCalib's *own* full camera-calibration module vs our bare DLT.
 
 ### Phase C — Pose decision → heavy wiring (research → box)
-- **B2** finalize the pose model against WorldPose (research, autonomous).
+- **B2** finalize the pose model against WorldPose — bake-off procedure in
+  [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) (needs the box **and** WorldPose frames).
+  The runbook runs two grounding conditions (GT camera vs our PnLCalib) so the result also tells us
+  whether the next effort goes to the pose net or to calibration.
 - **B3** wire the chosen pose backend + ball TrackNet live on the box (box-local, like PnLCalib).
 - **T2** foot-plane anchoring — implement alongside B3, once the backend yields foot/pelvis joints.
 - Then: bundle-adjust pose with player keypoints, not field lines alone.
