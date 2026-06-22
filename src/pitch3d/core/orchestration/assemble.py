@@ -10,6 +10,7 @@ functions, unit-testable without any model/renderer.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from ..correction.engine import resolve_ball, resolve_subject_motion
 from ..scene.field import FieldModel
@@ -17,6 +18,10 @@ from ..scene.layers import ConfidenceMap
 from ..scene.scene import Scene
 from ..scene.subject import Role, Subject, Team
 from .pipeline import ReconstructionResult
+
+if TYPE_CHECKING:
+    from ..ports.io import ClipRef
+    from ..ports.pose import PoseEstimator
 
 _CLS_TO_ROLE = {
     "player": Role.PLAYER,
@@ -65,7 +70,9 @@ def assemble_scene(
     )
 
 
-def resolve_scene(scene: Scene, *, refit_port: object | None = None, clip: object | None = None) -> Scene:
+def resolve_scene(
+    scene: Scene, *, refit_port: PoseEstimator | None = None, clip: ClipRef | None = None
+) -> Scene:
     """Return a copy of ``scene`` with every subject/ball resolved and the stack baked empty.
 
     REFIT corrections call ``refit_port`` (the :class:`PoseEstimator`) over ``clip``; pass both

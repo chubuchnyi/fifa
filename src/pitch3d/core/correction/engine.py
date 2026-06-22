@@ -20,6 +20,7 @@ average) — never by adding axis-angle vectors componentwise.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -42,6 +43,10 @@ from .rotations import (
     quat_to_axis_angle,
     slerp_quat,
 )
+
+if TYPE_CHECKING:
+    from ..ports.io import ClipRef
+    from ..ports.pose import PoseEstimator
 
 _ROTATION_KINDS = (TargetKind.POSE_BODY_JOINT, TargetKind.ROOT_ORIENTATION)
 
@@ -192,7 +197,10 @@ def _apply_inplace(
 
 
 def _splice_refit(
-    resolved: SubjectMotion, corr: Correction, refit_port: object | None, clip: object | None
+    resolved: SubjectMotion,
+    corr: Correction,
+    refit_port: PoseEstimator | None,
+    clip: ClipRef | None,
 ) -> None:
     if refit_port is None or clip is None:
         raise ValueError(
@@ -218,8 +226,8 @@ def resolve_subject_motion(
     proposal: SubjectMotion,
     corrections: Iterable[Correction],
     *,
-    refit_port: object | None = None,
-    clip: object | None = None,
+    refit_port: PoseEstimator | None = None,
+    clip: ClipRef | None = None,
 ) -> SubjectMotion:
     """Return ``proposal ⊕ corrections`` for one subject; ``proposal`` is never mutated.
 
@@ -278,8 +286,8 @@ def preview_subject_motion(
     corrections: Sequence[Correction],
     candidate: Correction,
     *,
-    refit_port: object | None = None,
-    clip: object | None = None,
+    refit_port: PoseEstimator | None = None,
+    clip: ClipRef | None = None,
 ) -> SubjectMotion:
     """FR-23: resolve *as if* ``candidate`` were added, without storing it or mutating state."""
     return resolve_subject_motion(
