@@ -48,7 +48,7 @@ of the public repo.
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
 | **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video** |
-| **B2** | Blocker (decision) | Pose-model pick (GVHMR vs SMPLest-X+SMART vs SAM 3D Body) not finalized | ✅ research-only | benchmark against WorldPose / FIFA-Skeleton; may revise the memory's stub-backend pick |
+| **B2** | Blocker (decision) | Pose-model pick — research **done**: recommend **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback), recorded in memory | ✅ research done | remaining: (1) user sign-off on the revised pick, (2) empirical WorldPose bake-off — box-gated (Phase C/B3) |
 | **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
