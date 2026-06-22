@@ -48,11 +48,11 @@ of the public repo.
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
 | **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video**. **The full WorldPose video unblocks B1 *and* the B2 bake-off — one asset, two payoffs (highest-leverage acquisition).** **Acquisition stalled 2026-06-22 — gated behind a FIFA content-licence form (worldpose.ait.ethz.ch), NOT a missing mirror: challenge registration does *not* grant frames; test GT held out. No drop-in replacement; verified alternatives in [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) §0a — SoccerNet (NDA) is the B1 path (real broadcast + GT pitch calibration; no 3D-pose GT).** |
-| **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness + FK seam + backend-driven condition-A pass now built & unit-tested (`pitch3d.eval`, pure/no-box) — oracle backend scores ~0, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** |
+| **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box): FK seam + conditions A/B, real SMPL-X FK on CPU, a runnable driver (`scripts/run_bakeoff.py`), and camera-sweep + occlusion masking — oracle scores ~0 from every viewpoint, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** |
 | **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
-| **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→16 via safe fixes (incl. the 6 real None-handling latent bugs, now fixed + tested); rest documented below |
+| **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→15 via safe fixes (incl. the 6 real None-handling latent bugs, now fixed + tested); rest documented below |
 | **T2** | Ticket (quality) | Foot-plane anchoring in `_ground_root` (root Z is a fixed 0.92 m constant today) | ❌ coupled to B3 | re-scoped 2026-06-22 — see design note below. The quality jump needs SMPL-X FK (foot→pelvis offset) from the heavy backend; not faithfully doable in the pure half |
 | **T3** | Ticket (consistency) | ~~`--tracker-backend` flag absent though the adapter supports `TrackingBackend` injection~~ | ✅ **done** (09ef3f9) | flag now threads the seam; +1 injection +1 guard test (213→215). Symmetric with pose/ball/calibrator |
 
@@ -67,11 +67,17 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   `backend=`, so it was a 4-line symmetric wiring + tests.
 - **Bug2** mypy triage: fix the safe ones, document the rest.
 - **Bake-off harness (pure):** synthetic broadcast-soccer GT + MPJPE metrics + the FK seam
-  (`JointModel`/`PlaceholderJointModel`) + a backend-driven condition-A pass (`run_backend`)
-  built & tested in `pitch3d.eval` (numpy-only, no box/asset, +19 tests → 234). GT is generated
-  *through* the FK seam over the same `HMRBackend` contract the product uses, so an oracle
-  backend scores ~0 and a zero-pose backend gives the Local-MPJPE floor. Real SMPL-X FK and
-  condition B (PnLCalib) are the box-gated swaps behind the same seam. ✅ done.
+  (`JointModel`) + a backend-driven A/B pass built & tested in `pitch3d.eval` (numpy-only, no
+  box/asset; unit suite now 250 passed + 7 env-gated skips). GT is generated *through* the FK seam
+  over the same `HMRBackend` contract the product uses, so an oracle backend scores ~0 and a
+  zero-pose backend gives the Local-MPJPE floor. Grown since the snapshot, all still pure/no-box:
+  **real SMPL-X FK on CPU** (`SmplxJointModel` — oracle round-trips at machine precision, 4e-16);
+  a **runnable driver** (`scripts/run_bakeoff.py` — candidate × condition MPJPE table);
+  **condition B** (foot-point grounding via the GT-homography stand-in, so the A→B gap is the
+  grounding floor, Global-only — ~0.05–0.08 m placeholder FK, ~0.15 m SMPL-X); and **camera-sweep
+  + occlusion masking** (`CAMERA_VIEWS` presets + a mesh-free inter-person visibility proxy +
+  opt-in `visible_only`) that hardens condition-A placement — the oracle still scores ~0 from
+  every viewpoint. Only condition B's *PnLCalib* and the real pose nets remain box-gated. ✅ done.
 
 ### Phase B — Calibration data & honest evaluation (needs asset / box)
 - **B1** acquire a landscape 16:9 broadcast clip *or* a WorldPose video.
@@ -116,22 +122,26 @@ would fake precision we don't have). Implement (1) together with B3.
 
 The project gates on neither mypy nor ruff, so debt has accumulated. Measured state:
 
-- **mypy: 33 → 16** after safe fixes. Fixed: `ReconstructionResult.detections/tracks` were bare
+- **mypy: 33 → 15** after safe fixes. Fixed: `ReconstructionResult.detections/tracks` were bare
   `object` (now `Detections`/`Tracks`); a `RenderResult` shadowing the `render: str` param in
   `cli.py`; widened a `look_at`/`camera_at` `up` default; explicit RGB 3-tuples in overlay/proxy;
-  the 6 `controller.py`/`blender/runner.py` `None`-handling gaps (below).
-  Remaining 16, deferred with reason:
-  - **~14** — `Correction.payload` is `object`; the engine narrows it by `corr.mode` (which mypy
-    can't follow), so a proper fix needs `isinstance`/`cast` at each dispatch site. Invasive on
-    pure, well-tested code; low value. Deferred.
+  the 6 `controller.py`/`blender/runner.py` `None`-handling gaps (below); and the `tracking.py`
+  comprehension (below).
+  Remaining 15, deferred with reason:
+  - **~14** — `Correction.payload` is `object` (13 in `correction/engine.py` + 1 `blender/live.py`,
+    all `.delta`/keyframe attr access); the engine narrows it by `corr.mode` (which mypy can't
+    follow), so a proper fix needs `isinstance`/`cast` at each dispatch site. Invasive on pure,
+    well-tested code; low value. Deferred.
   - ~~**3** `controller.py` + **3** `blender/runner.py` — real `None`-handling gaps~~ **FIXED**:
     `preview()` on a ball-less scene now degrades to a no-op (`max_abs_change` 0); a non-ball target
     with no `subject_track_id` raises `ValueError`; `BlenderSceneObserver` routes its overlay/ui/radar
     delegators through a `_delegate` property narrowing the always-set fallback. +3 covering tests.
   - **1** `detection.py` lazy `_model: object` — intentional, to avoid importing torch at module load.
-  - **1** `tracking.py` list-comprehension element type.
-- **ruff: 51 → 49** (removed an unused import + sorted a block in `cli.py`). The remaining 49 span
-  23 files (e.g. `controller.py` has 14) and are mostly `E501` long lines. Pre-existing; not churned.
+  - ~~**1** `tracking.py` list-comprehension element type~~ **FIXED**: a walrus guard narrows the
+    appearance features (already filtered non-None by the `idx` selection above) — behavior-identical.
+- **ruff: 48 remaining** (cleared 7 safe auto-fixes this pass — 2 unused imports, 2 unsorted import
+  blocks, 3 redundant quoted annotations under `from __future__ import annotations`). The rest are
+  29 `E501` long lines + 18 `UP042` (str-enum style) + 1 `B024` — repo-wide style, not churned.
 
 Stance: fix debt opportunistically in files we're already editing for real reasons; don't do a
 repo-wide lint sweep as a standalone change (high churn, zero functional value, ungated).
