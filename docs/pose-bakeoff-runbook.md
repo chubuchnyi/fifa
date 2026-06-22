@@ -40,6 +40,29 @@ ls "$WS"/SMPLest-X/human_models/human_model_files/smplx/SMPLX_to_J14.pkl   # joi
 
 ---
 
+## 0a. Alternative eval data — verified 2026-06-22 (WorldPose video is gated)
+
+WorldPose's **video is gated behind a FIFA content-licence form** (`worldpose.ait.ethz.ch`) —
+registering for the challenge (Codabench comp. 11681 val / 11682 test) does **not** grant frames,
+the test GT is held out, and the HF Light mirror is annotations-only. The block is real, not a
+missing public mirror. There is **no single drop-in replacement** (WorldPose uniquely combines
+real broadcast pixels + 3D-world GT + GT camera + soccer); assemble partial coverage instead:
+
+| dataset | GT | real? | soccer? | access | use |
+|---|---|---|---|---|---|
+| **SoccerNet** (Calib / Field-Loc) | pitch-line → camera-calibration GT; **no 3D-pose GT** | ✅ broadcast | ✅ | `pip install SoccerNet`; video via NDA form | **B1** (calibration) — most accessible real soccer |
+| **EMDB** | SMPL + **global body & GT camera trajectory** (world coords) | ✅ | ❌ | application form; non-commercial | **B2 global** — best for Global-MPJPE methodology |
+| **3DPW** | SMPL params + per-frame camera, multi-person | ✅ moving cam | ❌ | homepage DL; MPI non-commercial | **B2 local** — standard articulation benchmark |
+| **AGORA / BEDLAM** | SMPL-X params | ❌ synthetic | ❌ | register + license | pretrain/aux only (not metre-accurate real) |
+
+**Our in-house substitute (no box, no asset):** `pitch3d.eval` — a deterministic synthetic
+broadcast-soccer generator (`generate_scene`) with **perfect GT** (camera, world 3D joints,
+2D, bboxes, GT homography) + the MPJPE metrics + condition-A placement. It lets the whole
+harness (crop→place→correspond→eval geometry) be built and unit-tested *now*; swap the
+placeholder skeleton for SMPL-X FK and the synthetic frames for EMDB/3DPW/WorldPose later.
+
+---
+
 ## 1. The metric — defer to the challenge's OFFICIAL evaluator
 
 The benchmark is **Global MPJPE** and **Local MPJPE**, both **in metres**, **no Procrustes / no PA**:
