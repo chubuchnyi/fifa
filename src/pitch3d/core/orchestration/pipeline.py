@@ -13,7 +13,14 @@ from dataclasses import dataclass, field
 from ..ports.cache import Cache
 from ..ports.io import ClipRef
 from ..ports.jobs import JobQueue
-from ..ports.perception import BallTracker, Detector, FieldCalibrator, Tracker
+from ..ports.perception import (
+    BallTracker,
+    Detections,
+    Detector,
+    FieldCalibrator,
+    Tracker,
+    Tracks,
+)
 from ..ports.pose import PoseEstimator
 from ..scene.field import FieldCalibration
 from ..scene.motion import Ball2DTrack, BallTrack, SubjectMotion
@@ -25,8 +32,8 @@ from .stages import Stage, StageRun, clip_hash, run_cached
 class ReconstructionResult:
     """Everything the reconstruction stages produce for one clip (the proposal layer)."""
 
-    detections: object
-    tracks: object
+    detections: Detections
+    tracks: Tracks
     calibration: FieldCalibration
     motions: dict[int, SubjectMotion]
     ball_2d: Ball2DTrack

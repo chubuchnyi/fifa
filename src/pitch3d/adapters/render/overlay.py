@@ -45,7 +45,8 @@ def confidence_to_color(
     map renders exactly as before.
     """
     c = float(np.clip(conf, 0.0, 1.0))
-    return tuple(int(round(low[i] * (1.0 - c) + base[i] * c)) for i in range(3))
+    ch = [int(round(low[i] * (1.0 - c) + base[i] * c)) for i in range(3)]
+    return (ch[0], ch[1], ch[2])
 
 
 def quat_to_rotation_matrix(quat: np.ndarray) -> np.ndarray:
@@ -114,7 +115,8 @@ def _subject_color(subject: Subject, teams: list[Team]) -> tuple[int, int, int]:
         return _REFEREE_COLOR
     team = next((t for t in teams if t.id == subject.team_id), None)
     if team is not None and team.color_rgb is not None:
-        return tuple(int(np.clip(round(c * 255), 0, 255)) for c in team.color_rgb)
+        rgb = [int(np.clip(round(c * 255), 0, 255)) for c in team.color_rgb]
+        return (rgb[0], rgb[1], rgb[2])
     return _PLAYER_COLOR
 
 

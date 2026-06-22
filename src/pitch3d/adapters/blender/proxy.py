@@ -101,7 +101,8 @@ def _subject_rgb(subject: Subject, teams: list[Team]) -> tuple[float, float, flo
         return _REFEREE_RGB
     team = next((t for t in teams if t.id == subject.team_id), None)
     if team is not None and team.color_rgb is not None:
-        return tuple(float(np.clip(c, 0.0, 1.0)) for c in team.color_rgb)
+        rgb = [float(np.clip(c, 0.0, 1.0)) for c in team.color_rgb]
+        return (rgb[0], rgb[1], rgb[2])
     return _PLAYER_RGB
 
 

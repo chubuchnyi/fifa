@@ -14,15 +14,14 @@ manifest, canonical-JSON export) and the process exits 0 when the path completes
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
 
+from ..adapters.io import FFmpegIngestor
 from ..core.correction.engine import make_offset
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
-from ..adapters.io import FFmpegIngestor
 from ..core.scene.layers import CorrectionTarget, TargetKind
 from .controller import Application
 from .wiring import build_app, default_ports
@@ -149,8 +148,11 @@ def run_dry_run(
     _print_observation(obs_after, label="observe:after")
 
     # 9) Render the RESOLVED scene (proposal ⊕ corrections), single source of truth.
-    render = app.render(scene_id, quality="preview")
-    print(f"\n== render: {render.n_frames} frame(s), is_video={render.is_video} → {render.uri}")
+    render_result = app.render(scene_id, quality="preview")
+    print(
+        f"\n== render: {render_result.n_frames} frame(s), "
+        f"is_video={render_result.is_video} → {render_result.uri}"
+    )
 
     # 10) Export (canonical JSON is a real round-trip; other formats are honest fakes).
     export_path = out_dir / "export" / f"scene.{export_format}"

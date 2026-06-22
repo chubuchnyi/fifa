@@ -19,7 +19,9 @@ _EPS = 1e-9
 
 
 def look_at(
-    eye: np.ndarray, target: np.ndarray, up: np.ndarray = (0.0, 0.0, 1.0)
+    eye: np.ndarray,
+    target: np.ndarray,
+    up: np.ndarray | tuple[float, float, float] = (0.0, 0.0, 1.0),
 ) -> tuple[np.ndarray, np.ndarray]:
     """World→camera ``(quat_wxyz, translation)`` for a camera at ``eye`` facing ``target``.
 
@@ -56,7 +58,7 @@ def camera_at(
     *,
     frame: int,
     intrinsics: CameraIntrinsics,
-    up: np.ndarray = (0.0, 0.0, 1.0),
+    up: np.ndarray | tuple[float, float, float] = (0.0, 0.0, 1.0),
 ) -> CameraTrack:
     """A static single-frame :class:`CameraTrack` looking from ``eye`` at ``target``."""
     quat, transl = look_at(eye, target, up)
