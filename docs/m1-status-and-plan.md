@@ -52,7 +52,7 @@ of the public repo.
 | **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
-| **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→22 via safe fixes; rest documented below |
+| **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→16 via safe fixes (incl. the 6 real None-handling latent bugs, now fixed + tested); rest documented below |
 | **T2** | Ticket (quality) | Foot-plane anchoring in `_ground_root` (root Z is a fixed 0.92 m constant today) | ❌ coupled to B3 | re-scoped 2026-06-22 — see design note below. The quality jump needs SMPL-X FK (foot→pelvis offset) from the heavy backend; not faithfully doable in the pure half |
 | **T3** | Ticket (consistency) | ~~`--tracker-backend` flag absent though the adapter supports `TrackingBackend` injection~~ | ✅ **done** (09ef3f9) | flag now threads the seam; +1 injection +1 guard test (213→215). Symmetric with pose/ball/calibrator |
 
@@ -116,15 +116,18 @@ would fake precision we don't have). Implement (1) together with B3.
 
 The project gates on neither mypy nor ruff, so debt has accumulated. Measured state:
 
-- **mypy: 33 → 22** after safe fixes. Fixed: `ReconstructionResult.detections/tracks` were bare
+- **mypy: 33 → 16** after safe fixes. Fixed: `ReconstructionResult.detections/tracks` were bare
   `object` (now `Detections`/`Tracks`); a `RenderResult` shadowing the `render: str` param in
-  `cli.py`; widened a `look_at`/`camera_at` `up` default; explicit RGB 3-tuples in overlay/proxy.
-  Remaining 22, deferred with reason:
+  `cli.py`; widened a `look_at`/`camera_at` `up` default; explicit RGB 3-tuples in overlay/proxy;
+  the 6 `controller.py`/`blender/runner.py` `None`-handling gaps (below).
+  Remaining 16, deferred with reason:
   - **~14** — `Correction.payload` is `object`; the engine narrows it by `corr.mode` (which mypy
     can't follow), so a proper fix needs `isinstance`/`cast` at each dispatch site. Invasive on
     pure, well-tested code; low value. Deferred.
-  - **3** `controller.py` + **3** `blender/runner.py` — real `None`-handling gaps (`BallTrack | None`,
-    `SceneObserver | None`); each needs a behaviour decision + a covering test, not a blind guard.
+  - ~~**3** `controller.py` + **3** `blender/runner.py` — real `None`-handling gaps~~ **FIXED**:
+    `preview()` on a ball-less scene now degrades to a no-op (`max_abs_change` 0); a non-ball target
+    with no `subject_track_id` raises `ValueError`; `BlenderSceneObserver` routes its overlay/ui/radar
+    delegators through a `_delegate` property narrowing the always-set fallback. +3 covering tests.
   - **1** `detection.py` lazy `_model: object` — intentional, to avoid importing torch at module load.
   - **1** `tracking.py` list-comprehension element type.
 - **ruff: 51 → 49** (removed an unused import + sorted a block in `cli.py`). The remaining 49 span
