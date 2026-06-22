@@ -225,6 +225,28 @@ def test_run_blender_without_a_binary_is_actionable(monkeypatch, make_scene, mak
         run_blender(plan)
 
 
+def test_observer_delegates_overlay_ui_radar_without_blender(tmp_path, make_scene, make_motion):
+    # The 2D overlay, GUI screenshot, and radar are delegated to the headless fallback observer
+    # (wired in __post_init__) — so they must work with no Blender binary and no live editor.
+    subj = Subject(track_id=1, proposal=make_motion([0, 1, 2], transl_z=1.0))
+    ball = BallTrack(
+        frames=np.arange(3), positions_3d=np.tile([0.0, 0.0, 0.2], (3, 1)),
+        height_confidence=np.ones(3),
+    )
+    scene = make_scene(subjects=[subj], ball=ball)
+    observer = BlenderSceneObserver(out_dir=tmp_path / "obs")  # blender=None ⇒ fallback path only
+
+    overlay = observer.capture_frame_overlay(scene, frame=0)
+    ui = observer.capture_ui(scene)
+    radar = observer.capture_radar(scene, frame=0)
+
+    assert overlay.kind == ObservationKind.FRAME_OVERLAY
+    assert ui is not None and ui.kind == ObservationKind.UI
+    assert radar is not None and radar.kind == ObservationKind.RADAR
+    for img in (overlay, ui, radar):
+        assert Path(img.uri).read_bytes()[:8] == _PNG_SIG
+
+
 # --- real subprocess: build a .blend and render proxy SCENE_3D (skips without Blender) -
 
 

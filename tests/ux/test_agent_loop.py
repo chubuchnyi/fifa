@@ -25,6 +25,31 @@ def test_preview_is_nondestructive_fr23(reconstructed):
     assert len(app.get_scene(scene_id).corrections) == n_before  # nothing stored
 
 
+def test_preview_ball_target_without_a_ball_is_zero_change(app, make_scene):
+    # A BALL_POSITION preview on a scene with no ball must degrade to a no-op (max change 0),
+    # mirroring the resolve-time None guard — never pass None into resolve_ball and crash.
+    scene = make_scene(ball=None)
+    app._scenes[scene.id] = scene
+    candidate = make_offset(
+        "cand", CorrectionTarget(kind=TargetKind.BALL_POSITION), (0, 3), np.array([0, 0, 0.5])
+    )
+    result = app.preview(scene.id, candidate)
+    assert result["committed"] is False
+    assert result["max_abs_change"] == 0.0
+
+
+def test_preview_non_ball_target_requires_a_subject_id(reconstructed):
+    # A non-ball target carrying no subject_track_id is malformed; preview must reject it
+    # explicitly rather than passing None into scene.subject(...).
+    app, scene_id = reconstructed
+    candidate = make_offset(
+        "cand", CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=None),
+        (0, 3), np.array([0, 0, 0.2]),
+    )
+    with pytest.raises(ValueError, match="subject_track_id"):
+        app.preview(scene_id, candidate)
+
+
 def test_toggle_correction_resets_to_model_ux5(reconstructed):
     app, scene_id = reconstructed
     track_id = app.get_scene(scene_id).subjects[0].track_id

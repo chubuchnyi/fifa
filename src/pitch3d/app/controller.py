@@ -175,11 +175,16 @@ class Application:
         clip = self._scene_clip.get(scene_id)
         tgt = candidate.target
         if tgt.kind == TargetKind.BALL_POSITION:
-            existing = scene.corrections_for(None)
-            base = resolve_ball(scene.ball, existing).positions_3d
-            prev = resolve_ball(scene.ball, [*existing, candidate]).positions_3d
+            if scene.ball is None:
+                base = prev = np.empty((0, 3))
+            else:
+                existing = scene.corrections_for(None)
+                base = resolve_ball(scene.ball, existing).positions_3d
+                prev = resolve_ball(scene.ball, [*existing, candidate]).positions_3d
         else:
             tid = tgt.subject_track_id
+            if tid is None:
+                raise ValueError("non-ball correction target is missing a subject_track_id")
             subj = scene.subject(tid)
             existing = scene.corrections_for(tid)
             base_m = resolve_subject_motion(subj.proposal, existing, refit_port=self.ports.pose, clip=clip)

@@ -177,14 +177,19 @@ class BlenderSceneObserver(SceneObserver):
             )
         return images
 
+    @property
+    def _delegate(self) -> SceneObserver:
+        assert self.fallback is not None  # always set in __post_init__
+        return self.fallback
+
     def capture_frame_overlay(self, scene: Scene, frame: int) -> ObservationImage:
-        return self.fallback.capture_frame_overlay(scene, frame)
+        return self._delegate.capture_frame_overlay(scene, frame)
 
     def capture_ui(self, scene: Scene | None = None) -> ObservationImage | None:
-        return self.fallback.capture_ui(scene)
+        return self._delegate.capture_ui(scene)
 
     def capture_radar(self, scene: Scene, frame: int = 0) -> ObservationImage | None:
-        return self.fallback.capture_radar(scene, frame)
+        return self._delegate.capture_radar(scene, frame)
 
 
 __all__ = [
