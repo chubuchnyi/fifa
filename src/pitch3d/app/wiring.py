@@ -81,7 +81,7 @@ def default_ports(
     ball: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
-    calibrator_backend: str | None = None,
+    calibrator_backend: str | None = None, tracker_backend: str | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -108,11 +108,12 @@ def default_ports(
     players/goalkeepers/referees). Same adapter-vs-root split as ``device``: the adapter dataclass
     defaults to the sports map (production intent), the root to ``"coco"`` (what runs for free).
 
-    ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` inject a bring-your-own heavy
-    backend by dotted path (``"package.module:Factory"``) into the matching real adapter — the
-    on-box seam for wiring a vendored GVHMR/TrackNet/keypoint network without forking this wiring
-    (ADR-0006, see :func:`_resolve_backend`). Each requires its real adapter to be selected (e.g.
-    ``pose_backend`` needs ``pose="gvhmr"``); pairing one with ``"fake"`` raises.
+    ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` / ``tracker_backend`` inject a
+    bring-your-own heavy backend by dotted path (``"package.module:Factory"``) into the matching
+    real adapter — the on-box seam for wiring a vendored GVHMR/TrackNet/keypoint/tracking network
+    without forking this wiring (ADR-0006, see :func:`_resolve_backend`). Each requires its real
+    adapter to be selected (e.g. ``pose_backend`` needs ``pose="gvhmr"``); pairing one with
+    ``"fake"`` raises.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -148,11 +149,18 @@ def default_ports(
         raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")
 
     if tracker == "fake":
+        if tracker_backend:
+            raise ValueError("tracker_backend requires --tracker bytetrack")
         trk: Tracker = FakeTracker()
     elif tracker == "bytetrack":
         from ..adapters.models import ByteTrackTracker
+        from ..adapters.models.tracking import TrackingBackend
 
-        trk = ByteTrackTracker(device=device)
+        trk = ByteTrackTracker(
+            device=device,
+            backend=_resolve_backend(tracker_backend, TrackingBackend)
+            if tracker_backend else None,
+        )
     else:
         raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
 

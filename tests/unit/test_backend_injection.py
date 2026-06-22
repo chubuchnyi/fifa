@@ -51,6 +51,13 @@ class StubKeypointBackend:
         raise NotImplementedError
 
 
+class StubTrackingBackend:
+    """Minimal ``TrackingBackend`` (presence of ``associate`` is the protocol contract)."""
+
+    def associate(self, clip: ClipRef, detections):  # pragma: no cover - not called in these tests
+        raise NotImplementedError
+
+
 class NotABackend:
     """Implements none of the backend protocols — the guardrail must reject it."""
 
@@ -104,12 +111,21 @@ def test_calibrator_backend_is_injected(tmp_path):
     assert isinstance(ports.calibrator.backend, StubKeypointBackend)
 
 
+def test_tracker_backend_is_injected(tmp_path):
+    ports = default_ports(
+        out_dir=tmp_path / "o", tracker="bytetrack",
+        tracker_backend=f"{__name__}:StubTrackingBackend",
+    )
+    assert isinstance(ports.tracker.backend, StubTrackingBackend)
+
+
 @pytest.mark.parametrize(
     "kwargs, message",
     [
         ({"pose": "fake", "pose_backend": "x:Y"}, "pose_backend requires"),
         ({"ball": "fake", "ball_backend": "x:Y"}, "ball_backend requires"),
         ({"calibrator": "fake", "calibrator_backend": "x:Y"}, "calibrator_backend requires"),
+        ({"tracker": "fake", "tracker_backend": "x:Y"}, "tracker_backend requires"),
     ],
 )
 def test_backend_override_requires_its_real_adapter(tmp_path, kwargs, message):

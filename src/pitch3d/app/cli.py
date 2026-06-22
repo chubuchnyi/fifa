@@ -69,7 +69,7 @@ def run_dry_run(
     render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
-    calibrator_backend: str | None = None,
+    calibrator_backend: str | None = None, tracker_backend: str | None = None,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -86,7 +86,7 @@ def run_dry_run(
         calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
         observer=observer, device=device, detector_weights=detector_weights,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
-        calibrator_backend=calibrator_backend,
+        calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -213,6 +213,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--calibrator-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own KeypointBackend; "
                              "requires --calibrator keypoints")
+    parser.add_argument("--tracker-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own TrackingBackend; "
+                             "requires --tracker bytetrack")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -235,6 +238,7 @@ def main(argv: list[str] | None = None) -> int:
         pose_backend=args.pose_backend,
         ball_backend=args.ball_backend,
         calibrator_backend=args.calibrator_backend,
+        tracker_backend=args.tracker_backend,
     )
 
 
