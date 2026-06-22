@@ -12,6 +12,7 @@ from .bodymodel import (
     JOINT_NAMES,
     JointModel,
     PlaceholderJointModel,
+    SmplxJointModel,
 )
 from .harness import evaluate, place_under_gt_camera, run_backend
 from .metrics import mpjpe_global, mpjpe_local
@@ -22,6 +23,7 @@ __all__ = [
     "JOINT_NAMES",
     "JointModel",
     "PlaceholderJointModel",
+    "SmplxJointModel",
     "SyntheticScene",
     "generate_scene",
     "mpjpe_global",

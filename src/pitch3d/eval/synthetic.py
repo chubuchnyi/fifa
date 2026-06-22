@@ -41,11 +41,27 @@ from .bodymodel import (
 
 #: Per-joint swing amplitude (rad) about the local x-axis, modulated by a per-frame sine.
 #: Arms and the contralateral legs swing out of phase so Local MPJPE is exercised.
+#: Indexed by the 16 canonical joints — the placeholder's ``body_pose`` axis.
 _BODY_SWING: np.ndarray = np.zeros(CANONICAL_SKELETON.shape[0])
 _BODY_SWING[[6, 8]] = (0.15, 0.25)      # l_elbow, l_wrist  (forward)
 _BODY_SWING[[7, 9]] = (-0.15, -0.25)    # r_elbow, r_wrist  (back)
 _BODY_SWING[[12, 14]] = (-0.15, -0.25)  # l_knee,  l_ankle  (contralateral to the left arm)
 _BODY_SWING[[13, 15]] = (0.15, 0.25)    # r_knee,  r_ankle
+
+#: SMPL-X body-pose swing (21 input joints; index ``i`` drives SMPL-X joint ``i+1``): flex the
+#: knees and elbows about local x, contralaterally, so the real kinematic tree moves the joints.
+_SMPLX_BODY_SWING: np.ndarray = np.zeros(21)
+_SMPLX_BODY_SWING[[3, 17]] = (0.25, 0.30)    # l_knee (joint 4), l_elbow (joint 18)
+_SMPLX_BODY_SWING[[4, 18]] = (-0.25, -0.30)  # r_knee (joint 5), r_elbow (joint 19)
+
+
+def _body_swing(n_pose: int) -> np.ndarray:
+    """Per-input-joint local-x swing amplitudes for a backend carrying ``n_pose`` body joints."""
+    if n_pose == _BODY_SWING.shape[0]:
+        return _BODY_SWING
+    if n_pose == _SMPLX_BODY_SWING.shape[0]:
+        return _SMPLX_BODY_SWING
+    return np.zeros(n_pose)
 
 
 def _look_at(center: np.ndarray, target: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -91,7 +107,8 @@ class SyntheticScene:
         pelvis_height_m: World Z of the grounded pelvis (joint 0).
         gt_global_orient: GT camera-space root orientation (axis-angle), shape ``(T, N, 3)`` —
             what a perfect HMR backend would emit.
-        gt_body_pose: GT per-joint articulation (axis-angle), shape ``(T, N, J, 3)``.
+        gt_body_pose: GT per-joint articulation (axis-angle), shape ``(T, N, P, 3)`` where ``P``
+            is the FK backend's ``n_pose_joints`` (16 placeholder, 21 SMPL-X body).
         gt_betas: GT per-subject shape coefficients, shape ``(N, B)`` (placeholder: zeros).
         joint_names: Names aligned with the ``J`` axis.
         joint_model: The FK that produced the joints (the harness must use the same one).
@@ -157,6 +174,7 @@ def generate_scene(
     image_size: tuple[int, int] = (1280, 720),
     seed: int = 0,
     pelvis_height_m: float = 0.92,
+    joint_model: JointModel | None = None,
 ) -> SyntheticScene:
     """Generate a deterministic synthetic broadcast-soccer scene with perfect GT.
 
@@ -165,6 +183,11 @@ def generate_scene(
     their limbs sinusoidally (so root-relative articulation is non-trivial). The GT joints
     are produced *through the FK seam* so a perfect backend scores zero. All outputs are
     pure functions of ``seed``.
+
+    ``joint_model`` is the FK backend (default :class:`PlaceholderJointModel`); pass a
+    :class:`SmplxJointModel` to generate the same scene through real SMPL-X FK. The GT
+    articulation axis (``gt_body_pose``) is sized to that backend's ``n_pose_joints`` while the
+    world joints are always the 16 canonical :data:`JOINT_NAMES`.
     """
     width, height = image_size
     rng = np.random.default_rng(seed)
@@ -180,8 +203,10 @@ def generate_scene(
     yaw = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
     phase = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
 
-    joint_model = PlaceholderJointModel()
-    n_joints = joint_model.skeleton.shape[0]
+    if joint_model is None:
+        joint_model = PlaceholderJointModel()
+    n_pose = joint_model.n_pose_joints
+    n_out = len(JOINT_NAMES)
 
     # World root path: pelvis walks in a straight line at a constant grounded height.
     root_xy = start_xy[None] + velocity[None] * frames[:, None, None]      # (T, N, 2)
@@ -197,17 +222,17 @@ def generate_scene(
     ).copy()
     period = max(n_frames, 2)
     sway = np.sin(2.0 * np.pi * frames[:, None] / period + phase[None, :])  # (T, N)
-    gt_body_pose = np.zeros((n_frames, n_subjects, n_joints, 3))
-    gt_body_pose[..., 0] = _BODY_SWING[None, None, :] * sway[:, :, None]    # swing about local x
+    gt_body_pose = np.zeros((n_frames, n_subjects, n_pose, 3))
+    gt_body_pose[..., 0] = _body_swing(n_pose)[None, None, :] * sway[:, :, None]  # local-x swing
     gt_betas = np.zeros((n_subjects, 10))
 
     # FK → camera-space root-relative joints, place at the GT root through the GT camera.
     flat = n_frames * n_subjects
     fk_cam = joint_model.joints(
         gt_global_orient.reshape(flat, 3),
-        gt_body_pose.reshape(flat, n_joints, 3),
+        gt_body_pose.reshape(flat, n_pose, 3),
         gt_betas[0],
-    ).reshape(n_frames, n_subjects, n_joints, 3)
+    ).reshape(n_frames, n_subjects, n_out, 3)
     root_cam = root_world @ rotation.T + translation                      # world_to_camera(root)
     joints_cam = root_cam[:, :, None, :] + fk_cam
     joints_world = (joints_cam - translation) @ rotation                  # camera_to_world

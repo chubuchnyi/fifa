@@ -18,8 +18,10 @@ is pelvis-at-origin with feet at ``z ≈ -0.90`` so a pelvis grounded at ~0.92 m
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from pathlib import Path
+from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
@@ -118,12 +120,24 @@ class JointModel(Protocol):
 
     The seam the synthetic GT, the bake-off harness, and the box-side SMPL-X share. ``betas`` is
     part of the contract (real shape parameters) even where an implementation ignores it.
+
+    Note the two joint counts: ``body_pose`` carries :attr:`n_pose_joints` *input* articulations
+    (16 placeholder, 21 SMPL-X body), but :meth:`joints` always returns the 16 *canonical*
+    :data:`JOINT_NAMES` — backends with a denser kinematic tree select down to the shared set.
     """
+
+    @property
+    def n_pose_joints(self) -> int:
+        """Joints carried by the ``body_pose`` axis (16 placeholder, 21 SMPL-X body)."""
+        ...
 
     def joints(
         self, global_orient: np.ndarray, body_pose: np.ndarray, betas: np.ndarray
     ) -> np.ndarray:
-        """``global_orient (T,3)`` + ``body_pose (T,J,3)`` + ``betas (B,)`` → joints ``(T,J,3)``."""
+        """``global_orient (T,3)`` + ``body_pose (T,P,3)`` + ``betas (B,)`` → joints ``(T,16,3)``.
+
+        ``P`` is :attr:`n_pose_joints`; the output is always the 16 canonical joints.
+        """
         ...
 
 
@@ -137,6 +151,10 @@ class PlaceholderJointModel:
 
     skeleton: np.ndarray = field(default_factory=lambda: CANONICAL_SKELETON.copy())
 
+    @property
+    def n_pose_joints(self) -> int:
+        return int(self.skeleton.shape[0])
+
     def joints(
         self, global_orient: np.ndarray, body_pose: np.ndarray, betas: np.ndarray
     ) -> np.ndarray:
@@ -147,3 +165,113 @@ class PlaceholderJointModel:
         rot_joint = _rodrigues(bp.reshape(-1, 3)).reshape(*bp.shape[:2], 3, 3)  # (T, J, 3, 3)
         local = np.einsum("tjac,jc->tja", rot_joint, self.skeleton)      # (T, J, 3)
         return np.einsum("tac,tjc->tja", rot_global, local)             # (T, J, 3)
+
+
+_SMPLX_ENV_PATH = "PITCH3D_SMPLX_MODEL_PATH"
+_SMPLX_DEFAULT_DIR = "SMPL-X/models"
+
+#: SMPL-X joint index for each of the 16 canonical :data:`JOINT_NAMES`, in order (rest-pose probe).
+SMPLX_TO_CANONICAL: tuple[int, ...] = (0, 6, 12, 15, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8)
+
+#: SMPL-X native axes (x=anatomical-left, y=up, z=front) → ours (x=right, y=forward, z=up).
+#: This is R_x(+90°), verified empirically (det +1) against a rest-pose forward pass.
+_R_SMPLX_TO_OURS: np.ndarray = np.array(
+    [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+)
+
+
+def _build_smplx(model_path: str | None, gender: str, num_betas: int) -> Any:
+    """Construct an ``smplx`` SMPL-X model, resolving the asset dir from arg → env → default.
+
+    Raises a clear error if ``smplx`` is missing or the ``.npz`` is absent, so the no-asset path
+    stays on :class:`PlaceholderJointModel` rather than hitting a cryptic ImportError later.
+    """
+    try:
+        import smplx
+    except ImportError as exc:
+        raise RuntimeError(
+            "SmplxJointModel needs the 'smplx' package (pip install smplx — the 'hmr' extra). "
+            "Use PlaceholderJointModel for the asset-free / CPU-only path."
+        ) from exc
+    root = model_path or os.environ.get(_SMPLX_ENV_PATH) or _SMPLX_DEFAULT_DIR
+    model_file = Path(root) / "smplx" / f"SMPLX_{gender.upper()}.npz"
+    if not model_file.exists():
+        raise FileNotFoundError(
+            f"SMPL-X model not found at {model_file}. Download the SMPL-X .npz and set "
+            f"${_SMPLX_ENV_PATH} (or pass model_path=) to its parent 'models' dir."
+        )
+    return smplx.create(
+        root,
+        model_type="smplx",
+        gender=gender,
+        use_pca=False,
+        flat_hand_mean=True,
+        num_betas=num_betas,
+        batch_size=1,
+    )
+
+
+@dataclass
+class SmplxJointModel:
+    """Real SMPL-X forward kinematics behind the :class:`JointModel` seam (CPU, torch).
+
+    Runs the SMPL-X kinematic tree with the supplied ``body_pose`` (21 body joints) and **zero**
+    internal ``global_orient``, selects the 16 canonical :data:`JOINT_NAMES`, roots them at the
+    pelvis, maps native→our frame (:data:`_R_SMPLX_TO_OURS`), then applies the external
+    ``global_orient`` via Rodrigues — mirroring :class:`PlaceholderJointModel` exactly so the
+    synthetic oracle round-trips. The torch/smplx import is lazy and the model is built on first
+    use, so importing this module stays pure (no torch at load time).
+
+    Asset: ``smplx`` package + ``SMPLX_{GENDER}.npz``, resolved from ``model_path`` →
+    ``$PITCH3D_SMPLX_MODEL_PATH`` → ``SMPL-X/models``.
+    """
+
+    model_path: str | None = None
+    gender: str = "neutral"
+    num_betas: int = 10
+    _model: Any = field(default=None, init=False, repr=False, compare=False)
+
+    @property
+    def n_pose_joints(self) -> int:
+        return 21
+
+    def _ensure_model(self) -> Any:
+        if self._model is None:
+            self._model = _build_smplx(self.model_path, self.gender, self.num_betas)
+        return self._model
+
+    def joints(
+        self, global_orient: np.ndarray, body_pose: np.ndarray, betas: np.ndarray
+    ) -> np.ndarray:
+        import torch
+
+        model = self._ensure_model()
+        go = np.asarray(global_orient, dtype=float).reshape(-1, 3)           # (T, 3)
+        bp = np.asarray(body_pose, dtype=float)
+        bp = bp.reshape(bp.shape[0], -1, 3)                                  # (T, 21, 3)
+        t = go.shape[0]
+
+        b = np.zeros(self.num_betas)
+        src = np.asarray(betas, dtype=float).reshape(-1)
+        b[: min(src.shape[0], self.num_betas)] = src[: self.num_betas]
+        betas_t = torch.as_tensor(
+            np.broadcast_to(b, (t, self.num_betas)).copy(), dtype=torch.float32
+        )
+        zeros3 = torch.zeros(t, 3)
+        with torch.no_grad():
+            out = model(
+                betas=betas_t,
+                global_orient=zeros3,
+                body_pose=torch.as_tensor(bp.reshape(t, -1), dtype=torch.float32),
+                left_hand_pose=torch.zeros(t, 45),
+                right_hand_pose=torch.zeros(t, 45),
+                jaw_pose=zeros3,
+                leye_pose=zeros3,
+                reye_pose=zeros3,
+                expression=torch.zeros(t, 10),
+            )
+        canon = out.joints.detach().cpu().numpy()[:, list(SMPLX_TO_CANONICAL), :]  # (T,16,3) native
+        canon = canon - canon[:, :1, :]                                     # root-relative
+        canon = canon @ _R_SMPLX_TO_OURS.T                                  # native → ours
+        rot_global = _rodrigues(go)                                         # (T, 3, 3)
+        return np.einsum("tac,tjc->tja", rot_global, canon)                 # (T, 16, 3)
