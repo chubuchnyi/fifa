@@ -23,6 +23,7 @@ from pitch3d.adapters.models.calibration import (
     _temporal_smooth,
     reprojection_error,
     solve_homography,
+    solve_homography_ransac,
 )
 from pitch3d.core.ports.io import ClipRef
 from pitch3d.core.ports.perception import FieldCalibrator
@@ -38,6 +39,11 @@ _WORLD = np.array(
 )
 #: Image points that map back to _WORLD under _H_GT (so solve should recover _H_GT).
 _IMAGE = _apply_homography(np.linalg.inv(_H_GT), _WORLD)
+
+#: The clean set plus one gross mislocalisation (image shifted 1000 px, world unchanged) — the
+#: dominant real-world failure RANSAC/weighting must reject without dragging the homography.
+_IMAGE_OUT = np.vstack([_IMAGE, _IMAGE[0] + [1000.0, 1000.0]])
+_WORLD_OUT = np.vstack([_WORLD, _WORLD[0]])
 
 
 def _clip(frames=(0, 1, 2), width=1280, height=720) -> ClipRef:
@@ -84,6 +90,40 @@ def test_solve_homography_needs_four_points():
         solve_homography(_IMAGE[:3], _WORLD[:3])
 
 
+def test_weighted_solve_ignores_zero_weighted_outlier():
+    # Zeroing the outlier's weight must recover _H_GT exactly; the unweighted fit is wrecked by it.
+    weights = np.ones(_IMAGE_OUT.shape[0])
+    weights[-1] = 0.0
+    h = solve_homography(_IMAGE_OUT, _WORLD_OUT, weights=weights)
+    np.testing.assert_allclose(h, _H_GT, atol=1e-6)
+    h_unweighted = solve_homography(_IMAGE_OUT, _WORLD_OUT)
+    assert reprojection_error(h_unweighted, _IMAGE, _WORLD) > reprojection_error(h, _IMAGE, _WORLD)
+
+
+def test_weighted_solve_rejects_mismatched_weight_length():
+    with pytest.raises(ValueError, match="one weight per correspondence"):
+        solve_homography(_IMAGE, _WORLD, weights=np.ones(_IMAGE.shape[0] - 1))
+
+
+def test_ransac_rejects_outlier_and_recovers_homography():
+    h, inliers = solve_homography_ransac(_IMAGE_OUT, _WORLD_OUT, threshold=1.0, seed=0)
+    assert inliers.tolist() == [True] * 7 + [False]  # the planted outlier is the only reject
+    np.testing.assert_allclose(h, _H_GT, atol=1e-6)
+
+
+def test_ransac_four_points_is_a_plain_weighted_solve():
+    h, inliers = solve_homography_ransac(_IMAGE[:4], _WORLD[:4])
+    assert inliers.tolist() == [True] * 4  # nothing to reject with a minimal set
+    np.testing.assert_allclose(h, solve_homography(_IMAGE[:4], _WORLD[:4]), atol=1e-9)
+
+
+def test_ransac_is_deterministic_for_seed():
+    h1, m1 = solve_homography_ransac(_IMAGE_OUT, _WORLD_OUT, seed=7)
+    h2, m2 = solve_homography_ransac(_IMAGE_OUT, _WORLD_OUT, seed=7)
+    np.testing.assert_array_equal(h1, h2)
+    np.testing.assert_array_equal(m1, m2)
+
+
 def test_confidence_decreases_with_error():
     assert _confidence_from_error(0.0, 0.5) == 1.0
     assert _confidence_from_error(0.5, 0.5) == pytest.approx(0.5)
@@ -118,6 +158,16 @@ def test_keypoints_recovers_world_points_and_scores_high():
     result = _keypoints_calibrator(frames=(0,)).calibrate(_clip(frames=(0,)))
     np.testing.assert_allclose(result.image_to_world(0, _IMAGE), _WORLD, atol=1e-6)
     assert result.confidence[0] > 0.99  # exact fit → near-1 confidence
+
+
+def test_calibrate_rejects_outlier_landmark_and_downweights_confidence():
+    per = {0: (_IMAGE_OUT, _WORLD_OUT)}
+    cal = KeypointFieldCalibrator(backend=_StubKeypointBackend(per))
+    result = cal.calibrate(_clip(frames=(0,)))
+    # RANSAC rejects the planted outlier, so the clean points still recover _WORLD exactly …
+    np.testing.assert_allclose(result.image_to_world(0, _IMAGE), _WORLD, atol=1e-6)
+    # … but confidence is below the all-clean ~1.0, scaled by the 7/8 inlier fraction (R-6).
+    assert 0.8 < result.confidence[0] < 0.99
 
 
 def test_under_detected_frame_carries_last_good_at_zero_confidence():

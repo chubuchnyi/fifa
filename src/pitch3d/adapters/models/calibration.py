@@ -94,11 +94,16 @@ def _apply_homography(h: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return hom[:, :2] / hom[:, 2:3]
 
 
-def solve_homography(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
+def solve_homography(
+    src: np.ndarray, dst: np.ndarray, weights: np.ndarray | None = None
+) -> np.ndarray:
     """Normalized-DLT homography ``H`` with ``dst ~ H @ src`` (image→world), shape ``(3, 3)``.
 
     Needs ≥ 4 non-collinear correspondences. Hartley-normalises both point sets for numerical
-    conditioning, solves by SVD, denormalises, and scales so ``H[2, 2] == 1``.
+    conditioning, solves by SVD, denormalises, and scales so ``H[2, 2] == 1``. If ``weights`` is
+    given (one non-negative weight per correspondence, e.g. per-landmark detection confidence),
+    each correspondence's two DLT rows are scaled by it, so uncertain landmarks pull the fit less.
+    ``weights=None`` reproduces the plain unweighted DLT exactly.
     """
     src = np.asarray(src, dtype=float).reshape(-1, 2)
     dst = np.asarray(dst, dtype=float).reshape(-1, 2)
@@ -114,7 +119,13 @@ def solve_homography(src: np.ndarray, dst: np.ndarray) -> np.ndarray:
     for (sx, sy), (dx, dy) in zip(src_n, dst_n, strict=True):
         rows.append([0.0, 0.0, 0.0, -sx, -sy, -1.0, dy * sx, dy * sy, dy])
         rows.append([sx, sy, 1.0, 0.0, 0.0, 0.0, -dx * sx, -dx * sy, -dx])
-    _, _, vt = np.linalg.svd(np.asarray(rows, dtype=float))
+    a = np.asarray(rows, dtype=float)
+    if weights is not None:
+        w = np.asarray(weights, dtype=float).reshape(-1)
+        if w.shape[0] != n:
+            raise ValueError(f"need one weight per correspondence, got {w.shape[0]} for {n}")
+        a = a * np.repeat(np.clip(w, 0.0, None), 2)[:, None]  # two DLT rows per correspondence
+    _, _, vt = np.linalg.svd(a)
     h_norm = vt[-1].reshape(3, 3)
 
     h = np.linalg.inv(t_dst) @ h_norm @ t_src
@@ -126,6 +137,63 @@ def reprojection_error(h: np.ndarray, src: np.ndarray, dst: np.ndarray) -> float
     pred = _apply_homography(h, src)
     dst = np.asarray(dst, dtype=float).reshape(-1, 2)
     return float(np.sqrt(((pred - dst) ** 2).sum(axis=1).mean()))
+
+
+def solve_homography_ransac(
+    src: np.ndarray,
+    dst: np.ndarray,
+    weights: np.ndarray | None = None,
+    *,
+    threshold: float = 1.0,
+    max_iters: int = 200,
+    seed: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Robust image→world homography by RANSAC, returning ``(H, inlier_mask)``.
+
+    A plain least-squares DLT is wrecked by even one mislocalised landmark — the dominant failure
+    on real broadcast frames, where the keypoint net emits the odd gross outlier. This repeatedly
+    fits ``H`` from a random minimal 4-point sample, counts inliers (reprojection residual under
+    ``threshold`` world units), keeps the largest consensus set, then refits a confidence-weighted
+    DLT on those inliers. With exactly 4 points there is nothing to reject (single weighted solve,
+    all-true mask); if no ≥4 consensus emerges it falls back to fitting all points. Deterministic
+    for a given ``seed``. On clean correspondences every sample agrees, so it reproduces the plain
+    DLT.
+    """
+    src = np.asarray(src, dtype=float).reshape(-1, 2)
+    dst = np.asarray(dst, dtype=float).reshape(-1, 2)
+    n = src.shape[0]
+    if n < 4 or dst.shape[0] != n:
+        raise ValueError(f"need ≥4 matched correspondences, got {n} src / {dst.shape[0]} dst")
+    if n == 4:
+        return solve_homography(src, dst, weights), np.ones(n, dtype=bool)
+
+    rng = np.random.default_rng(seed)
+    best_mask: np.ndarray | None = None
+    best_key = (3, -np.inf)  # (inlier count, -mean residual); any ≥4-inlier hypothesis beats it
+    for _ in range(max_iters):
+        idx = rng.choice(n, size=4, replace=False)
+        try:
+            h = solve_homography(src[idx], dst[idx])
+        except (ValueError, np.linalg.LinAlgError):
+            continue
+        with np.errstate(divide="ignore", invalid="ignore"):
+            # a degenerate minimal sample can map points to infinity → non-finite residuals,
+            # which we explicitly reject below; don't let that benign case warn.
+            resid = np.sqrt(((_apply_homography(h, src) - dst) ** 2).sum(axis=1))
+        if not np.all(np.isfinite(resid)):
+            continue
+        mask = resid < threshold
+        count = int(mask.sum())
+        if count < 4:
+            continue
+        key = (count, -float(resid[mask].mean()))
+        if key > best_key:
+            best_key, best_mask = key, mask
+
+    if best_mask is None:  # no consensus — best-effort fit over everything
+        return solve_homography(src, dst, weights), np.ones(n, dtype=bool)
+    w = None if weights is None else np.asarray(weights, dtype=float).reshape(-1)[best_mask]
+    return solve_homography(src[best_mask], dst[best_mask], w), best_mask
 
 
 def _confidence_from_error(err: float, scale_m: float) -> float:
@@ -148,7 +216,12 @@ def _temporal_smooth(homographies: np.ndarray, window: int) -> np.ndarray:
 
 @dataclass
 class KeypointFieldCalibrator(FieldCalibrator):
-    """Pitch-keypoint homography calibrator (FR-7) — pure solve over an injected backend.
+    """Pitch-keypoint homography calibrator (FR-7) — pure robust solve over an injected backend.
+
+    Each frame's landmarks are fitted with a **RANSAC + confidence-weighted DLT** so a few
+    mislocalised pitch points (the dominant failure on real broadcast frames) are rejected instead
+    of dragging the whole homography — and confidence is scored on the inliers, downweighted by how
+    many landmarks actually agreed (R-6 honesty).
 
     Attributes:
         backend: The landmark-detection backend. If ``None``, a real :class:`PitchKeypointBackend`
@@ -157,6 +230,9 @@ class KeypointFieldCalibrator(FieldCalibrator):
             confidence 0 (drift is surfaced honestly, R-6), or identity if none yet.
         smooth_window: Centred temporal-smoothing window in frames (1 disables smoothing).
         conf_scale_m: Reprojection error (metres) that maps to confidence 0.5.
+        ransac_threshold_m: Max reprojection residual (metres) for a landmark to count as an inlier.
+        ransac_iters: RANSAC hypothesis count per frame.
+        seed: RANSAC RNG seed — makes calibration reproducible.
         device: Inference device for the default backend.
     """
 
@@ -164,13 +240,20 @@ class KeypointFieldCalibrator(FieldCalibrator):
     min_keypoints: int = 4
     smooth_window: int = 1
     conf_scale_m: float = 0.5
+    ransac_threshold_m: float = 1.0
+    ransac_iters: int = 200
+    seed: int = 0
     device: str = "cuda"
 
     def info(self) -> ModelInfo:
         return ModelInfo(
             name="PitchKeypoints+DLT",
             backend=Backend.LOCAL,
-            params={"smooth_window": self.smooth_window, "device": self.device},
+            params={
+                "smooth_window": self.smooth_window,
+                "ransac_threshold_m": self.ransac_threshold_m,
+                "device": self.device,
+            },
         )
 
     def calibrate(self, clip: ClipRef) -> FieldCalibration:
@@ -183,10 +266,23 @@ class KeypointFieldCalibrator(FieldCalibrator):
         frames: list[int] = []
         last_good: np.ndarray | None = None
         for fk in per:
+            conf_kp = fk.confidence
+            assert conf_kp is not None  # FrameKeypoints.__post_init__ fills this (ones if unset)
             if fk.image_uv.shape[0] >= self.min_keypoints:
-                h = solve_homography(fk.image_uv, fk.world_xy)
-                err = reprojection_error(h, fk.image_uv, fk.world_xy)
-                conf = _confidence_from_error(err, self.conf_scale_m) * float(fk.confidence.mean())
+                h, inliers = solve_homography_ransac(
+                    fk.image_uv,
+                    fk.world_xy,
+                    weights=conf_kp,
+                    threshold=self.ransac_threshold_m,
+                    max_iters=self.ransac_iters,
+                    seed=self.seed,
+                )
+                err = reprojection_error(h, fk.image_uv[inliers], fk.world_xy[inliers])
+                conf = (
+                    _confidence_from_error(err, self.conf_scale_m)
+                    * float(conf_kp[inliers].mean())
+                    * float(inliers.mean())  # honest down-weight by the agreeing-landmark fraction
+                )
                 last_good = h
             else:
                 h = last_good if last_good is not None else np.eye(3)
