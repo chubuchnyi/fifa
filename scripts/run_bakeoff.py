@@ -28,7 +28,7 @@ from pitch3d.adapters.models.pose import HMRBackend
 from pitch3d.eval.backends import GtOracleBackend, ZeroPoseBackend
 from pitch3d.eval.bodymodel import JointModel, PlaceholderJointModel
 from pitch3d.eval.harness import run_conditions
-from pitch3d.eval.synthetic import SyntheticScene, generate_scene
+from pitch3d.eval.synthetic import CAMERA_VIEWS, SyntheticScene, generate_scene
 
 #: name → factory(scene) → HMRBackend. Register real candidates here on the box (same seam).
 CANDIDATES: dict[str, Callable[[SyntheticScene], HMRBackend]] = {
@@ -51,11 +51,18 @@ def _fk(name: str) -> JointModel:
 def run_bakeoff(
     scene: SyntheticScene,
     candidates: Mapping[str, Callable[[SyntheticScene], HMRBackend]] = CANDIDATES,
+    visible_only: bool = False,
 ) -> dict[str, dict[str, dict[str, float] | None]]:
-    """candidate → ``{'A': grid, 'B': grid}`` over ``scene`` (B via the GT-homography stand-in)."""
+    """candidate → ``{'A': grid, 'B': grid}`` over ``scene`` (B via the GT-homography stand-in).
+
+    ``visible_only`` scores only joints the scene marks visible (occlusion-aware), mirroring the
+    official evaluator's masking — most useful with a multi-subject / stacked-camera scene.
+    """
     calibration = scene.field_calibration()
     return {
-        name: run_conditions(scene, make(scene), calibration=calibration)
+        name: run_conditions(
+            scene, make(scene), calibration=calibration, visible_only=visible_only
+        )
         for name, make in candidates.items()
     }
 
@@ -86,15 +93,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--subjects", type=int, default=3)
     ap.add_argument("--frames", type=int, default=8)
     ap.add_argument("--fk", default="placeholder", choices=["placeholder", "smplx"])
+    ap.add_argument("--camera", default="main_sideline", choices=list(CAMERA_VIEWS))
+    ap.add_argument(
+        "--visible-only",
+        action="store_true",
+        help="score only joints the scene marks visible (occlusion-aware)",
+    )
     args = ap.parse_args(argv)
 
     scene = generate_scene(
-        n_subjects=args.subjects, n_frames=args.frames, seed=args.seed, joint_model=_fk(args.fk)
+        n_subjects=args.subjects,
+        n_frames=args.frames,
+        seed=args.seed,
+        joint_model=_fk(args.fk),
+        camera=CAMERA_VIEWS[args.camera],
     )
-    grid = run_bakeoff(scene)
+    grid = run_bakeoff(scene, visible_only=args.visible_only)
     print(
         f"# pose bake-off — synthetic (seed={args.seed}, N={args.subjects}, T={args.frames}, "
-        f"FK={args.fk}); metres, no Procrustes"
+        f"FK={args.fk}, cam={args.camera}, visible_only={args.visible_only}); metres, no Procrustes"
     )
     print(format_table(grid))
     print(

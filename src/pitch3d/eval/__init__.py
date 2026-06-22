@@ -22,7 +22,7 @@ from .harness import (
     run_conditions,
 )
 from .metrics import mpjpe_global, mpjpe_local
-from .synthetic import SyntheticScene, generate_scene
+from .synthetic import CAMERA_VIEWS, CameraView, SyntheticScene, generate_scene
 
 __all__ = [
     "CANONICAL_SKELETON",
@@ -30,6 +30,8 @@ __all__ = [
     "JointModel",
     "PlaceholderJointModel",
     "SmplxJointModel",
+    "CAMERA_VIEWS",
+    "CameraView",
     "SyntheticScene",
     "generate_scene",
     "mpjpe_global",

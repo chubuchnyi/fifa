@@ -16,7 +16,7 @@ import numpy as np
 
 from pitch3d.eval.backends import GtOracleBackend, ZeroPoseBackend
 from pitch3d.eval.harness import run_backend, run_backend_grounded, run_conditions
-from pitch3d.eval.synthetic import generate_scene
+from pitch3d.eval.synthetic import CAMERA_VIEWS, generate_scene
 
 
 def test_oracle_condition_a_reconstructs_gt():
@@ -51,6 +51,44 @@ def test_zero_pose_floor_is_finite_and_positive():
     grid = run_backend(s, ZeroPoseBackend(s))
     assert np.isfinite(grid["global_mpjpe_m"])
     assert grid["local_mpjpe_m"] > 0.0
+
+
+def test_oracle_scores_zero_from_every_camera_view():
+    # A perfect backend must reconstruct the GT from any broadcast viewpoint — this is what the
+    # camera sweep buys: it hardens condition-A *placement*, independent of the pose net.
+    for view in CAMERA_VIEWS.values():
+        s = generate_scene(seed=4, camera=view)
+        grid = run_backend(s, GtOracleBackend(s))
+        assert grid["global_mpjpe_m"] < 1e-9
+        assert grid["local_mpjpe_m"] < 1e-9
+
+
+def _occluded_scene():
+    # Two subjects stacked on the camera ray (n_frames=1 pins the layout) → real occlusion.
+    return generate_scene(
+        n_subjects=2, n_frames=1, seed=0, start_xy=np.array([[0.0, -8.0], [0.0, -7.6]])
+    )
+
+
+def test_visible_only_changes_score_under_occlusion():
+    s = _occluded_scene()
+    assert not s.visibility.all()  # the fixture must actually occlude something
+    full = run_backend(s, ZeroPoseBackend(s))
+    masked = run_backend(s, ZeroPoseBackend(s), visible_only=True)
+    assert np.isfinite(masked["global_mpjpe_m"])
+    assert not np.isclose(full["global_mpjpe_m"], masked["global_mpjpe_m"])
+
+
+def test_run_conditions_threads_visible_only():
+    s = _occluded_scene()
+    calib = s.field_calibration()
+    conds = run_conditions(s, ZeroPoseBackend(s), calibration=calib, visible_only=True)
+    assert conds["A"]["global_mpjpe_m"] == run_backend(
+        s, ZeroPoseBackend(s), visible_only=True
+    )["global_mpjpe_m"]
+    assert conds["B"]["global_mpjpe_m"] == run_backend_grounded(
+        s, ZeroPoseBackend(s), calib, visible_only=True
+    )["global_mpjpe_m"]
 
 
 def _load_driver() -> ModuleType:

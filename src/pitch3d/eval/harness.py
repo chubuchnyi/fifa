@@ -94,7 +94,7 @@ def _clip_and_tracks(scene: SyntheticScene) -> tuple[ClipRef, Tracks]:
 
 
 def run_backend(
-    scene: SyntheticScene, backend: HMRBackend, root_joint: int = 0
+    scene: SyntheticScene, backend: HMRBackend, root_joint: int = 0, visible_only: bool = False
 ) -> dict[str, float]:
     """Run an HMR backend over the synthetic scene → condition-A Global/Local MPJPE grid.
 
@@ -104,6 +104,9 @@ def run_backend(
     pose-net / articulation quality), and scores against GT. A backend returning the scene's GT
     params scores ~0; a zero-pose backend gives the finite Local-MPJPE sanity floor.
 
+    ``visible_only`` scores only joints the scene marks visible (:attr:`SyntheticScene.visibility`),
+    mirroring the official evaluator's occlusion masking.
+
     Assumes the backend returns one :class:`RawBodyMotion` per tracklet whose ``frames`` match
     the scene's (true for the synthetic fixtures); real WorldPose alignment is the product's job.
     """
@@ -112,7 +115,8 @@ def run_backend(
     pred = np.empty_like(scene.joints_world)
     for n, tl in enumerate(tracks.tracklets):
         pred[:, n] = _place_subject(scene, bodies[tl.track_id], scene.root_world[:, n])
-    return evaluate(pred, scene.joints_world, root_joint)
+    mask = scene.visibility if visible_only else None
+    return evaluate(pred, scene.joints_world, root_joint, mask)
 
 
 def run_backend_grounded(
@@ -121,6 +125,7 @@ def run_backend_grounded(
     calibration: FieldCalibration,
     root_joint: int = 0,
     pelvis_height_m: float | None = None,
+    visible_only: bool = False,
 ) -> dict[str, float]:
     """Condition B: place each subject at a root **grounded from its bbox foot point** through
     ``calibration`` (homography), instead of the GT 3D root — the product's real grounding path.
@@ -130,7 +135,7 @@ def run_backend_grounded(
     only** (Local is root-relative and so is identical to condition A). Feed
     :meth:`SyntheticScene.field_calibration` (perfect GT homography) for the methodology floor, or
     a perturbed homography to model real calibration error. ``pelvis_height_m`` defaults to the
-    scene's grounded height.
+    scene's grounded height; ``visible_only`` masks occluded joints as in :func:`run_backend`.
     """
     clip, tracks = _clip_and_tracks(scene)
     bodies = backend.estimate_bodies(clip, tracks)
@@ -139,7 +144,8 @@ def run_backend_grounded(
     for n, tl in enumerate(tracks.tracklets):
         root_world = _ground_root_from_feet(tl, calibration, ph)
         pred[:, n] = _place_subject(scene, bodies[tl.track_id], root_world)
-    return evaluate(pred, scene.joints_world, root_joint)
+    mask = scene.visibility if visible_only else None
+    return evaluate(pred, scene.joints_world, root_joint, mask)
 
 
 def run_conditions(
@@ -147,27 +153,38 @@ def run_conditions(
     backend: HMRBackend,
     calibration: FieldCalibration | None = None,
     root_joint: int = 0,
+    visible_only: bool = False,
 ) -> dict[str, dict[str, float] | None]:
     """Both bake-off conditions for one backend → ``{'A': grid, 'B': grid | None}``.
 
     ``A`` is the GT camera (pose-net only); ``B`` grounds via ``calibration`` (the product number).
     ``B`` is ``None`` when no calibration is given — the GT homography
     (:meth:`SyntheticScene.field_calibration`) is the perfect-calibration stand-in on synthetic
-    until PnLCalib runs on the box.
+    until PnLCalib runs on the box. ``visible_only`` masks occluded joints in both grids
+    (:attr:`SyntheticScene.visibility`), mirroring the official evaluator's occlusion handling.
     """
     return {
-        "A": run_backend(scene, backend, root_joint),
+        "A": run_backend(scene, backend, root_joint, visible_only=visible_only),
         "B": (
-            run_backend_grounded(scene, backend, calibration, root_joint)
+            run_backend_grounded(scene, backend, calibration, root_joint, visible_only=visible_only)
             if calibration is not None
             else None
         ),
     }
 
 
-def evaluate(pred_world: np.ndarray, gt_world: np.ndarray, root_joint: int = 0) -> dict[str, float]:
-    """Score predicted vs GT world joints → ``{global_mpjpe_m, local_mpjpe_m}`` (metres)."""
+def evaluate(
+    pred_world: np.ndarray,
+    gt_world: np.ndarray,
+    root_joint: int = 0,
+    mask: np.ndarray | None = None,
+) -> dict[str, float]:
+    """Score predicted vs GT world joints → ``{global_mpjpe_m, local_mpjpe_m}`` (metres).
+
+    ``mask`` (``(..., J)`` bool, optional) restricts scoring to visible joints — feed
+    :attr:`SyntheticScene.visibility` to mirror the official evaluator's occlusion masking.
+    """
     return {
-        "global_mpjpe_m": mpjpe_global(pred_world, gt_world),
-        "local_mpjpe_m": mpjpe_local(pred_world, gt_world, root_joint),
+        "global_mpjpe_m": mpjpe_global(pred_world, gt_world, mask),
+        "local_mpjpe_m": mpjpe_local(pred_world, gt_world, root_joint, mask),
     }

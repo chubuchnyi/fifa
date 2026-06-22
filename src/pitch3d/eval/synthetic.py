@@ -39,6 +39,30 @@ from .bodymodel import (
     _rotmat_to_aa,
 )
 
+
+@dataclass(frozen=True)
+class CameraView:
+    """A broadcast camera placement: eye + look-at target (world metres) and focal lengths (px).
+
+    Lets a caller sweep condition A across viewpoints (steep/shallow, behind-goal, corner) instead
+    of the single hard-wired sideline — a perfect backend must score ~0 from *any* of them, so the
+    sweep hardens the placement methodology rather than the pose net.
+    """
+
+    eye: tuple[float, float, float]
+    target: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    fx: float = 1400.0
+    fy: float = 1400.0
+
+
+#: Canonical broadcast viewpoints (single monocular camera — the project's premise) to sweep.
+CAMERA_VIEWS: dict[str, CameraView] = {
+    "main_sideline": CameraView(eye=(0.0, -50.0, 15.0)),                       # default; gentle
+    "high_sideline": CameraView(eye=(0.0, -36.0, 30.0)),                       # steeper, tighter
+    "behind_goal": CameraView(eye=(60.0, 0.0, 16.0), fx=1900.0, fy=1900.0),   # end-on, long lens
+    "corner_high": CameraView(eye=(-46.0, -34.0, 28.0)),                       # oblique corner
+}
+
 #: Per-joint swing amplitude (rad) about the local x-axis, modulated by a per-frame sine.
 #: Arms and the contralateral legs swing out of phase so Local MPJPE is exercised.
 #: Indexed by the 16 canonical joints — the placeholder's ``body_pose`` axis.
@@ -92,6 +116,42 @@ def _rot_z(yaw: np.ndarray) -> np.ndarray:
     return out
 
 
+def _visibility_mask(
+    joints_image: np.ndarray,
+    cam_depth: np.ndarray,
+    boxes_xyxy: np.ndarray,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    """Per-joint visibility ``(T, N, J)`` bool: in-frame **and** not behind a nearer subject's box.
+
+    A coarse, mesh-free **inter-person** occlusion proxy: subject ``k`` occludes a joint of subject
+    ``i`` when ``k`` is nearer the camera (smaller forward depth) and the joint's pixel lands inside
+    ``k``'s box. Self-occlusion is not modelled (no mesh) — condition A scores *placement*, not
+    silhouettes — but player-behind-player drop-out, the dominant broadcast case, is.
+
+    Args:
+        joints_image: ``(T, N, J, 2)`` joint pixels.
+        cam_depth: ``(T, N)`` camera-space forward depth (Z) per subject.
+        boxes_xyxy: ``(T, N, 4)`` per-subject image boxes.
+        width, height: frame size in pixels.
+    """
+    u, v = joints_image[..., 0], joints_image[..., 1]                 # (T, N, J)
+    in_frame = (u >= 0) & (u < width) & (v >= 0) & (v < height)
+    occluded = np.zeros(in_frame.shape, dtype=bool)
+    for k in range(cam_depth.shape[1]):
+        bx = boxes_xyxy[:, k]                                         # (T, 4)
+        inside = (
+            (u >= bx[:, 0][:, None, None]) & (u <= bx[:, 2][:, None, None])
+            & (v >= bx[:, 1][:, None, None]) & (v <= bx[:, 3][:, None, None])
+        )                                                            # (T, N, J)
+        nearer = (cam_depth[:, k][:, None] < cam_depth)[:, :, None]   # (T, N, 1)
+        hit = inside & nearer
+        hit[:, k, :] = False                                         # never self-occlude
+        occluded |= hit
+    return in_frame & ~occluded
+
+
 @dataclass
 class SyntheticScene:
     """A fully-known synthetic broadcast scene: GT camera + world/image joints + GT articulation.
@@ -112,6 +172,8 @@ class SyntheticScene:
         gt_betas: GT per-subject shape coefficients, shape ``(N, B)`` (placeholder: zeros).
         joint_names: Names aligned with the ``J`` axis.
         joint_model: The FK that produced the joints (the harness must use the same one).
+        joints_visible: Per-joint visibility ``(T, N, J)`` bool (in-frame ∧ not occluded). ``None``
+            means "not computed" → :attr:`visibility` treats every joint as visible.
     """
 
     intrinsics: CameraIntrinsics
@@ -127,6 +189,14 @@ class SyntheticScene:
     gt_betas: np.ndarray
     joint_names: tuple[str, ...] = JOINT_NAMES
     joint_model: JointModel = field(default_factory=PlaceholderJointModel)
+    joints_visible: np.ndarray | None = None
+
+    @property
+    def visibility(self) -> np.ndarray:
+        """Per-joint visibility ``(T, N, J)`` bool; all-visible if the scene did not compute it."""
+        if self.joints_visible is None:
+            return np.ones(self.joints_world.shape[:-1], dtype=bool)
+        return self.joints_visible
 
     @property
     def n_frames(self) -> int:
@@ -175,30 +245,40 @@ def generate_scene(
     seed: int = 0,
     pelvis_height_m: float = 0.92,
     joint_model: JointModel | None = None,
+    camera: CameraView | None = None,
+    start_xy: np.ndarray | None = None,
 ) -> SyntheticScene:
     """Generate a deterministic synthetic broadcast-soccer scene with perfect GT.
 
-    The camera sits behind the ``-Y`` sideline, elevated, looking at the pitch centre.
-    Subjects start at random central pitch positions, walk in a straight line, and swing
-    their limbs sinusoidally (so root-relative articulation is non-trivial). The GT joints
-    are produced *through the FK seam* so a perfect backend scores zero. All outputs are
-    pure functions of ``seed``.
+    Subjects start at random central pitch positions, walk in a straight line, and swing their
+    limbs sinusoidally (so root-relative articulation is non-trivial). The GT joints are produced
+    *through the FK seam* so a perfect backend scores zero. All outputs are pure functions of the
+    arguments (``seed`` + any overrides).
 
     ``joint_model`` is the FK backend (default :class:`PlaceholderJointModel`); pass a
-    :class:`SmplxJointModel` to generate the same scene through real SMPL-X FK. The GT
-    articulation axis (``gt_body_pose``) is sized to that backend's ``n_pose_joints`` while the
-    world joints are always the 16 canonical :data:`JOINT_NAMES`.
+    :class:`SmplxJointModel` to generate the same scene through real SMPL-X FK. The GT articulation
+    axis (``gt_body_pose``) is sized to that backend's ``n_pose_joints`` while the world joints are
+    always the 16 canonical :data:`JOINT_NAMES`.
+
+    ``camera`` (default :data:`CAMERA_VIEWS`'s ``main_sideline``) is the broadcast viewpoint; sweep
+    :data:`CAMERA_VIEWS` to harden condition-A placement across geometries. ``start_xy`` ``(N, 2)``
+    overrides the random ground positions — e.g. to place subjects on one camera ray and force the
+    inter-person occlusion recorded in :attr:`SyntheticScene.joints_visible`.
     """
     width, height = image_size
     rng = np.random.default_rng(seed)
     frames = np.arange(n_frames)
 
+    view = camera if camera is not None else CAMERA_VIEWS["main_sideline"]
     intrinsics = CameraIntrinsics(
-        fx=1400.0, fy=1400.0, cx=width / 2.0, cy=height / 2.0, width=width, height=height
+        fx=view.fx, fy=view.fy, cx=width / 2.0, cy=height / 2.0, width=width, height=height
     )
-    rotation, translation = _look_at(np.array([0.0, -50.0, 15.0]), np.zeros(3))
+    rotation, translation = _look_at(np.array(view.eye), np.array(view.target))
 
-    start_xy = rng.uniform([-20.0, -12.0], [20.0, 12.0], size=(n_subjects, 2))
+    if start_xy is None:
+        start_xy = rng.uniform([-20.0, -12.0], [20.0, 12.0], size=(n_subjects, 2))
+    else:
+        start_xy = np.asarray(start_xy, dtype=float).reshape(n_subjects, 2)
     velocity = rng.uniform(-0.15, 0.15, size=(n_subjects, 2))
     yaw = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
     phase = rng.uniform(0.0, 2.0 * np.pi, size=n_subjects)
@@ -259,5 +339,8 @@ def generate_scene(
             np.clip(u.max(-1), 0, width), np.clip(v.max(-1), 0, height),
         ],
         axis=-1,
+    )
+    scene.joints_visible = _visibility_mask(
+        scene.joints_image, root_cam[..., 2], scene.boxes_xyxy, width, height
     )
     return scene
