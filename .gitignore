@@ -35,3 +35,7 @@ samples/
 
 # Datasets (large / gated; live outside git — e.g. WorldPose annotations + footage).
 /data/
+
+# Box-local heavy/GPL backend glue injected via the ADR-0006 dotted-path seam
+# (e.g. PnLCalib calibrator) — lives on the GPU box, must NOT enter the public repo.
+/backends/
