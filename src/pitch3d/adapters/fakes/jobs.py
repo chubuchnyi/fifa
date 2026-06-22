@@ -30,7 +30,7 @@ class InProcessJobQueue(JobQueue):
     """Synchronous queue: each ``submit`` runs the thunk now and records the outcome."""
 
     worker: InProcessWorker = field(default_factory=InProcessWorker)
-    _ids: "itertools.count[int]" = field(default_factory=lambda: itertools.count(1), repr=False)
+    _ids: itertools.count[int] = field(default_factory=lambda: itertools.count(1), repr=False)
     _state: dict[str, JobState] = field(default_factory=dict, repr=False)
     _result: dict[str, Any] = field(default_factory=dict, repr=False)
     _error: dict[str, BaseException] = field(default_factory=dict, repr=False)

@@ -16,12 +16,12 @@ import numpy as np
 
 from pitch3d.core.ports.io import ClipRef
 from pitch3d.core.ports.perception import (
+    BallTracker,
     Detection,
     Detections,
     Detector,
     FieldCalibrator,
     FrameDetections,
-    BallTracker,
     Tracker,
     Tracklet,
     Tracks,

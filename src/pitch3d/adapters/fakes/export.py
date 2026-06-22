@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pitch3d.core.ports.export import ExportFormat, Exporter, ExportResult
+from pitch3d.core.ports.export import Exporter, ExportFormat, ExportResult
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import save_scene
 

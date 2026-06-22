@@ -176,7 +176,7 @@ class ByteTrackTracker(Tracker):
         ]
         if not idx:
             return []
-        feats = np.stack([raw[i].appearance for i in idx])
+        feats = np.stack([a for i in idx if (a := raw[i].appearance) is not None])
         k = min(self.n_teams, len(self.team_ids), len(idx))
         labels = _kmeans(feats, k)
 

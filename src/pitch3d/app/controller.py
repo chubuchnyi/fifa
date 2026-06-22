@@ -46,7 +46,7 @@ if TYPE_CHECKING:  # avoid a wiring↔controller import cycle
 class Application:
     """In-memory project + ports; the single control surface for CLI and MCP."""
 
-    ports: "AppPorts"
+    ports: AppPorts
     out_dir: Path = field(default_factory=lambda: Path("out"))
 
     _sources: dict[str, Source] = field(default_factory=dict, repr=False)
@@ -54,7 +54,7 @@ class Application:
     _clips: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scenes: dict[str, Scene] = field(default_factory=dict, repr=False)
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
-    _ids: dict[str, "itertools.count[int]"] = field(default_factory=dict, repr=False)
+    _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
     def _next(self, kind: str) -> int:
         self._ids.setdefault(kind, itertools.count(1))
