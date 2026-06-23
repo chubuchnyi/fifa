@@ -1,4 +1,4 @@
-# pitch3d — Roadmap (M0 → M3)
+# pitch3d — Roadmap (M0 → M4)
 
 Maps the TZ milestones (§10) to concrete packages/tickets. **Mono through every milestone.**
 Each milestone ends with a **working end-to-end artifact on one real clip**. Real multi-camera
@@ -42,43 +42,28 @@ propagate → render(fake) → export, and `pytest` is green. The LLM-feedback l
 **Goal (TZ M1):** a 3D scene on a real clip that can be **edited**, with edits propagated.
 Proxy only — no photoreal yet. This is the first milestone that replaces fakes with real models.
 
-**Status:** every perception/render/export port now has its real adapter wired behind the same
-split pattern (pure half unit-tested via an injected stub backend; heavy half lazy-imported and
-gated behind its extra). Each is selectable per-port — `default_ports(detector="rfdetr", …)` and
-the matching CLI flags (`--detector/--tracker/--calibrator/--pose/--ball/--render/--export`). The
-two dependency-free reals (overlay render, glTF/npz export) run end-to-end on a real clip today
-with no GPU; the heavy perception reals need their extra + weights at call time. The live MCP
-`serve()` is wired too — its tool→use-case→content-block dispatch is real and unit-tested on the
-fakes (the SDK stdio loop is lazy-imported, gated behind the `mcp` extra). The Blender proxy is
-wired as well: a pure `ProxyPlan` builder (unit-tested, never imports `bpy`) feeds an
-out-of-process `blender --background` runner that writes the editable `.blend` (root/ball as
-F-curves, β + body pose as channels) and renders proxy `SCENE_3D` viewpoints for the LLM loop —
-gated on a Blender binary (`$PITCH3D_BLENDER`/PATH), Workbench/CPU, no GPU. Confidence
-highlighting (overlay/radar markers fade toward a warning colour as confidence drops, UX-3/FR-16)
-and the top-down tactical **radar** VIEW (a camera-free 2D minimap surfaced through
-`observe(include_radar=…)`) are real and dependency-free too. The inference **device** is now a
-wired runtime knob — `default_ports(device=…)` / CLI `--device {cpu,cuda}` forwards it to every
-real perception adapter, defaulting to **`cpu`** (the local concept-validation profile, ADR-0009);
-production flips to `--device cuda` with no code change. **P2.3 validated detection + tracking on
-CPU** on a real broadcast clip: RF-DETR's free COCO base weights → ~15–17 players/frame → ByteTrack
-→ 16 stable tracks clustered into teams A/B (HSV), no GPU and no learned tracker weights. **P2.4**
-found GVHMR is an unwired research repo (not pip-installable) and GPU-bound, but CPU-validated its
-*central* pure half — grounding 16 real tracks' world roots onto the pitch from the field
-homography (world metres, Z = pelvis height). **P1 landed the interactive-placement seam**: a GUI
-drag in a *live* Blender session now becomes a `ROOT_TRANSLATION` correction through the **same**
-`apply_offset` use-case the LLM drives (one code path for human and agent, ADR-0008/0010). The
-whole host side is real and unit-tested over a socket pair — the `radar_to_world` inverse, the
-`subject_<id>` id↔name contract, and a newline-JSON edit loop that diffs a dropped root against the
-*resolved* position so the subject lands exactly where placed. Remaining for M1: wiring the actual
-GVHMR and TrackNet networks (their `hmr`/`ball` extras ship only substrate today — both live
-backends are stubs, GVHMR GPU-bound), and the one piece that needs a display we don't have in CI —
-the live GUI Blender session itself (`launch_live_session` + the in-Blender depsgraph watcher, step 10).
-The *on-box seam* for that network wiring already exists: a vendored GVHMR/TrackNet/keypoint
-network is injected into its real adapter by dotted path from the composition root **and** the CLI
-(`--pose-backend`/`--ball-backend`/`--calibrator-backend pkg.module:Factory`) — config-not-fork, so
-the research code stays out of the core tree (ADR-0006). The seam (resolution, protocol guard,
-injection, override-needs-a-real-adapter rule) is unit-tested headlessly, including a full CPU
-reconstruction driven by an in-repo stub backend.
+**Status (snapshot — the live state, blockers and next steps live in
+[`m1-status-and-plan.md`](m1-status-and-plan.md)).** Every perception/render/export port now has a
+real adapter behind the same split (pure half unit-tested via an injected stub; heavy half
+lazy-imported behind its extra), selectable per-port via `default_ports(...)` and the
+`--detector/--tracker/--calibrator/--pose/--ball/--render/--export` flags.
+
+- **Real, no GPU, today:** overlay render (+ confidence highlighting, UX-3/FR-16), glTF/`.npz`
+  export, the camera-free top-down **radar** VIEW, the live MCP `serve()` dispatch (SDK stdio loop
+  behind the `mcp` extra), and the Blender proxy `.blend`/`SCENE_3D` builder (needs a Blender
+  binary, Workbench/CPU).
+- **Real on CPU, validated on a real clip:** RF-DETR detection (~15–17 players/frame) → ByteTrack →
+  teams A/B (HSV), plus the pose adapter's *pure* root-grounding (16 tracks grounded to world metres
+  from the field homography). The interactive-placement seam (a live-Blender drag → `ROOT_TRANSLATION`
+  `Correction` through the **same** `apply_offset` the LLM drives, ADR-0008/0010) is host-side real
+  and unit-tested over a socket pair.
+- **Device knob:** `--device {cpu,cuda}` forwards to every real adapter, defaulting to `cpu` (the
+  local validation profile, ADR-0009); production flips to `cuda` with no code change.
+- **Still box-gated (stubs):** the pose and ball *heavy* backends. The chosen nets are **SMPLest-X**
+  (pose) and **WASB** (ball); they inject on the box by dotted path
+  (`--pose-backend`/`--ball-backend pkg.module:Factory` — config-not-fork, research code stays out
+  of core, ADR-0006). The injection seam itself is wired + headlessly tested. Also pending: the live
+  **GUI** Blender session (`launch_live_session` + depsgraph watcher, step 10) — it needs a display.
 
 ### Vertical slice (one clip, end to end)
 1. **Ingest** a real broadcast clip via the FFmpeg adapter → `Source` (fps/res/timecode). `adapters/models` (io)

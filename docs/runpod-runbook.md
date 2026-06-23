@@ -38,8 +38,8 @@ claude mcp add runpod -e RUNPOD_API_KEY=rpa_xxx -- npx -y @runpod/mcp-server@lat
 ## 1. Pick the GPU + check stock
 
 `runpodctl gpu`, or MCP `list-gpu-types` with `searchTerm: "RTX 4090"`. Price/quality pick for
-this project is the **RTX 4090 (24 GB)** — only GVHMR (pose) really stresses the GPU; RF-DETR/
-ByteTrack fit in far less. Rough rates: Community ~$0.34/hr, **Secure ~$0.69/hr**.
+this project is the **RTX 4090 (24 GB)** — only the pose net (SMPLest-X) really stresses the GPU;
+RF-DETR/ByteTrack fit in far less. Rough rates: Community ~$0.34/hr, **Secure ~$0.69/hr**.
 
 > **Caveat:** the catalog `stockStatus: "High"` / `available: true` is an *aggregate* — it does
 > **not** guarantee a host can place your exact pod.
