@@ -104,9 +104,14 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 - Honesty (R-6): our number is a homography-plane `line_acc@Npx` proxy, **not** the official
   SoccerNet Completeness×JaC@5 (full camera params, distortion, circles, L/R ambiguity); and these
   weights are in-distribution for SoccerNet, so this is an upper-ish bound, not OOD generalization.
-- Next: report accuracy-on-completed separately from completeness (so RMS stops being outlier
-  -inflated); chase the 25 % miss rate (lower kp threshold / line-only fallback); then evaluate
-  PnLCalib's *own* full camera-calibration module vs our bare DLT.
+- **Done (pure-core, `e6bbd09`):** accuracy-on-completed is now reported separately from
+  completeness. `evaluate_calibration` adds an `on_completed` sub-grid + `n_completed` that pool the
+  reprojection stats over **only** the confident frames, so the outlier-inflated all-frames RMS no
+  longer masks the sub-2 px accuracy where PnLCalib actually locks on. Existing top-level fields are
+  unchanged (the measured B1 numbers still reproduce); shared `_pool_summary` keeps both grids identical.
+- Next (box): chase the 25 % miss rate (lower kp threshold / line-only fallback); then evaluate
+  PnLCalib's *own* full camera-calibration module vs our bare DLT; and run B1 over more of the 3143
+  `test` frames than the first 200 (with `on_completed` now separating accuracy from coverage).
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in
