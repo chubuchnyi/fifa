@@ -15,6 +15,11 @@ forward must run in the repo venv and hand geometry to Blender via files:
    (works headless, no GPU/display needed). Writes `blender_scene.png` (all subjects) +
    `blender_scene_hero.png` (close-up of the first body).
 
+For a **live, interactive** look instead of a still, [`scripts/blender_view_meshes.py`](../scripts/blender_view_meshes.py)
+builds the *same* scene but leaves Blender **open** with a realtime material-preview viewport framed
+through the camera, so you can orbit the reconstructed crowd. It needs a display, so do **not** pass
+`--background` (see "Live, interactive GUI" below).
+
 A matplotlib-only variant, [`scripts/render_smplx_mesh.py`](../scripts/render_smplx_mesh.py), renders
 the same mesh **without Blender** (quick look / pod sanity check).
 
@@ -38,6 +43,41 @@ the same mesh **without Blender** (quick look / pod sanity check).
     --python scripts/blender_render_meshes.py -- \
     --in out/cuda/mesh --out out/cuda/mesh/blender_scene.png
 # -> out/cuda/mesh/blender_scene.png  +  blender_scene_hero.png
+```
+
+## Live, interactive GUI
+
+Same scene, but an **open** Blender window you can orbit (realtime material preview), instead of a
+headless still. Needs a display — on a local GNOME/Wayland box pass the session env through and **omit**
+`--background`:
+
+```bash
+XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 \
+  /home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender \
+  --python scripts/blender_view_meshes.py -- --in out/live_real/mesh
+# log prints `BLENDER_VIEW_READY -> N bodies ...`; the window opens framed through the camera.
+```
+
+### Full live chain (real models on a GPU pod → local GUI)
+
+The end-to-end "real video → real SMPL-X → live Blender" demo. The heavy half runs on the GPU box
+(real RF-DETR + ByteTrack + SMPLest-X); the visual half runs locally on CPU:
+
+```bash
+# 1. ON THE POD: real perception → real SMPL-X pose → smplx_npz export (see docs/cloud-dev.md §5).
+#    The pose stage injects the wired SMPLest-X backend by dotted path (ADR-0006):
+PYTHONPATH=src python -m pitch3d --clip clip.mp4 --frames 6 \
+  --detector rfdetr --tracker bytetrack --device cuda \
+  --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
+  --render overlay --export gltf --format smplx_npz --out-dir out/live_demo
+
+# 2. LOCAL: pull the real export down (scp from the pod), into out/live_real/export/...
+#    then forward it through SMPL-X (real-pose → DEFAULT orientation, NOT canonical):
+PITCH3D_NPZ_DIR=out/live_real/export/scene.smplx_npz \
+  PITCH3D_MESH_OUT=out/live_real/mesh \
+  .venv/bin/python scripts/smplx_export_meshes.py
+
+# 3. LOCAL: open the live GUI on the reconstructed crowd (command above), --in out/live_real/mesh
 ```
 
 ## Env / flags
