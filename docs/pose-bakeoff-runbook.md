@@ -61,6 +61,39 @@ broadcast-soccer generator (`generate_scene`) with **perfect GT** (camera, world
 harness (crop→place→correspond→eval geometry) be built and unit-tested *now*; swap the
 placeholder skeleton for SMPL-X FK and the synthetic frames for EMDB/3DPW/WorldPose later.
 
+### 0b. Executable harness — `scripts/run_pose_eval.py` (the "one command away" front door)
+
+The harness is now driveable from the CLI, so the headline number is one command once a real
+backend + GT are in hand. It scores **any** `HMRBackend` (built-in `oracle`/`zero`, or a vendored
+net by dotted path, ADR-0006) → the Global/Local MPJPE grid as JSON.
+
+```bash
+# Runnable HERE AND NOW (no asset/GPU) — self-tests the whole crop→place→score path:
+PYTHONPATH=src python scripts/run_pose_eval.py --dataset synthetic --backend oracle --condition-b
+#   → A ≈ 0 (oracle reconstructs GT), B.global ≈ 0.08 m (the foot-grounding/calibration cost),
+#     B.local ≈ 0 (root-relative). `--backend zero` prints the Local-MPJPE floor (~0.6 m).
+
+# The REAL number (on a box with the data + SMPL-X asset + the wired backend):
+PYTHONPATH=src python scripts/run_pose_eval.py --dataset 3dpw \
+    --pkl /data/3dpw/sequenceFiles/test/downtown_walking_00.pkl \
+    --images /data/3dpw/imageFiles/downtown_walking_00 \
+    --joint-model smplx --backend pitch3d.adapters.models.smplestx_backend:make
+```
+
+**3DPW loader (`pitch3d.eval.datasets_3dpw.load_3dpw_sequence`).** Reads a sequence pickle into a
+`PoseEvalScene` that reuses this exact harness. Notes that matter for the number:
+- **Condition A only.** 3DPW has a *moving* camera (per-frame extrinsics — `SyntheticScene` now
+  carries `(T,3,3)`/`(T,3)`), and no pitch plane, so there is no condition B here. The A→B
+  calibration gap stays a synthetic / WorldPose measurement.
+- **Joint convention.** 3DPW ships SMPL 24-joint world positions; SMPL's body skeleton (idx 0–21)
+  is identical to SMPL-X's, so GT and a SMPL-X backend's FK are selected with the **same**
+  `SMPLX_TO_CANONICAL` tuple (e.g. `spine` = joint 6 on both sides) — a like-for-like MPJPE.
+- **Status — honest.** Parsing + projection geometry are unit-tested end-to-end against a
+  synthetic 3DPW-shaped pickle (`tests/unit/test_eval_3dpw.py`); `diagnose_3dpw_scene` +
+  a hard depth check catch an inverted `cam_poses` convention. What still needs a **real run**
+  (their 3DPW download + a GPU for the SMPLest-X backend) is the first actual number — the
+  plumbing no longer is the blocker.
+
 ---
 
 ## 1. The metric — defer to the challenge's OFFICIAL evaluator

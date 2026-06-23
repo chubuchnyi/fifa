@@ -159,8 +159,9 @@ class SyntheticScene:
     Attributes:
         intrinsics: Shared pinhole intrinsics.
         frames: Frame indices, shape ``(T,)``.
-        rotation: World→camera rotation ``R``, shape ``(3, 3)`` (static camera).
-        translation: World→camera translation ``t``, shape ``(3,)``.
+        rotation: World→camera rotation ``R``, shape ``(3, 3)`` for a static camera, or
+            ``(T, 3, 3)`` per-frame for a moving camera (e.g. 3DPW handheld).
+        translation: World→camera translation ``t``, shape ``(3,)`` (static) or ``(T, 3)``.
         joints_world: GT joints in world metres, shape ``(T, N, J, 3)``.
         joints_image: GT joint projections in pixels, shape ``(T, N, J, 2)``.
         boxes_xyxy: GT per-subject bounding boxes (px, clipped to frame), shape ``(T, N, 4)``.
@@ -212,12 +213,29 @@ class SyntheticScene:
         return self.joints_world[:, :, 0, :]
 
     def world_to_camera(self, pts_world: np.ndarray) -> np.ndarray:
-        """Map world points ``(..., 3)`` into camera space (``X_c = R @ X_w + t``)."""
-        return np.asarray(pts_world, dtype=float) @ self.rotation.T + self.translation
+        """Map world points ``(..., 3)`` into camera space (``X_c = R @ X_w + t``).
+
+        ``R, t`` may be **static** (``(3, 3)`` / ``(3,)``) or **per-frame** (``(T, 3, 3)`` /
+        ``(T, 3)``, a moving broadcast/handheld camera as in 3DPW). For the per-frame case the
+        input's leading axis must be the frame axis ``T`` (every harness call is per-subject and
+        already shaped ``(T, ...)``).
+        """
+        return self._apply_rt(pts_world, inverse=False)
 
     def camera_to_world(self, pts_cam: np.ndarray) -> np.ndarray:
         """Inverse of :meth:`world_to_camera`: camera points ``(..., 3)`` → world metres."""
-        return (np.asarray(pts_cam, dtype=float) - self.translation) @ self.rotation
+        return self._apply_rt(pts_cam, inverse=True)
+
+    def _apply_rt(self, pts: np.ndarray, *, inverse: bool) -> np.ndarray:
+        """Apply the world↔camera rigid map, broadcasting a static *or* per-frame ``R, t``."""
+        x = np.asarray(pts, dtype=float)
+        r, t = self.rotation, self.translation
+        if r.ndim == 2:  # static camera — the elegant (..., 3) @ R(.T) form
+            return (x - t) @ r if inverse else x @ r.T + t
+        tt = t.reshape(t.shape[0], *([1] * (x.ndim - 2)), 3)  # per-frame: align leading T axis
+        if inverse:
+            return np.einsum("tji,t...j->t...i", r, x - tt)
+        return np.einsum("tij,t...j->t...i", r, x) + tt
 
     def project(self, pts_world: np.ndarray) -> np.ndarray:
         """Project world points ``(..., 3)`` to pixels ``(..., 2)`` through the GT camera."""
@@ -226,7 +244,17 @@ class SyntheticScene:
         return img[..., :2] / img[..., 2:3]
 
     def field_calibration(self) -> FieldCalibration:
-        """The GT image→world(plane Z=0) homography track — a perfect-calibration baseline."""
+        """The GT image→world(plane Z=0) homography track — a perfect-calibration baseline.
+
+        Defined only for a **static** pitch camera (condition B grounds feet on the ``Z = 0``
+        plane). A per-frame moving camera (e.g. 3DPW) has no single pitch plane, so this raises —
+        score such datasets on condition A (the GT-camera / pose-net number) only.
+        """
+        if self.rotation.ndim != 2:
+            raise ValueError(
+                "field_calibration requires a static camera (rotation (3, 3)); a per-frame "
+                "camera has no fixed Z=0 pitch plane — evaluate condition A only."
+            )
         k = self.intrinsics.matrix()
         plane = np.column_stack([self.rotation[:, 0], self.rotation[:, 1], self.translation])
         h_iw = np.linalg.inv(k @ plane)
