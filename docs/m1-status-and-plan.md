@@ -50,7 +50,7 @@ of the public repo.
 
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
-| **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video**. **The full WorldPose video unblocks B1 *and* the B2 bake-off — one asset, two payoffs (highest-leverage acquisition).** **Acquisition stalled 2026-06-22 — gated behind a FIFA content-licence form (worldpose.ait.ethz.ch), NOT a missing mirror: challenge registration does *not* grant frames; test GT held out. No drop-in replacement; verified alternatives in [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) §0a — SoccerNet (NDA) is the B1 path (real broadcast + GT pitch calibration; no 3D-pose GT).** |
+| **B1** | Data-unblocked 2026-06-23; harness built (CPU) | Evaluate `FieldCalibrator` (PnLCalib) on *independent* real broadcast frames with GT pitch calibration | 🟡 CPU harness done; GPU number pending pod | **Correction:** B1 was never truly asset-blocked. SoccerNet `calibration-2023` (real broadcast frames + per-image pitch-line GT) is **openly downloadable, NO NDA password** — only the broadcast *video* is NDA-gated. Built + unit-tested the full CPU half: re-derived pitch template, GT parser, reprojection metrics, CLI (`scripts/run_calib_eval.py`), open downloader (`scripts/get_soccernet_calibration.py`). Synthetic oracle reproj_rms ≈ 1.9e-14 m, perturb grows monotonically (6/6 tests, ruff+mypy clean). **Remaining for the real number:** restart the (deliberately stopped) GPU pod, commit the box-local PnLCalib glue as `pitch3d.adapters.models.pnlcalib_backend:make`, run the CLI. Honesty (R-6): our accuracy metric is a homography-plane proxy named `line_acc@Npx`, **not** the official SoccerNet Completeness×JaC@5. (WorldPose video still gated, but no longer the B1 path.) |
 | **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box): FK seam + conditions A/B, real SMPL-X FK on CPU, a runnable driver (`scripts/run_bakeoff.py`), and camera-sweep + occlusion masking — oracle scores ~0 from every viewpoint, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** |
 | **B3** | **Resolved** (pod-verified 2026-06-23) | Pose + ball live adapters **run on CUDA** (SMPLest-X, WASB) | ✅ done | both import torch-free behind the seam; staged box-local (`scripts/stage_wasb_weight.sh`). WASB pod-verified standalone (`scripts/smoke_wasb_gpu.py`) **and** in the full pipeline (`scripts/pod_real_e2e.sh` — all real backends → export). Needed two compat fixes, now in-tree: `torch.no_grad()` around inference (WASB's postprocessor calls `.numpy()` without `detach`); `_load` forces WASB's `src` ahead of SMPLest-X on `sys.path` to dodge a `utils` collision. NumPy-2 `np.Inf` patch folded into the staging script. |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
@@ -82,14 +82,21 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   opt-in `visible_only`) that hardens condition-A placement — the oracle still scores ~0 from
   every viewpoint. Only condition B's *PnLCalib* and the real pose nets remain box-gated. ✅ done.
 
-### Phase B — Calibration data & honest evaluation (needs asset / box)
-- **B1** acquire a landscape 16:9 broadcast clip *or* a WorldPose video.
-- Measure PnLCalib end-to-end on it (independent accuracy, not in-sample RMS).
-- **PnLCalib WorldPose-fine-tuned weights** (`SV_FT_WP_kp` / `SV_FT_WP_lines`, 265 MB each) are
-  **already staged** at `/workspace/repos/PnLCalib/weights/`; re-running the calibrator backend on
-  them is **pod-side and blocked on a pod restart** (deliberately stopped) — and only meaningful once
-  B1 lands a landscape clip, since every clip on the box is OOD for PnLCalib's HRNet.
-- Evaluate PnLCalib's *own* full camera-calibration module vs our bare DLT.
+### Phase B — Calibration data & honest evaluation (box only — data unblocked)
+- **B1 data unblocked 2026-06-23.** SoccerNet `calibration-2023` (real landscape-16:9 broadcast
+  frames + per-image pitch-line GT) is **openly downloadable, no NDA** — fetch with
+  `scripts/get_soccernet_calibration.py` (only the broadcast *video* needs the NDA password).
+- **CPU harness built & unit-tested** (`pitch3d.eval.datasets_soccernet` + `calib_metrics`, CLI
+  `scripts/run_calib_eval.py`): re-derived pitch template, normalized-GT parser, point-to-segment
+  reprojection metrics, plus a synthetic self-test (oracle ≈ 0, perturb grows). Pure/no-box.
+- **Remaining for the real number (box only):** (1) restart the deliberately-stopped GPU pod;
+  (2) commit the box-local PnLCalib glue (`/workspace/backends/pnlcalib_backend.py`, currently
+  gitignored — violates reproducibility) as `pitch3d.adapters.models.pnlcalib_backend:make`;
+  (3) `python scripts/get_soccernet_calibration.py` then `scripts/run_calib_eval.py --dataset
+  soccernet --frames-dir <split> --backend pitch3d.adapters.models.pnlcalib_backend:make`.
+- Honesty (R-6): our number is a homography-plane `line_acc@Npx` proxy, **not** the official
+  SoccerNet Completeness×JaC@5 (which uses full camera params, distortion, circles, L/R ambiguity).
+- Then evaluate PnLCalib's *own* full camera-calibration module vs our bare DLT.
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in

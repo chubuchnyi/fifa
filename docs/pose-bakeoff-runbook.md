@@ -26,6 +26,12 @@ confirms (or overturns) it before we sink the wiring effort of B3 into the wrong
 > full **WorldPose** release (ETH AIT, `eth-ait.github.io/WorldPoseDataset`), *not* the Light
 > annotations package. Pull them aligned to the Light `clip_id`/frame indices, onto `$WS/datasets/`,
 > after sizing the volume ≥ 200 GB (footage is tens of GB; see runpod-agent-setup §Prereqs).
+>
+> **Update 2026-06-23 — B1 no longer waits on WorldPose.** SoccerNet `calibration-2023` (real
+> broadcast frames + pitch-line GT) is **openly downloadable, no NDA** and gives B1 its own
+> independent calibration benchmark (`scripts/get_soccernet_calibration.py` →
+> `scripts/run_calib_eval.py`). WorldPose remains the highest-leverage asset for the *pose* bake-off
+> (B2), but it is no longer the only road to an honest calibration number.
 
 **Assets that ARE already on box** (verify before starting):
 
@@ -50,7 +56,7 @@ real broadcast pixels + 3D-world GT + GT camera + soccer); assemble partial cove
 
 | dataset | GT | real? | soccer? | access | use |
 |---|---|---|---|---|---|
-| **SoccerNet** (Calib / Field-Loc) | pitch-line → camera-calibration GT; **no 3D-pose GT** | ✅ broadcast | ✅ | `pip install SoccerNet`; video via NDA form | **B1** (calibration) — most accessible real soccer |
+| **SoccerNet** `calibration-2023` | pitch-line → camera-calibration GT; **no 3D-pose GT** | ✅ broadcast | ✅ | **OPEN — frames+GT need NO NDA** (only the broadcast *video* is NDA-gated); `scripts/get_soccernet_calibration.py` | **B1 (DONE, data-unblocked 2026-06-23)** — CPU harness built+tested; GPU number pending pod |
 | **EMDB** | SMPL + **global body & GT camera trajectory** (world coords) | ✅ | ❌ | application form; non-commercial | **B2 global** — best for Global-MPJPE methodology |
 | **3DPW** | SMPL params + per-frame camera, multi-person | ✅ moving cam | ❌ | homepage DL; MPI non-commercial | **B2 local** — standard articulation benchmark |
 | **AGORA / BEDLAM** | SMPL-X params | ❌ synthetic | ❌ | register + license | pretrain/aux only (not metre-accurate real) |

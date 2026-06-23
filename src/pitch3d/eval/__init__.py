@@ -14,7 +14,22 @@ from .bodymodel import (
     PlaceholderJointModel,
     SmplxJointModel,
 )
+from .calib_metrics import (
+    evaluate_calibration,
+    frame_metrics,
+    frame_pixel_errors,
+    frame_world_errors,
+)
 from .dataset import PoseEvalScene, evaluate_dataset
+from .datasets_soccernet import (
+    CalibFrameGT,
+    CalibLineGT,
+    as_clip,
+    load_calib_annotation,
+    load_calib_dir,
+    pitch_plane_lines,
+    synthetic_calib_frames,
+)
 from .harness import (
     evaluate,
     place_under_gt_camera,
@@ -44,4 +59,16 @@ __all__ = [
     "run_backend",
     "run_backend_grounded",
     "run_conditions",
+    # calibration bake-off (B1: SoccerNet pitch-line GT)
+    "pitch_plane_lines",
+    "CalibLineGT",
+    "CalibFrameGT",
+    "load_calib_annotation",
+    "load_calib_dir",
+    "as_clip",
+    "synthetic_calib_frames",
+    "frame_world_errors",
+    "frame_pixel_errors",
+    "frame_metrics",
+    "evaluate_calibration",
 ]
