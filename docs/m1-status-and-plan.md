@@ -1,6 +1,6 @@
 # M1 — Status & Forward Plan
 
-*Snapshot: 2026-06-22. Companion to `roadmap.md` (which is the step-by-step M1 build log);
+*Snapshot: 2026-06-23. Companion to `roadmap.md` (which is the step-by-step M1 build log);
 this doc is the higher-level "where are we / what's blocking / what's next" view.*
 
 ## TL;DR
@@ -10,8 +10,10 @@ of five perception stages are real: **detector (RF-DETR)** and **tracker (ByteTr
 fully wired built-ins, and the **calibrator** is live via the box-local injected PnLCalib
 backend (validated on `messi_sample`: RANSAC + confidence-weighted DLT cut reprojection RMS
 3.87 m → 0.36 m). The two remaining live backends — **pose (GVHMR)** and **ball (TrackNet)** —
-have real, unit-tested *pure* halves but their heavy/GPU halves are `NotImplementedError`
-stubs behind the ADR-0006 dotted-path injection seam.
+have real, unit-tested *pure* halves and now in-core, torch-free heavy adapters behind the
+ADR-0006 dotted-path seam (SMPLest-X for pose, WASB for ball). The pose adapter is
+box-smoke-tested; the ball adapter (`wasb_backend.py`, staged via `scripts/stage_wasb_weight.sh`)
+awaits its first pod run.
 
 The single biggest external blocker is **data**: we lack a landscape 16:9 broadcast clip (the
 distribution PnLCalib's HRNet was trained on) to measure calibration honestly on independent
@@ -37,8 +39,8 @@ of the public repo.
 | **Detector** | `--detector rfdetr` | n/a | ✅ built-in (RF-DETR, Apache-2.0) | needs `cv` extra + weights + GPU; no injection seam needed (permissive, in-core) |
 | **Tracker** | `--tracker bytetrack` | n/a | ✅ built-in (ByteTrack, MIT) + team clustering | `--tracker-backend` threads the `TrackingBackend` injection seam (T3 ✅), symmetric with pose/ball/calibrator |
 | **Calibrator** | `--calibrator keypoints` | ✅ DLT + RANSAC + confidence-weighted solve (core) | ✅ injected PnLCalib HRNet (box-local) | validated messi 3.87 m → 0.36 m; `--calibrator-backend` ✓ |
-| **Pose** | `--pose gvhmr` | ✅ root-grounding + constraint refit (core) | ❌ `NotImplementedError` stub | `--pose-backend` seam exists; no box-local backend written yet |
-| **Ball** | `--ball tracknet` | ✅ threshold + gap-fill (core) | ❌ `NotImplementedError` stub | `--ball-backend` seam exists; no box-local backend written yet |
+| **Pose** | `--pose gvhmr` | ✅ root-grounding + constraint refit (core) | 🟡 SMPLest-X adapter in-core (torch-free; box-smoke-tested) | `--pose-backend pitch3d.adapters.models.smplestx_backend:make`; not yet E2E-validated on WorldPose |
+| **Ball** | `--ball tracknet` | ✅ threshold + gap-fill (core) | 🟡 WASB adapter in-core (torch-free; GPU path pod-unverified) | `--ball-backend pitch3d.adapters.models.wasb_backend:make`; stage repo+weight via `scripts/stage_wasb_weight.sh`; awaits first pod run |
 | Render | `--render overlay` | ✅ reprojection PNGs (dependency-free) | n/a | real, no GPU |
 | Export | `--export gltf` | ✅ SMPL-X npz + JSON round-trip | (glTF binary TODO) | |
 | Observer | `--observer blender` | — | ⬜ needs Blender + display | see **B4** |
@@ -49,7 +51,7 @@ of the public repo.
 |---|---|---|---|---|
 | **B1** | Blocker (data) | No landscape 16:9 broadcast clip (or WorldPose video) to evaluate calibration on independent footage | ❌ needs asset | every clip we have is OOD for PnLCalib's HRNet (portrait / drone / faint amateur markings). WorldPose-Light on the box has annotations but **no video**. **The full WorldPose video unblocks B1 *and* the B2 bake-off — one asset, two payoffs (highest-leverage acquisition).** **Acquisition stalled 2026-06-22 — gated behind a FIFA content-licence form (worldpose.ait.ethz.ch), NOT a missing mirror: challenge registration does *not* grant frames; test GT held out. No drop-in replacement; verified alternatives in [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) §0a — SoccerNet (NDA) is the B1 path (real broadcast + GT pitch calibration; no 3D-pose GT).** |
 | **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box): FK seam + conditions A/B, real SMPL-X FK on CPU, a runnable driver (`scripts/run_bakeoff.py`), and camera-sweep + occlusion masking — oracle scores ~0 from every viewpoint, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** |
-| **B3** | Blocker (resource) | Pose + ball live backends unwired | ❌ needs GPU box + weights + GPL research repos cloned box-local | mirrors how PnLCalib was wired |
+| **B3** | Blocker (resource) | Pose + ball live adapters **written in-core** (SMPLest-X, WASB); pod validation pending | 🟡 partial | both import torch-free behind the seam; upstream repo+weights stage box-local (`scripts/stage_wasb_weight.sh` for WASB). Pose box-smoke-tested; **ball not yet run on a pod** (WASB detector is GPU-only; needs pod restart) |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
 | **Bug1** | Bug (typing) | `refit_port`/`clip` typed as bare `object` in correction engine + assemble | ✅ | latent: `object` has no `.refit`, so misuse is caught only at runtime. Fix = Protocol types |
 | **Bug2** | Bug (lint/type debt) | mypy + ruff debt repo-wide (project gates on neither) | ✅ partial | mypy 33→15 via safe fixes (incl. the 6 real None-handling latent bugs, now fixed + tested); rest documented below |
@@ -82,6 +84,10 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 ### Phase B — Calibration data & honest evaluation (needs asset / box)
 - **B1** acquire a landscape 16:9 broadcast clip *or* a WorldPose video.
 - Measure PnLCalib end-to-end on it (independent accuracy, not in-sample RMS).
+- **PnLCalib WorldPose-fine-tuned weights** (`SV_FT_WP_kp` / `SV_FT_WP_lines`, 265 MB each) are
+  **already staged** at `/workspace/repos/PnLCalib/weights/`; re-running the calibrator backend on
+  them is **pod-side and blocked on a pod restart** (deliberately stopped) — and only meaningful once
+  B1 lands a landscape clip, since every clip on the box is OOD for PnLCalib's HRNet.
 - Evaluate PnLCalib's *own* full camera-calibration module vs our bare DLT.
 
 ### Phase C — Pose decision → heavy wiring (research → box)

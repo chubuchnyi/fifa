@@ -156,7 +156,9 @@ exact commands the repo documents.
 - **PnLCalib** — weights ship in the repo's **v1.0.0 GitHub release** (and the world-template pitch
   keypoints are in `utils/utils_keypoints.py`). Download the release assets into `$WS/weights/pnlcalib/`.
 - **WASB** — soccer weights are in the repo's Google-Drive **model zoo** (linked from its README).
-  Pull the soccer checkpoint into `$WS/weights/wasb/`.
+  `scripts/stage_wasb_weight.sh` does this end-to-end (idempotent): clones nttcom/WASB-SBDT into
+  `$WS/repos`, installs gdown, and pulls the soccer checkpoint into `$WS/weights/wasb/`. Wire it with
+  `--ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make --device cuda`.
 - **RF-DETR base** (~370 MB) auto-downloads into `$TORCH_HOME` on the first real detection run — no
   manual step.
 
