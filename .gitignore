@@ -13,6 +13,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Claude Code runtime state (local-only: lock files, scheduled-task bookkeeping)
+.claude/
+
 # Project runtime artifacts (content-addressable cache, dry-run outputs)
 .cache/
 out/
