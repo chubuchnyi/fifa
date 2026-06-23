@@ -123,6 +123,8 @@ class WASBBallBackend:
     _cfg: Any = field(default=None, init=False, repr=False)
 
     def detect_ball(self, clip: ClipRef) -> RawBallDetections:  # pragma: no cover - heavy GPU path
+        import torch  # lazy: keep the module import torch-free (matches the other adapters)
+
         self._load()
 
         frame_indices = [int(f) for f in clip.frames.tolist()]
@@ -135,13 +137,16 @@ class WASBBallBackend:
             return _assemble_detections([], {}, {})
 
         per_pos_dets: dict[int, list] = {pos: [] for pos in range(n)}
-        for start in _window_starts(n, _FRAMES_IN, self.step):
-            window = [min(start + k, n - 1) for k in range(_FRAMES_IN)]
-            imgs_t, affine_mats = self._preprocess_window([rgb_frames[p] for p in window])
-            results, _ = self._detector.run_tensor(imgs_t, affine_mats)
-            for j in range(_FRAMES_IN):
-                if start + j < n:  # skip clamp-padded slots at the clip tail
-                    per_pos_dets[start + j].extend(results[0][j])
+        # WASB's postprocessor calls .cpu().numpy() without detach; its own eval.py is
+        # @torch.no_grad(), so run_tensor must be invoked inside a no-grad context.
+        with torch.no_grad():
+            for start in _window_starts(n, _FRAMES_IN, self.step):
+                window = [min(start + k, n - 1) for k in range(_FRAMES_IN)]
+                imgs_t, affine_mats = self._preprocess_window([rgb_frames[p] for p in window])
+                results, _ = self._detector.run_tensor(imgs_t, affine_mats)
+                for j in range(_FRAMES_IN):
+                    if start + j < n:  # skip clamp-padded slots at the clip tail
+                        per_pos_dets[start + j].extend(results[0][j])
 
         self._tracker.refresh()
         xy_by_pos: dict[int, tuple[float, float]] = {}
