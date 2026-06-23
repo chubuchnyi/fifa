@@ -199,8 +199,32 @@ class WASBBallBackend:
                 "https://github.com/nttcom/WASB-SBDT and stage the soccer weight "
                 "(scripts/stage_wasb_weight.sh)."
             )
-        if src not in sys.path:
-            sys.path.insert(0, src)
+        # WASB and other vendored research repos (e.g. SMPLest-X) both ship generically named
+        # top-level packages — notably `utils`. Whichever imports first wins sys.modules and
+        # shadows the other, so a WASB load after a SMPLest-X load fails on `from utils import
+        # read_image`. Force WASB's src to the front of sys.path and drop the colliding cached
+        # packages so they re-import from WASB. Safe here: the pipeline runs POSE (SMPLest-X) to
+        # completion before BALL (WASB), so SMPLest-X never re-imports its `utils` afterwards.
+        while src in sys.path:
+            sys.path.remove(src)
+        sys.path.insert(0, src)
+        _wasb_top = {
+            "configs",
+            "dataloaders",
+            "datasets",
+            "detectors",
+            "losses",
+            "models",
+            "optimizers",
+            "runners",
+            "trackers",
+            "utils",
+        }
+        for _name in list(sys.modules):
+            if _name.split(".", 1)[0] in _wasb_top:
+                _path = getattr(sys.modules[_name], "__file__", None) or ""
+                if not _path.startswith(src):
+                    del sys.modules[_name]
 
         from dataloaders import build_img_transforms
         from detectors import build_detector
