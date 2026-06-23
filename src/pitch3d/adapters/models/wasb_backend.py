@@ -34,10 +34,14 @@ with a visibility flag. We surface that visibility as confidence ``1.0`` (visibl
 
 **Validation status (honest).** The pure windowing (:func:`_window_starts`) and per-frame assembly
 (:func:`_assemble_detections`) are unit-tested; importing this module is torch-free. The GPU path
-(:meth:`_load` Hydra build + :meth:`_preprocess_window` warpAffine + ``run_tensor`` + tracker) is
-**API-faithful but not yet executed on hardware** — the pod that hosts WASB is the first place it
-runs. Stage the repo + weight with ``scripts/stage_wasb_weight.sh`` and confirm on the first pod run
-(see ``docs/runpod-agent-setup.md``).
+(:meth:`_load` Hydra build + :meth:`_preprocess_window` warpAffine + ``run_tensor`` + tracker) was
+**executed on a CUDA pod on 2026-06-23** (RTX PRO 4500, torch 2.8/cu128, NumPy 2.1): the standalone
+smoke (``scripts/smoke_wasb_gpu.py``) tracks the ball over real frames, and the full pipeline
+(``scripts/pod_real_e2e.sh``) runs detect→track→calibrate→pose→**ball**→assemble→export green. Two
+environment fixes were needed and are in-tree: inference runs under ``torch.no_grad()`` (WASB's
+postprocessor calls ``.numpy()`` without ``detach``), and :meth:`_load` forces WASB's ``src`` ahead
+of other vendored repos on ``sys.path`` to dodge a ``utils`` package collision with SMPLest-X. Stage
+the repo + weight with ``scripts/stage_wasb_weight.sh`` (see ``docs/runpod-agent-setup.md``).
 """
 
 from __future__ import annotations

@@ -157,8 +157,18 @@ exact commands the repo documents.
   keypoints are in `utils/utils_keypoints.py`). Download the release assets into `$WS/weights/pnlcalib/`.
 - **WASB** — soccer weights are in the repo's Google-Drive **model zoo** (linked from its README).
   `scripts/stage_wasb_weight.sh` does this end-to-end (idempotent): clones nttcom/WASB-SBDT into
-  `$WS/repos`, installs gdown, and pulls the soccer checkpoint into `$WS/weights/wasb/`. Wire it with
+  `$WS/repos`, installs gdown, pulls the soccer checkpoint (`wasb_soccer_best.pth.tar`) into
+  `$WS/weights/wasb/`, and patches WASB's `np.Inf → np.inf` for NumPy 2.x. Wire it with
   `--ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make --device cuda`.
+  Needs `hydra-core` in the venv (`pip install hydra-core`; verified 1.3.3).
+  **Pod-verified 2026-06-23** (RTX PRO 4500, torch 2.8/cu128, NumPy 2.1):
+  - Standalone: `PYTHONPATH=src python scripts/smoke_wasb_gpu.py` → tracks the ball over real frames
+    (e.g. 7/9 visible, coherent trajectory; occluded frames left as gaps for the pure half to fill).
+  - Full pipeline: `scripts/pod_real_e2e.sh` runs every real backend
+    (detect→track→calibrate→pose→**ball**→assemble→export) green, with the ball present in the scene.
+  - Two adapter fixes this surfaced (now in-tree): inference runs under `torch.no_grad()` (WASB's
+    postprocessor calls `.numpy()` without `detach`), and `_load` forces WASB's `src` to the front of
+    `sys.path` + evicts cached colliding top-level packages to dodge a `utils` clash with SMPLest-X.
 - **RF-DETR base** (~370 MB) auto-downloads into `$TORCH_HOME` on the first real detection run — no
   manual step.
 
