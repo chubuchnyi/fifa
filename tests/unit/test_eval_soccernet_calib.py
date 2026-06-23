@@ -98,3 +98,25 @@ def test_completeness_from_confidence() -> None:
     conf = np.array([1.0, 0.0, 0.8, 0.0])
     grid = evaluate_calibration(frames, true_h, confidence=conf)
     assert grid["completeness"] == pytest.approx(0.5)  # 2 of 4 frames confident
+
+
+def test_on_completed_excludes_failed_frames() -> None:
+    # Two good frames + one "failed" frame whose homography is degenerate-but-invertible — a
+    # stand-in for the identity/garbage H the calibrator stores when it cannot lock on. It maps
+    # 960x540 pixel coords into a sub-metre blob at the origin while the true pitch lines span
+    # tens of metres, so its reprojection error is huge-but-finite: it must pollute the all-frames
+    # RMS yet be excluded from the on_completed (confidence > 0) sub-grid.
+    frames, true_h = synthetic_calib_frames(n_frames=3, seed=5)
+    h = true_h.copy()
+    h[2] = np.diag([1e-3, 1e-3, 1.0])
+    conf = np.array([1.0, 1.0, 0.0])
+
+    grid = evaluate_calibration(frames, h, confidence=conf)
+
+    assert grid["completeness"] == pytest.approx(2 / 3)
+    assert grid["n_completed"] == 2
+    assert grid["reproj_rms_m"] > 1.0  # all-frames RMS polluted by the failed frame
+    on_completed = grid["on_completed"]
+    assert isinstance(on_completed, dict)
+    assert on_completed["reproj_rms_m"] < 1e-6  # the two confident frames are essentially exact
+    assert on_completed["line_acc@5px"] == 1.0

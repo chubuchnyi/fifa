@@ -109,13 +109,40 @@ def frame_metrics(
     return out
 
 
+def _pool_summary(
+    world_pool: list[np.ndarray],
+    px_pool: list[np.ndarray],
+    ok_lines: dict[float, int],
+    total_lines: int,
+    thresholds_px: tuple[float, ...],
+) -> dict[str, float]:
+    """Reduce pooled per-point world/pixel errors + per-threshold line-ok counts to a stats dict.
+
+    Shared by the all-frames grid and the ``on_completed`` sub-grid so both report *identical*
+    statistics over their respective frame pools (only the pool membership differs).
+    """
+    world = np.concatenate(world_pool) if world_pool else np.empty(0)
+    px_all = np.concatenate(px_pool) if px_pool else np.empty(0)
+    finite_px = px_all[np.isfinite(px_all)]
+    out: dict[str, float] = {
+        "reproj_rms_m": float(np.sqrt((world**2).mean())) if world.size else float("nan"),
+        "reproj_median_m": float(np.median(world)) if world.size else float("nan"),
+        "reproj_p95_m": float(np.percentile(world, 95)) if world.size else float("nan"),
+        "reproj_rms_px": float(np.sqrt((finite_px**2).mean())) if finite_px.size else float("nan"),
+        "reproj_median_px": float(np.median(finite_px)) if finite_px.size else float("nan"),
+    }
+    for t in thresholds_px:
+        out[f"line_acc@{t:g}px"] = (ok_lines[t] / total_lines) if total_lines else float("nan")
+    return out
+
+
 def evaluate_calibration(
     frames: list[CalibFrameGT],
     homographies: np.ndarray,
     *,
     confidence: np.ndarray | None = None,
     thresholds_px: tuple[float, ...] = (5.0, 10.0),
-) -> dict[str, float | int]:
+) -> dict[str, object]:
     """Aggregate calibration quality over a set of SoccerNet frames → a JSON-able summary grid.
 
     ``homographies`` is ``(T, 3, 3)`` image→world, positionally aligned with ``frames`` (as produced
@@ -124,41 +151,55 @@ def evaluate_calibration(
     ``line_acc@{t}px`` figures are total correct lines over total GT lines. ``completeness`` is the
     fraction of frames the calibrator was confident about (``confidence > 0``) when a confidence
     vector is supplied — surfacing carried/under-detected frames honestly rather than hiding them.
+
+    When ``confidence`` is given the grid also carries ``n_completed`` and an ``on_completed``
+    sub-grid: the same reprojection stats pooled over **only** the confident frames. This matters
+    because failed frames hold a degenerate/identity ``H`` that projects pixel coordinates as
+    "metres", so their errors are huge-but-finite and dominate the all-frames ``reproj_rms_m`` /
+    ``reproj_p95_m``. ``on_completed`` reports the accuracy *where the calibrator actually locked
+    on*, kept separate from ``completeness`` (how often it locks on) so neither hides the other.
     """
     n = min(len(frames), homographies.shape[0])
+    conf = np.asarray(confidence, dtype=float).reshape(-1)[:n] if confidence is not None else None
     world_pool: list[np.ndarray] = []
     px_pool: list[np.ndarray] = []
     total_lines = 0
     ok_lines = {t: 0 for t in thresholds_px}
     per_frame_lines: list[int] = []
+    # Completed-only pools (confidence > 0); populated only when a confidence vector is supplied.
+    world_pool_c: list[np.ndarray] = []
+    px_pool_c: list[np.ndarray] = []
+    total_lines_c = 0
+    ok_lines_c = {t: 0 for t in thresholds_px}
     for i in range(n):
         gt = frames[i]
         h = homographies[i]
-        world_pool.append(frame_world_errors(h, gt))
+        world_err = frame_world_errors(h, gt)
         px = frame_pixel_errors(h, gt)
-        for e in px.values():
-            px_pool.append(e)
+        line_ok = {t: int(sum(bool(np.all(e <= t)) for e in px.values())) for t in thresholds_px}
+        world_pool.append(world_err)
+        px_pool.extend(px.values())
         total_lines += gt.n_lines
         per_frame_lines.append(gt.n_lines)
         for t in thresholds_px:
-            ok_lines[t] += int(sum(bool(np.all(e <= t)) for e in px.values()))
+            ok_lines[t] += line_ok[t]
+        if conf is not None and i < conf.size and conf[i] > 0:
+            world_pool_c.append(world_err)
+            px_pool_c.extend(px.values())
+            total_lines_c += gt.n_lines
+            for t in thresholds_px:
+                ok_lines_c[t] += line_ok[t]
 
-    world = np.concatenate(world_pool) if world_pool else np.empty(0)
-    px_all = np.concatenate(px_pool) if px_pool else np.empty(0)
-    finite_px = px_all[np.isfinite(px_all)]
-    grid: dict[str, float | int] = {
+    grid: dict[str, object] = {
         "n_frames": int(n),
         "total_lines": int(total_lines),
         "mean_lines_per_frame": float(np.mean(per_frame_lines)) if per_frame_lines else 0.0,
-        "reproj_rms_m": float(np.sqrt((world**2).mean())) if world.size else float("nan"),
-        "reproj_median_m": float(np.median(world)) if world.size else float("nan"),
-        "reproj_p95_m": float(np.percentile(world, 95)) if world.size else float("nan"),
-        "reproj_rms_px": float(np.sqrt((finite_px**2).mean())) if finite_px.size else float("nan"),
-        "reproj_median_px": float(np.median(finite_px)) if finite_px.size else float("nan"),
     }
-    for t in thresholds_px:
-        grid[f"line_acc@{t:g}px"] = (ok_lines[t] / total_lines) if total_lines else float("nan")
-    if confidence is not None:
-        conf = np.asarray(confidence, dtype=float).reshape(-1)[:n]
+    grid.update(_pool_summary(world_pool, px_pool, ok_lines, total_lines, thresholds_px))
+    if conf is not None:
         grid["completeness"] = float((conf > 0).mean()) if conf.size else float("nan")
+        grid["n_completed"] = int((conf > 0).sum())
+        grid["on_completed"] = _pool_summary(
+            world_pool_c, px_pool_c, ok_lines_c, total_lines_c, thresholds_px
+        )
     return grid
