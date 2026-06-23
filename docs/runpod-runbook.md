@@ -76,6 +76,25 @@ re-renting the GPU**: `update-pod` the `imageName` to the `cuda12.4.1` tag, then
 + `start-pod` (the image swap only applies on the next container start; same machine/volume
 are kept). The crash-looping pod **bills the whole time**, so fix or stop it promptly.
 
+**Lesson learned (2026-06-23) — Blackwell (RTX PRO 4500, sm_120) needs cu128, and MCP/REST
+*cannot create it*.** The PRO 4500 Blackwell is compute capability **sm_120**: it requires a
+**CUDA 12.8** image + **torch ≥2.7 / cu128** (a `cuda12.4` image with torch 2.6/cu124 has no
+`sm_120` in its arch list and won't run a CUDA kernel). Two traps:
+1. **Creation path.** MCP `create-pod` / REST `POST /v1/pods` expose a fixed `gpuTypeIds`
+   *enum* that **omits** `"NVIDIA RTX PRO 4500 Blackwell"` (it lists only the PRO 6000 Blackwell
+   variants, RTX 5090/5080, B200). So the 4500 can be created **only via `runpodctl`** (legacy
+   GraphQL), and specifically the **deprecated** `runpodctl create pod` form — its flags are
+   `--gpuType "NVIDIA RTX PRO 4500 Blackwell" --secureCloud --imageName <cu128 tag> --networkVolumeId <id> --startSSH --ports ... --env KEY=VAL` (repeatable). The newer `runpodctl pod create`
+   form uses `--gpu-id`/`--cloud-type`/`--env <json>` and has **no** `--secureCloud` (errors
+   `unknown flag`). Verified placement: auto (no `--dataCenterId`) landed in EU-RO-1 at $0.740/hr;
+   pinning a DC that lacked 4500 stock failed with `no instances available`.
+2. **On-box env.** [`cloud_setup.sh`](../scripts/cloud_setup.sh) defaults to **cu124 / torch 2.6**
+   — **do not run it as-is on Blackwell** (it would clobber the working cu128 torch). Instead
+   **reuse the image's torch** (the runpod cu128 PyTorch image ships **torch 2.8.0+cu128**, sm_120
+   verified): make a `python -m venv --system-site-packages` venv so it inherits that torch, then
+   `pip install -e .` + adapters **with a pip constraints file** (`torch==2.8.0` /
+   `torchvision==0.23.0`) so the `torch==2.6.0`-pinned extras (`hmr`/`ball`/…) can't downgrade it.
+
 Secure often grants a small persistent **volume** (e.g. 20 GB at `/workspace`) even if you didn't
 ask; clone into it so work survives stop/start.
 
