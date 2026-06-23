@@ -36,23 +36,23 @@ echo
 
 # 1) WASB checkout (provides src/{detectors,trackers,dataloaders,configs}). Clone is idempotent.
 if [ -d "$REPO_DIR/src" ]; then
-  echo "[1/3] checkout present — skipping clone"
+  echo "[1/4] checkout present — skipping clone"
 else
-  echo "[1/3] cloning nttcom/WASB-SBDT -> $REPO_DIR"
+  echo "[1/4] cloning nttcom/WASB-SBDT -> $REPO_DIR"
   mkdir -p "$(dirname "$REPO_DIR")"
   git clone https://github.com/nttcom/WASB-SBDT.git "$REPO_DIR"
 fi
 
 # 2) gdown — the model zoo lives on Google Drive; pip into whatever venv is active.
-echo "[2/3] ensuring gdown is installed"
+echo "[2/4] ensuring gdown is installed"
 python -m pip install -q -U gdown
 
 # 3) soccer weight. Skip if a non-trivial file is already there (a quota/HTML error page is tiny).
 mkdir -p "$(dirname "$CKPT")"
 if [ -f "$CKPT" ] && [ "$(stat -c%s "$CKPT")" -gt 1000000 ]; then
-  echo "[3/3] weight present ($(stat -c%s "$CKPT") bytes) — skipping download"
+  echo "[3/4] weight present ($(stat -c%s "$CKPT") bytes) — skipping download"
 else
-  echo "[3/3] downloading soccer checkpoint (Drive id $GDRIVE_ID)"
+  echo "[3/4] downloading soccer checkpoint (Drive id $GDRIVE_ID)"
   python -m gdown "https://drive.google.com/uc?id=${GDRIVE_ID}" -O "$CKPT"
 fi
 
@@ -63,9 +63,25 @@ if [ "$SZ" -le 1000000 ]; then
   echo "       Retry later, or use the repo's bulk setup script (MODEL_ZOO.md links a GET_STARTED.md)."
   exit 1
 fi
+
+# 4) NumPy 2.0 compat. WASB (2023) uses the removed `np.Inf` alias in its trackers/evaluator;
+#    the pod ships NumPy >= 2, where that alias raises AttributeError. Rewrite it to `np.inf` in
+#    the checkout. Idempotent: a second run finds nothing left to change.
+echo "[4/4] patching np.Inf -> np.inf for NumPy 2.0 (WASB trackers/evaluator)"
+_np_inf_files="$(grep -rlE '\bnp\.Inf\b' "$REPO_DIR/src" 2>/dev/null || true)"
+if [ -n "$_np_inf_files" ]; then
+  echo "$_np_inf_files" | xargs sed -i 's/\bnp\.Inf\b/np.inf/g'
+  echo "      patched $(echo "$_np_inf_files" | wc -l) file(s)"
+else
+  echo "      none found (already patched)"
+fi
+
 echo "OK: staged $CKPT (${SZ} bytes)."
 echo
-echo "Next — drive the real ball path (needs CUDA; the WASB detector asserts cuda):"
+echo "Next — first validate the ball backend in isolation (committed GPU smoke):"
+echo "  PYTHONPATH=src python scripts/smoke_wasb_gpu.py"
+echo
+echo "Then drive the full real ball path (needs CUDA; the WASB detector asserts cuda):"
 echo "  PITCH3D_WASB_REPO=$REPO_DIR PITCH3D_WASB_CKPT=$CKPT \\"
 echo "  PYTHONPATH=src python -m pitch3d --clip clip.mp4 --frames 6 --device cuda \\"
 echo "    --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \\"
