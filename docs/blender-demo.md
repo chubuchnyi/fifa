@@ -65,11 +65,13 @@ The end-to-end "real video → real SMPL-X → live Blender" demo. The heavy hal
 
 ```bash
 # 1. ON THE POD: real perception → real SMPL-X pose → smplx_npz export (see docs/cloud-dev.md §5).
-#    The pose stage injects the wired SMPLest-X backend by dotted path (ADR-0006):
-PYTHONPATH=src python -m pitch3d --clip clip.mp4 --frames 6 \
-  --detector rfdetr --tracker bytetrack --device cuda \
-  --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
-  --render overlay --export gltf --format smplx_npz --out-dir out/live_demo
+#    The committed runner injects the wired SMPLest-X backend by dotted path (ADR-0006):
+OUT=out/live_demo FRAMES=6 bash scripts/pod_real_e2e.sh
+#    (equivalently, the explicit command the runner wraps:)
+#    PYTHONPATH=src python -m pitch3d --clip clip.mp4 --frames 6 \
+#      --detector rfdetr --tracker bytetrack --device cuda \
+#      --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
+#      --render overlay --export gltf --format smplx_npz --out-dir out/live_demo
 
 # 2. LOCAL: pull the real export down (scp from the pod), into out/live_real/export/...
 #    then forward it through SMPL-X (real-pose → DEFAULT orientation, NOT canonical):

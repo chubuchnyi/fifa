@@ -87,6 +87,23 @@ PYTHONPATH=src python -m pitch3d \
 `scripts/cloud_setup.sh` is idempotent-ish (re-runnable); tune what it installs with
 `PITCH3D_EXTRAS` (default `cv,hmr,ball,export,mcp,dev`).
 
+### Full real path incl. pose (one command)
+
+Step 5's golden path runs real detection + tracking but leaves **pose** on the fake stub. To run
+the *full* real path — RF-DETR + ByteTrack + **real SMPLest-X** pose (the wired backend injected by
+dotted path, ADR-0006) — use the committed runner once SMPLest-X is vendored on the box
+(`/workspace/repos/SMPLest-X` + the `smplest_x_h` checkpoint). It writes a `smplx_npz` export you can
+gate with the dynamic-pose checker:
+
+```bash
+OUT=out/run_8f FRAMES=8 bash scripts/pod_real_e2e.sh         # see header for the env knobs
+python scripts/check_export_dynamic.py out/run_8f/export/scene.smplx_npz
+# checker asserts, per subject: betas != 0, body_pose varies across frames, transl travels the pitch
+```
+
+Pull the export down and forward it through SMPL-X for a live Blender look — see
+[`docs/blender-demo.md`](blender-demo.md) "Full live chain".
+
 ## Gotchas
 
 - **Ephemeral disk.** Spot/community boxes can vanish with their disk. Treat the box as
