@@ -3,8 +3,8 @@
 #
 # Runs the SAME golden path as docs/cloud-dev.md §5 (real video -> RF-DETR detect ->
 # ByteTrack -> assemble -> overlay render + smplx_npz/glTF export) but with the wired
-# **real SMPLest-X** pose backend injected by dotted path (ADR-0006) — i.e. the genuine
-# single-cam -> world-SMPL-X path, end to end, on CUDA.
+# **real SMPLest-X** pose + **real WASB** ball backends injected by dotted path (ADR-0006)
+# — i.e. the genuine single-cam -> world-SMPL-X path, end to end, on CUDA.
 #
 # Env (all have sensible pod defaults — override to point elsewhere):
 #   PITCH3D_REPO=/workspace/fifa            repo root (PYTHONPATH=src is set from here)
@@ -14,6 +14,8 @@
 #   OUT=out/run                             --out-dir (relative to repo)
 # The SMPLest-X backend reads its own env (PITCH3D_SMPLESTX_REPO / _CKPT / _DEVICE;
 # defaults /workspace/repos/SMPLest-X + smplest_x_h on cuda) — see the backend factory.
+# The WASB ball backend likewise reads PITCH3D_WASB_REPO / _CKPT / _DATASET / _DEVICE
+# (defaults /workspace/repos/WASB-SBDT + wasb_soccer_best.pth.tar on cuda).
 set -euo pipefail
 
 REPO="${PITCH3D_REPO:-/workspace/fifa}"
@@ -29,6 +31,7 @@ PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
   --detector rfdetr --tracker bytetrack --device cuda \
   --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
+  --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
   --render overlay --export gltf --format smplx_npz --out-dir "$OUT"
 echo "== done in $(( $(date +%s) - t0 ))s -> ${OUT} =="
 ls -la "${OUT}/export/scene.smplx_npz" 2>/dev/null | head
