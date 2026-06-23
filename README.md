@@ -78,6 +78,10 @@ python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --
 `numpy` is the only runtime dependency and is enough to run the tests and the dry-run.
 Heavy extras (`torch`, `gsplat`, `bpy`, …) are **declared but not installed**.
 
+**Render the actual SMPL-X body mesh in Blender** (not the box proxies): forward a `smplx_npz`
+export through SMPL-X and render it with Blender Cycles — see [`docs/blender-demo.md`](docs/blender-demo.md)
+([`scripts/smplx_export_meshes.py`](scripts/smplx_export_meshes.py) → [`scripts/blender_render_meshes.py`](scripts/blender_render_meshes.py)).
+
 Moving development to a rented GPU box? [`scripts/cloud_setup.sh`](scripts/cloud_setup.sh) installs
 a CUDA `torch` + the wired real adapters and verifies the GPU; [`docs/cloud-dev.md`](docs/cloud-dev.md)
 is the spin-up → verify → `--device cuda` golden-path checklist (ADR-0009).
