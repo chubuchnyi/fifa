@@ -47,7 +47,7 @@ the object must satisfy the protocol — and a `--*-backend` without its real ad
 | Resource | Recommended | Why |
 |---|---|---|
 | GPU | ≥ 24 GB VRAM (RTX 4090 / A5000 / L4 / A10) | headroom to wire HMR (SMPL-X) later; RF-DETR alone fits in far less |
-| Driver / CUDA | driver supporting **CUDA 12.x** | matches the `cu124` torch wheel (override `PITCH3D_CUDA` for cu118/cu126) |
+| Driver / CUDA | driver supporting **CUDA 12.x** | matches the `cu124` torch wheel (override `PITCH3D_CUDA`/`PITCH3D_TORCH` for cu118/cu126/cu128 — Blackwell sm_120 needs cu128, see below) |
 | Disk | ~30 GB | CUDA torch wheel (~2.5 GB) + venv + auto-downloaded weights (RF-DETR base ≈ 370 MB) |
 | System pkg | `ffmpeg` (gives `ffprobe`) | the real video ingestor (`--clip`) shells out to `ffprobe` |
 
@@ -68,6 +68,9 @@ git clone <your-remote> pitch3d && cd pitch3d
 ./scripts/cloud_setup.sh
 #   override the CUDA build if nvidia-smi shows e.g. CUDA 11.8 or 12.6:
 #   PITCH3D_CUDA=cu118 ./scripts/cloud_setup.sh
+#   Blackwell (sm_120) on the RunPod cu128 image — reuse the image's torch 2.8.0+cu128
+#   instead of installing our cu124 wheel (also `just cloud-setup-blackwell`):
+#   PITCH3D_REUSE_SYSTEM_TORCH=1 ./scripts/cloud_setup.sh
 
 # 4. Core suite — GPU-free, must stay green everywhere.
 PYTHONPATH=src python -m pytest

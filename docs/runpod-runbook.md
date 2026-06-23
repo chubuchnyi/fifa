@@ -88,17 +88,20 @@ are kept). The crash-looping pod **bills the whole time**, so fix or stop it pro
    form uses `--gpu-id`/`--cloud-type`/`--env <json>` and has **no** `--secureCloud` (errors
    `unknown flag`). Verified placement: auto (no `--dataCenterId`) landed in EU-RO-1 at $0.740/hr;
    pinning a DC that lacked 4500 stock failed with `no instances available`.
-2. **On-box env.** [`cloud_setup.sh`](../scripts/cloud_setup.sh) defaults to **cu124 / torch 2.6**
-   — **do not run it as-is on Blackwell** (it would clobber the working cu128 torch). Instead
-   **reuse the image's torch** (the runpod cu128 PyTorch image ships **torch 2.8.0+cu128**, sm_120
-   verified): make a `python -m venv --system-site-packages` venv so it inherits that torch, then
-   `pip install -e .` + adapters **with the committed constraints file**
+2. **On-box env.** [`cloud_setup.sh`](../scripts/cloud_setup.sh) defaults to **cu124 / torch 2.6**,
+   which would clobber the working cu128 torch — so on Blackwell run it in **reuse mode**
+   (`PITCH3D_REUSE_SYSTEM_TORCH=1`): it makes a `--system-site-packages` venv (inheriting the
+   image's **torch 2.8.0+cu128**, sm_120 verified), **skips** the torch install, and installs the
+   extras **held by the committed constraints file**
    [`scripts/constraints-cu128.txt`](../scripts/constraints-cu128.txt) (`torch==2.8.0` /
-   `torchvision==0.23.0`) so the `torch==2.6.0`-pinned extras (`hmr`/`ball`/…) can't downgrade it:
+   `torchvision==0.23.0`) so the `torch==2.6.0`-pinned extras (`hmr`/`ball`/…) can't downgrade it.
+   **One command** (also `just cloud-setup-blackwell`):
 
    ```bash
-   python -m venv --system-site-packages /workspace/.venv && source /workspace/.venv/bin/activate
-   pip install -e ".[cv,hmr,ball,export,mcp,dev]" -c scripts/constraints-cu128.txt
+   PITCH3D_VENV=/workspace/.venv PITCH3D_REUSE_SYSTEM_TORCH=1 ./scripts/cloud_setup.sh
+   #   equivalently, by hand:
+   #   python -m venv --system-site-packages /workspace/.venv && source /workspace/.venv/bin/activate
+   #   pip install -e ".[cv,hmr,ball,export,mcp,dev]" -c scripts/constraints-cu128.txt
    ```
 
    **Validate the SMPLest-X bring-up** (reproducible, committed): build+infer smoke with

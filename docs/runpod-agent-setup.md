@@ -116,6 +116,12 @@ PYTHONPATH=src python -m pytest                                 # core suite —
 `cloud_setup.sh` installs `torch==2.6.0`+`torchvision==0.21.0` (cu124) **before** the extras, then
 `-e ".[cv,hmr,ball,export,mcp,dev]"`. Keep this `torch` build fixed — see the conflict note in Step 3.
 
+> **Blackwell (sm_120) box?** This runbook assumes a cu124 / RTX 4090 pod. On a Blackwell pod (cu128
+> image, torch 2.8.0) **do not** run the line above as-is — run it in reuse mode so the script keeps
+> the image's torch: `PITCH3D_VENV=/workspace/.venv PITCH3D_REUSE_SYSTEM_TORCH=1 ./scripts/cloud_setup.sh`
+> (or `just cloud-setup-blackwell`). The why + the gpuTypeIds/creation traps are in
+> [`runpod-runbook.md` §2](runpod-runbook.md).
+
 ---
 
 ## Step 3 — Model code repos (the ADR-0006 backends live in *your* tree, not core)

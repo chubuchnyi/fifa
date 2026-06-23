@@ -13,25 +13,42 @@
 # detection+tracking path (RF-DETR + ByteTrack) on `--device cuda`. See docs/cloud-dev.md.
 #
 # Overridable via env:
-#   PITCH3D_CUDA=cu124   torch 2.6.0 / torchvision 0.21.0 wheels: cu118 | cu124 | cu126
-#   PITCH3D_EXTRAS=...   pip extras to install (bpy is Blender-provided — never here)
-#   PITCH3D_VENV=.venv   venv directory
+#   PITCH3D_CUDA=cu124          torch wheel index: cu118 | cu124 | cu126 | cu128
+#   PITCH3D_TORCH=2.6.0         torch version (Blackwell/cu128 path uses 2.8.0)
+#   PITCH3D_TORCHVISION=0.21.0  matched torchvision (Blackwell: 0.23.0)
+#   PITCH3D_REUSE_SYSTEM_TORCH=0  =1 on a box whose image ALREADY ships the right torch
+#                               (e.g. the RunPod cu128 image on Blackwell sm_120). Then this
+#                               script makes a --system-site-packages venv, SKIPS the torch
+#                               install, and holds the image torch via PITCH3D_CONSTRAINTS so
+#                               the torch==2.6.0-pinned extras can't downgrade it. This single
+#                               command replaces the manual Blackwell venv+pip in
+#                               docs/runpod-runbook.md §2.
+#   PITCH3D_CONSTRAINTS=scripts/constraints-cu128.txt  pip -c file used in reuse mode
+#   PITCH3D_EXTRAS=...          pip extras to install (bpy is Blender-provided — never here)
+#   PITCH3D_VENV=.venv          venv directory
 #   PITCH3D_PYTHON=python3
 set -euo pipefail
 
 CUDA="${PITCH3D_CUDA:-cu124}"
-TORCH_VERSION="2.6.0"          # MUST equal the `torch==` pin in pyproject (hmr/ball/env/...)
-TORCHVISION_VERSION="0.21.0"   # matched pair for torch 2.6.0 — see lesson in step 4
+TORCH_VERSION="${PITCH3D_TORCH:-2.6.0}"               # 2.6.0 == the `torch==` pin in pyproject (cu124)
+TORCHVISION_VERSION="${PITCH3D_TORCHVISION:-0.21.0}"  # matched pair for torch — see lesson in step 4
 EXTRAS="${PITCH3D_EXTRAS:-cv,hmr,ball,export,mcp,dev}"
 VENV="${PITCH3D_VENV:-.venv}"
 PY="${PITCH3D_PYTHON:-python3}"
+# Reuse the image's torch instead of installing our own (Blackwell/cu128 — see header).
+REUSE_SYSTEM_TORCH="${PITCH3D_REUSE_SYSTEM_TORCH:-0}"
+CONSTRAINTS="${PITCH3D_CONSTRAINTS:-scripts/constraints-cu128.txt}"
 
 cd "$(dirname "$0")/.."   # repo root, regardless of where this is invoked from
 
 echo "== pitch3d cloud setup =="
 echo "repo:     $(pwd)"
 echo "python:   $("$PY" --version 2>&1)"
-echo "cuda tag: ${CUDA}    torch: ${TORCH_VERSION}  torchvision: ${TORCHVISION_VERSION}    extras: [${EXTRAS}]"
+if [ "${REUSE_SYSTEM_TORCH}" = "1" ]; then
+  echo "mode:     REUSE_SYSTEM_TORCH (inherit image torch; held by ${CONSTRAINTS})    extras: [${EXTRAS}]"
+else
+  echo "cuda tag: ${CUDA}    torch: ${TORCH_VERSION}  torchvision: ${TORCHVISION_VERSION}    extras: [${EXTRAS}]"
+fi
 echo
 
 # 1) GPU + driver visible? (informational — a CPU box is still a valid target)
@@ -50,9 +67,13 @@ if ! command -v ffprobe >/dev/null 2>&1; then
   echo
 fi
 
-# 3) venv
+# 3) venv. In reuse mode inherit the image's site-packages so the venv sees its torch.
 if [ ! -d "${VENV}" ]; then
-  "$PY" -m venv "${VENV}"
+  if [ "${REUSE_SYSTEM_TORCH}" = "1" ]; then
+    "$PY" -m venv --system-site-packages "${VENV}"
+  else
+    "$PY" -m venv "${VENV}"
+  fi
 fi
 # shellcheck disable=SC1091
 . "${VENV}/bin/activate"
@@ -68,11 +89,26 @@ python -m pip install -U pip wheel
 #    a too-new torch (e.g. 2.12.x+cu130). That silently replaces this cu124 torch and
 #    breaks CUDA on a 12.4 host (cuDNN crash). Pinning the matched pair up front blocks
 #    that: torchvision's constraint is satisfied, so step 5 leaves the cu124 wheels be.
-python -m pip install "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" \
-  --index-url "https://download.pytorch.org/whl/${CUDA}"
+if [ "${REUSE_SYSTEM_TORCH}" = "1" ]; then
+  echo "REUSE_SYSTEM_TORCH=1 — using the image's torch (no wheel install)."
+  python - <<'PY'
+import torch
+print("inherited torch:", torch.__version__, "| cuda build:", torch.version.cuda,
+      "| available:", torch.cuda.is_available())
+PY
+else
+  python -m pip install "torch==${TORCH_VERSION}" "torchvision==${TORCHVISION_VERSION}" \
+    --index-url "https://download.pytorch.org/whl/${CUDA}"
+fi
 
 # 5) the package + heavy reals + dev tooling (editable). bpy stays out on purpose.
-python -m pip install -e ".[${EXTRAS}]"
+#    In reuse mode pass the constraints file so the torch==2.6.0-pinned extras can't pull a
+#    wheel over the image's (newer, e.g. cu128) torch.
+if [ "${REUSE_SYSTEM_TORCH}" = "1" ]; then
+  python -m pip install -e ".[${EXTRAS}]" -c "${CONSTRAINTS}"
+else
+  python -m pip install -e ".[${EXTRAS}]"
+fi
 
 # 6) verify the GPU is actually reachable from torch
 echo

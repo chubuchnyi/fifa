@@ -97,9 +97,16 @@ dev = [
   "ruff>=0.8",
 ]
 
+# Visualization for the local SMPL-X mesh demos (scripts/render_smplx_mesh.py +
+# scripts/smplx_export_meshes.py). matplotlib is a demo/viz dep, not an adapter — a
+# compatible range rather than an exact pin (it isn't reproducibility-critical).
+demo = [
+  "matplotlib>=3.8,<4",         # PSF/BSD-compatible
+]
+
 # Everything except bpy (which is environment-provided)
 all = [
-  "pitch3d[cv,hmr,ball,env,avatars,viewsynth,export,mcp,dev]",
+  "pitch3d[cv,hmr,ball,env,avatars,viewsynth,export,mcp,demo,dev]",
 ]
 
 [project.scripts]

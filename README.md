@@ -81,6 +81,9 @@ Heavy extras (`torch`, `gsplat`, `bpy`, …) are **declared but not installed**.
 **Render the actual SMPL-X body mesh in Blender** (not the box proxies): forward a `smplx_npz`
 export through SMPL-X and render it with Blender Cycles — see [`docs/blender-demo.md`](docs/blender-demo.md)
 ([`scripts/smplx_export_meshes.py`](scripts/smplx_export_meshes.py) → [`scripts/blender_render_meshes.py`](scripts/blender_render_meshes.py)).
+Bring up the local CPU env this demo needs (CPU `torch` + `smplx` + `matplotlib`) in one command:
+`just setup-local` (or [`scripts/local_setup.sh`](scripts/local_setup.sh)) — `just setup` installs the
+`[dev]`-only env, which is enough for the tests and the dry-run but not the mesh demos.
 
 Moving development to a rented GPU box? [`scripts/cloud_setup.sh`](scripts/cloud_setup.sh) installs
 a CUDA `torch` + the wired real adapters and verifies the GPU; [`docs/cloud-dev.md`](docs/cloud-dev.md)
