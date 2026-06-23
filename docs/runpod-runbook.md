@@ -92,8 +92,20 @@ are kept). The crash-looping pod **bills the whole time**, so fix or stop it pro
    — **do not run it as-is on Blackwell** (it would clobber the working cu128 torch). Instead
    **reuse the image's torch** (the runpod cu128 PyTorch image ships **torch 2.8.0+cu128**, sm_120
    verified): make a `python -m venv --system-site-packages` venv so it inherits that torch, then
-   `pip install -e .` + adapters **with a pip constraints file** (`torch==2.8.0` /
-   `torchvision==0.23.0`) so the `torch==2.6.0`-pinned extras (`hmr`/`ball`/…) can't downgrade it.
+   `pip install -e .` + adapters **with the committed constraints file**
+   [`scripts/constraints-cu128.txt`](../scripts/constraints-cu128.txt) (`torch==2.8.0` /
+   `torchvision==0.23.0`) so the `torch==2.6.0`-pinned extras (`hmr`/`ball`/…) can't downgrade it:
+
+   ```bash
+   python -m venv --system-site-packages /workspace/.venv && source /workspace/.venv/bin/activate
+   pip install -e ".[cv,hmr,ball,export,mcp,dev]" -c scripts/constraints-cu128.txt
+   ```
+
+   **Validate the SMPLest-X bring-up** (reproducible, committed): build+infer smoke with
+   [`scripts/smoke_smplestx.py`](../scripts/smoke_smplestx.py), then the real-frame seam run with
+   [`scripts/validate_smplestx_real.py`](../scripts/validate_smplestx_real.py)
+   (`PITCH3D_CLIP=/workspace/clip.mp4`). A green `REAL_RUN_OK` proves decode→RF-DETR→SMPLest-X→
+   `RawBodyMotion` on real pixels.
 
 Secure often grants a small persistent **volume** (e.g. 20 GB at `/workspace`) even if you didn't
 ask; clone into it so work survives stop/start.

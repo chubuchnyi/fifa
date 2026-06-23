@@ -1,0 +1,15 @@
+# pip constraints for the Blackwell (sm_120) / CUDA 12.8 GPU box.
+#
+# The RunPod cu128 PyTorch image ships a working torch 2.8.0+cu128 (sm_120 verified).
+# Several pitch3d extras (hmr/ball/...) pin torch==2.6.0, which would DOWNGRADE that
+# working wheel to a cu124 build with no sm_120 in its arch list. Install the package
+# and its extras WITH this constraints file so the image's torch/torchvision are held:
+#
+#   python -m venv --system-site-packages /workspace/.venv   # inherit image torch
+#   source /workspace/.venv/bin/activate
+#   pip install -e ".[cv,hmr,ball,export,mcp,dev]" -c scripts/constraints-cu128.txt
+#
+# Do NOT run scripts/cloud_setup.sh as-is on Blackwell: it defaults to cu124/torch 2.6
+# and would clobber the working cu128 torch. See docs/runpod-runbook.md.
+torch==2.8.0
+torchvision==0.23.0
