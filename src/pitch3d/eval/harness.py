@@ -68,18 +68,20 @@ def _ground_root_from_feet(
 
 
 def _clip_and_tracks(scene: SyntheticScene) -> tuple[ClipRef, Tracks]:
-    """Wrap the synthetic GT as the ``ClipRef`` + ``Tracks`` an ``HMRBackend`` consumes.
+    """Wrap the GT as the ``ClipRef`` + ``Tracks`` an ``HMRBackend`` consumes.
 
     Each subject ``n`` becomes a player tracklet with ``track_id = n`` carrying the GT boxes,
-    so the backend's per-crop contract is exercised exactly as in the product.
+    so the backend's per-crop contract is exercised exactly as in the product. A real-frames scene
+    (:class:`~pitch3d.eval.dataset.PoseEvalScene`) carries ``clip_uri``/``source_id`` pointing the
+    backend at actual RGB; a synthetic scene keeps the in-memory URI the fake backends ignore.
     """
     clip = ClipRef(
-        source_id="synthetic",
-        uri="memory://synthetic",
+        source_id=getattr(scene, "source_id", "synthetic"),
+        uri=getattr(scene, "clip_uri", "memory://synthetic"),
         frames=scene.frames,
         width=scene.intrinsics.width,
         height=scene.intrinsics.height,
-        fps=25.0,
+        fps=getattr(scene, "fps", 25.0),
     )
     tracklets = [
         Tracklet(

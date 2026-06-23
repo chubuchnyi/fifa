@@ -14,6 +14,7 @@ from .bodymodel import (
     PlaceholderJointModel,
     SmplxJointModel,
 )
+from .dataset import PoseEvalScene, evaluate_dataset
 from .harness import (
     evaluate,
     place_under_gt_camera,
@@ -33,10 +34,12 @@ __all__ = [
     "CAMERA_VIEWS",
     "CameraView",
     "SyntheticScene",
+    "PoseEvalScene",
     "generate_scene",
     "mpjpe_global",
     "mpjpe_local",
     "evaluate",
+    "evaluate_dataset",
     "place_under_gt_camera",
     "run_backend",
     "run_backend_grounded",
