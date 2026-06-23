@@ -20,7 +20,8 @@ and easy manual correction that **propagates across frames**.
 > [`docs/roadmap.md`](docs/roadmap.md) for per-step state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).
-Source of truth for the *shape* of this deliverable: [`CLAUDE_CODE_architecture_task.md`](CLAUDE_CODE_architecture_task.md).
+Documentation map: [`docs/README.md`](docs/README.md). The original architecture-kickoff brief
+(now executed) is archived under [`docs/archive/`](docs/archive/).
 
 ## Core ideas
 
@@ -96,9 +97,12 @@ is the spin-up → verify → `--device cuda` golden-path checklist (ADR-0009).
 
 ## Where to read next
 
+Start at the [`docs/README.md`](docs/README.md) map, or jump straight in:
+
 1. [`docs/architecture.md`](docs/architecture.md) — overview + data/control-flow diagrams (incl. both ViewSynthesizer seams).
 2. [`docs/scene-schema.md`](docs/scene-schema.md) — the canonical scene model.
-3. [`docs/adr/`](docs/adr/) — the decisions and why (0001–0007).
-4. [`docs/roadmap.md`](docs/roadmap.md) — M0→M3 plan and the M1 vertical slice.
-5. [`docs/cloud-dev.md`](docs/cloud-dev.md) — provisioning a GPU box for `--device cuda` development.
-6. [`docs/runpod-runbook.md`](docs/runpod-runbook.md) — concrete RunPod spin-up runbook (MCP / `runpodctl`, SSH, cost control).
+3. [`docs/adr/`](docs/adr/) — the decisions and why (0001–0010).
+4. [`docs/roadmap.md`](docs/roadmap.md) — M0→M4 plan and the M1 vertical slice.
+5. [`docs/m1-status-and-plan.md`](docs/m1-status-and-plan.md) — where M1 actually stands right now (blockers, next steps).
+6. [`docs/cloud-dev.md`](docs/cloud-dev.md) — provisioning a GPU box for `--device cuda` development.
+7. [`docs/runpod-runbook.md`](docs/runpod-runbook.md) — concrete RunPod spin-up runbook (MCP / `runpodctl`, SSH, cost control).

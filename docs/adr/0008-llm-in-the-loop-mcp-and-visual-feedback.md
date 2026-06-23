@@ -61,8 +61,11 @@ We must add this without breaking the hexagonal core (ADR-0001) or the single so
 **Negative / costs**
 - Rendering several viewpoints per `observe` is expensive; mitigated by `PREVIEW` quality, the
   content-addressable cache (ADR-0004), and letting the agent request only the viewpoints it needs.
-- The live server needs the application controller (Task 7) before it can serve; until then the
-  catalog is inspectable but `serve()` is an honest `NotImplementedError`.
+
+**Status note (M1):** realized. The live server is wired — `serve()`
+(`adapters/mcp/server.py`) dispatches each tool to its use-case and returns text/image content
+blocks, unit-tested over the fakes; the MCP SDK's stdio loop is lazy-imported behind the optional
+`mcp` extra. The earlier `NotImplementedError` placeholder is gone.
 
 ## Alternatives considered
 
