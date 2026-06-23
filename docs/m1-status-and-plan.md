@@ -7,18 +7,20 @@ this doc is the higher-level "where are we / what's blocking / what's next" view
 
 The full pipeline runs end-to-end on fake adapters (`tests/e2e/test_dry_run.py`) and three
 of five perception stages are real: **detector (RF-DETR)** and **tracker (ByteTrack)** are
-fully wired built-ins, and the **calibrator** is live via the box-local injected PnLCalib
-backend (validated on `messi_sample`: RANSAC + confidence-weighted DLT cut reprojection RMS
-3.87 m → 0.36 m). The two remaining live backends — **pose (GVHMR)** and **ball (TrackNet)** —
+fully wired built-ins, and the **calibrator** is live via the injected PnLCalib backend — now an
+in-repo module (`pitch3d.adapters.models.pnlcalib_backend:make`) and **measured on SoccerNet
+`calibration-2023` test** (200 frames: completeness 0.745, median reprojection 1.79 px / 0.236 m,
+line_acc@5px 0.618; RANSAC + confidence-weighted DLT). The two remaining live backends — **pose (GVHMR)** and **ball (TrackNet)** —
 have real, unit-tested *pure* halves and now in-core, torch-free heavy adapters behind the
 ADR-0006 dotted-path seam (SMPLest-X for pose, WASB for ball). Both are now **pod-verified on
 CUDA** (2026-06-23): the ball adapter (`wasb_backend.py`, staged via `scripts/stage_wasb_weight.sh`)
 runs standalone (`scripts/smoke_wasb_gpu.py`) and inside the full pipeline
 (`scripts/pod_real_e2e.sh`) end to end — detect→track→calibrate→pose→ball→assemble→export green.
 
-The single biggest external blocker is **data**: we lack a landscape 16:9 broadcast clip (the
-distribution PnLCalib's HRNet was trained on) to measure calibration honestly on independent
-footage. Everything else on the near-term path is autonomous, pure-core work.
+The calibration-data blocker is **resolved**: SoccerNet `calibration-2023` (open, no NDA) supplied
+independent landscape-broadcast frames + pitch-line GT, and **B1 is now measured** (see B1 below).
+The remaining external blocker is **WorldPose video** (FIFA-licence-gated), needed for the *pose*
+bake-off (B2); everything else on the near-term path is autonomous, pure-core work.
 
 ## Milestone status
 
@@ -39,7 +41,7 @@ of the public repo.
 |---|---|---|---|---|
 | **Detector** | `--detector rfdetr` | n/a | ✅ built-in (RF-DETR, Apache-2.0) | needs `cv` extra + weights + GPU; no injection seam needed (permissive, in-core) |
 | **Tracker** | `--tracker bytetrack` | n/a | ✅ built-in (ByteTrack, MIT) + team clustering | `--tracker-backend` threads the `TrackingBackend` injection seam (T3 ✅), symmetric with pose/ball/calibrator |
-| **Calibrator** | `--calibrator keypoints` | ✅ DLT + RANSAC + confidence-weighted solve (core) | ✅ injected PnLCalib HRNet (box-local) | validated messi 3.87 m → 0.36 m; `--calibrator-backend` ✓ |
+| **Calibrator** | `--calibrator keypoints` | ✅ DLT + RANSAC + confidence-weighted solve (core) | ✅ injected PnLCalib HRNet (in-repo `pnlcalib_backend:make`) | SoccerNet test: completeness 0.745, median 1.79 px / 0.236 m; messi 3.87 → 0.36 m; `--calibrator-backend` ✓ |
 | **Pose** | `--pose gvhmr` | ✅ root-grounding + constraint refit (core) | 🟡 SMPLest-X adapter in-core (torch-free; box-smoke-tested) | `--pose-backend pitch3d.adapters.models.smplestx_backend:make`; not yet E2E-validated on WorldPose |
 | **Ball** | `--ball tracknet` | ✅ threshold + gap-fill (core) | ✅ WASB adapter **pod-verified on CUDA** (smoke + full E2E, 2026-06-23) | `--ball-backend pitch3d.adapters.models.wasb_backend:make`; stage via `scripts/stage_wasb_weight.sh`; smoke `scripts/smoke_wasb_gpu.py` |
 | Render | `--render overlay` | ✅ reprojection PNGs (dependency-free) | n/a | real, no GPU |
@@ -50,7 +52,7 @@ of the public repo.
 
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
-| **B1** | Data-unblocked 2026-06-23; harness built (CPU) | Evaluate `FieldCalibrator` (PnLCalib) on *independent* real broadcast frames with GT pitch calibration | 🟡 CPU harness done; GPU number pending pod | **Correction:** B1 was never truly asset-blocked. SoccerNet `calibration-2023` (real broadcast frames + per-image pitch-line GT) is **openly downloadable, NO NDA password** — only the broadcast *video* is NDA-gated. Built + unit-tested the full CPU half: re-derived pitch template, GT parser, reprojection metrics, CLI (`scripts/run_calib_eval.py`), open downloader (`scripts/get_soccernet_calibration.py`). Synthetic oracle reproj_rms ≈ 1.9e-14 m, perturb grows monotonically (6/6 tests, ruff+mypy clean). **Remaining for the real number:** restart the (deliberately stopped) GPU pod, commit the box-local PnLCalib glue as `pitch3d.adapters.models.pnlcalib_backend:make`, run the CLI. Honesty (R-6): our accuracy metric is a homography-plane proxy named `line_acc@Npx`, **not** the official SoccerNet Completeness×JaC@5. (WorldPose video still gated, but no longer the B1 path.) |
+| **B1** | Data-unblocked 2026-06-23; harness built (CPU) | Evaluate `FieldCalibrator` (PnLCalib) on *independent* real broadcast frames with GT pitch calibration | 🟢 MEASURED 2026-06-23 (test, 200 frames) | **Correction:** B1 was never truly asset-blocked. SoccerNet `calibration-2023` (real broadcast frames + per-image pitch-line GT) is **openly downloadable, NO NDA password** — only the broadcast *video* is NDA-gated. Built + unit-tested the full CPU half: re-derived pitch template, GT parser, reprojection metrics, CLI (`scripts/run_calib_eval.py`), open downloader (`scripts/get_soccernet_calibration.py`). Synthetic oracle reproj_rms ≈ 1.9e-14 m, perturb grows monotonically (6/6 tests, ruff+mypy clean). **Measured 2026-06-23 (GPU):** glue committed + pulled (730f23a), CLI run on SoccerNet `test` (first 200/3143 frames): **completeness 0.745**, **median reproj 1.79 px / 0.236 m**, **line_acc@5px 0.618 / @10px 0.691** — RMS/p95 (131.8 m / 83.9 m) are outlier-inflated by the ~25 % uncalibrated frames, so median is the real stat. PnLCalib is sub-2 px where it locks on; **completeness, not planar accuracy, is the limiter.** Honesty (R-6): this is a homography-plane proxy named `line_acc@Npx`, **not** the official SoccerNet Completeness×JaC@5; SoccerNet-trained weights → in-distribution upper bound. (WorldPose video still gated, but no longer the B1 path.) |
 | **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box): FK seam + conditions A/B, real SMPL-X FK on CPU, a runnable driver (`scripts/run_bakeoff.py`), and camera-sweep + occlusion masking — oracle scores ~0 from every viewpoint, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** |
 | **B3** | **Resolved** (pod-verified 2026-06-23) | Pose + ball live adapters **run on CUDA** (SMPLest-X, WASB) | ✅ done | both import torch-free behind the seam; staged box-local (`scripts/stage_wasb_weight.sh`). WASB pod-verified standalone (`scripts/smoke_wasb_gpu.py`) **and** in the full pipeline (`scripts/pod_real_e2e.sh` — all real backends → export). Needed two compat fixes, now in-tree: `torch.no_grad()` around inference (WASB's postprocessor calls `.numpy()` without `detach`); `_load` forces WASB's `src` ahead of SMPLest-X on `sys.path` to dodge a `utils` collision. NumPy-2 `np.Inf` patch folded into the staging script. |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
@@ -89,14 +91,22 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 - **CPU harness built & unit-tested** (`pitch3d.eval.datasets_soccernet` + `calib_metrics`, CLI
   `scripts/run_calib_eval.py`): re-derived pitch template, normalized-GT parser, point-to-segment
   reprojection metrics, plus a synthetic self-test (oracle ≈ 0, perturb grows). Pure/no-box.
-- **Remaining for the real number (box only):** (1) restart the deliberately-stopped GPU pod;
-  (2) commit the box-local PnLCalib glue (`/workspace/backends/pnlcalib_backend.py`, currently
-  gitignored — violates reproducibility) as `pitch3d.adapters.models.pnlcalib_backend:make`;
-  (3) `python scripts/get_soccernet_calibration.py` then `scripts/run_calib_eval.py --dataset
-  soccernet --frames-dir <split> --backend pitch3d.adapters.models.pnlcalib_backend:make`.
+- **MEASURED 2026-06-23 (box, GPU).** Glue committed as `pitch3d.adapters.models.pnlcalib_backend:make`
+  (730f23a) and pulled on the pod; ran `scripts/run_calib_eval.py --dataset soccernet` over the
+  **first 200 frames of the `test` split** (3143 available) with PnLCalib `SV_kp`/`SV_lines`
+  (kp_th 0.3434, line_th 0.7867). Result: **completeness 0.745** (74.5 % of frames calibrated,
+  confidence > 0), **median reprojection 1.79 px / 0.236 m** (robust central stat),
+  **line_acc@5px 0.618 / @10px 0.691** (correct lines / 1344 total; uncalibrated frames count as
+  misses). RMS/p95 (131.8 m / 83.9 m) are **inflated by the ~25 % uncalibrated frames**
+  (identity/degenerate H) — median is the meaningful figure. Read: PnLCalib registers the pitch
+  **sub-2 px on the ~¾ of broadcast frames where it locks on**; the limiter is **completeness
+  (landmark coverage), not planar accuracy**.
 - Honesty (R-6): our number is a homography-plane `line_acc@Npx` proxy, **not** the official
-  SoccerNet Completeness×JaC@5 (which uses full camera params, distortion, circles, L/R ambiguity).
-- Then evaluate PnLCalib's *own* full camera-calibration module vs our bare DLT.
+  SoccerNet Completeness×JaC@5 (full camera params, distortion, circles, L/R ambiguity); and these
+  weights are in-distribution for SoccerNet, so this is an upper-ish bound, not OOD generalization.
+- Next: report accuracy-on-completed separately from completeness (so RMS stops being outlier
+  -inflated); chase the 25 % miss rate (lower kp threshold / line-only fallback); then evaluate
+  PnLCalib's *own* full camera-calibration module vs our bare DLT.
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in

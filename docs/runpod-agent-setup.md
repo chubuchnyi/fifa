@@ -154,7 +154,14 @@ exact commands the repo documents.
   pull the **Huge (ViT-H, ~8.2 GB)** checkpoint into `$WS/weights/smplest-x/`. This is the primary
   pose net.
 - **PnLCalib** — weights ship in the repo's **v1.0.0 GitHub release** (and the world-template pitch
-  keypoints are in `utils/utils_keypoints.py`). Download the release assets into `$WS/weights/pnlcalib/`.
+  keypoints are in `utils/utils_keypoints.py`). Download the release assets into `$WS/weights/pnlcalib/`
+  (the calibrator backend defaults expect `SV_kp` + `SV_lines`, ~265 MB each).
+  Needs **`shapely`** in the venv (`pip install shapely`; verified 2.1.2) — PnLCalib's `utils.utils_calib`
+  imports it. Wire it with `--calibrator keypoints --calibrator-backend
+  pitch3d.adapters.models.pnlcalib_backend:make --device cuda`; the zero-arg `make()` reads
+  `PNLCALIB_REPO` / `PNLCALIB_WEIGHTS_KP` / `PNLCALIB_WEIGHTS_LINES` / `PNLCALIB_DEVICE` (defaults match
+  the paths above). B1 number (SoccerNet calibration-2023 `test`): run `scripts/get_soccernet_calibration.py`
+  then `scripts/run_calib_eval.py --dataset soccernet` — see [`m1-status-and-plan.md`](m1-status-and-plan.md).
 - **WASB** — soccer weights are in the repo's Google-Drive **model zoo** (linked from its README).
   `scripts/stage_wasb_weight.sh` does this end-to-end (idempotent): clones nttcom/WASB-SBDT into
   `$WS/repos`, installs gdown, pulls the soccer checkpoint (`wasb_soccer_best.pth.tar`) into
