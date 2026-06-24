@@ -272,8 +272,8 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     (~0.25) on the proxy plane — this is a runtime/feature proof of the fade on real fragmentation, not
     a calibrated-accuracy result. Two extracted broadcast frames render cleanly (bodies + motion +
     pitch, correct angle); a frame-by-frame eyeball of the opacity ramp was not done.
-  - **#102 no-evaporation: edge extension ✅ implemented & unit-tested (local), pod-validation
-    pending.** The #101 run exposed the real issue behind the "20→16 by the last frame" drop: a
+  - **#102 no-evaporation: edge extension ✅ done & pod-validated 2026-06-24.** The #101 run
+    exposed the real issue behind the "20→16 by the last frame" drop: a
     player the tracker acquires late or loses early is **still physically on the pitch**, so fading
     or blinking it out is *less* honest than reconstructing it. New STRUCTURAL pass in
     `core/correction/coherence.py:extend_pose_to_span` extends every subject to the full clip span
@@ -290,8 +290,23 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     in the CLI `== coherence:` line). 11 new unit tests (coast-with-decay both edges, standing/
     single-frame hold, posture held, no-op when already full-span, non-mutation, optional hand/jaw,
     multi-subject span + low-conf flagging, disable path); full suite **357 passed**, ruff + mypy
-    clean. **Not yet pod-validated** — needs one `demo_video.sh` run to confirm a stable on-screen
-    population (no 20→16 drop) on the real clip.
+    clean. **Pod-validated 2026-06-24** on the real clip (`demo_video.sh --frames 48`): coherence
+    reported `extended 85 edge frame(s) across 6/20 subjects` (exactly the 6 partial-range tracks,
+    incl. the 11/48 B-team sub now at 48/48), **all 20 subjects span frames=48**, and Blender's
+    per-frame body count is **a flat 20 on every one of the 48 frames** (`global=0 … global=47`,
+    20 bodies) — the prior 20→16 collapse is gone, nobody evaporates. 4 mp4s under
+    `out/anim_extend/video/`, pod stopped on exit.
+  - **#102b pod-render hygiene ✅ done & pod-validated 2026-06-24** (commit `d81b2a2`). The first
+    #102 run surfaced a *separate* contamination bug: the pod's `out/anim/mesh` lives on the
+    persistent volume and is reused across runs, so two **stale** `anim_subject_22/25.npz` from an
+    earlier run lingered, got globbed by `blender_animate.py`, and rendered **phantom bodies** (21
+    on 4 frames of a 20-subject scene). Fixed at the producers: `anim_export.py` purges
+    `anim_subject_*.npz` + `ball.npz` before writing, `blender_animate.py` clears each camera's
+    `frame_*.png` before rendering (same hazard for ffmpeg's glob when frame counts differ). A
+    `--reuse-scene` re-render confirmed the purge: no `subject_22/25`, **20 bodies on all 48
+    frames**. Honesty (R-6): both #102 runs reused the #101-class reconstruction, so the
+    `calib=PROXY` / low-height-confidence-ball caveats carry over — this validates the *population
+    stability* feature, not calibrated accuracy.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 
