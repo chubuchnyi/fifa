@@ -88,6 +88,11 @@ Bring up the local CPU env this demo needs (CPU `torch` + `smplx` + `matplotlib`
 `just setup-local` (or [`scripts/local_setup.sh`](scripts/local_setup.sh)) — `just setup` installs the
 `[dev]`-only env, which is enough for the tests and the dry-run but not the mesh demos.
 
+**Render a multi-angle 3D *video*** (bodies + ball, several camera angles) straight from a broadcast
+clip — the whole Blender Cycles render runs **on the GPU pod**, no local Blender needed:
+`scripts/demo_video.sh --clip samples/video/your.mp4` pulls one `.mp4` per angle back to the machine.
+See [`docs/video-demo.md`](docs/video-demo.md).
+
 Moving development to a rented GPU box? [`scripts/cloud_setup.sh`](scripts/cloud_setup.sh) installs
 a CUDA `torch` + the wired real adapters and verifies the GPU; [`docs/cloud-dev.md`](docs/cloud-dev.md)
 is the spin-up → verify → `--device cuda` golden-path checklist (ADR-0009).

@@ -12,6 +12,7 @@
 #   PITCH3D_CLIP=/workspace/clip.mp4        input broadcast clip
 #   FRAMES=8                                --frames
 #   OUT=out/run                             --out-dir (relative to repo)
+#   FORMAT=smplx_npz                        --format (json carries the ball; smplx_npz = bodies)
 # The SMPLest-X backend reads its own env (PITCH3D_SMPLESTX_REPO / _CKPT / _DEVICE;
 # defaults /workspace/repos/SMPLest-X + smplest_x_h on cuda) — see the backend factory.
 # The WASB ball backend likewise reads PITCH3D_WASB_REPO / _CKPT / _DATASET / _DEVICE
@@ -23,6 +24,7 @@ PY="${PITCH3D_PY:-/workspace/.venv/bin/python}"
 CLIP="${PITCH3D_CLIP:-/workspace/clip.mp4}"
 FRAMES="${FRAMES:-8}"
 OUT="${OUT:-out/run}"
+FORMAT="${FORMAT:-smplx_npz}"
 
 # Optional REAL calibration: set PNLCALIB_REPO (+ its weights) to swap the proxy field
 # calibrator for the wired PnLCalib backend (ADR-0006 dotted path). Empty/absent -> proxy.
@@ -36,7 +38,7 @@ else
 fi
 
 cd "$REPO"
-echo "== pod real E2E :: frames=${FRAMES} out=${OUT} clip=${CLIP} =="
+echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} =="
 t0=$(date +%s)
 PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
@@ -44,6 +46,6 @@ PYTHONPATH=src "$PY" -m pitch3d \
   "${CALIB_ARGS[@]}" \
   --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
-  --render overlay --export gltf --format smplx_npz --out-dir "$OUT"
+  --render overlay --export gltf --format "$FORMAT" --out-dir "$OUT"
 echo "== done in $(( $(date +%s) - t0 ))s -> ${OUT} =="
-ls -la "${OUT}/export/scene.smplx_npz" 2>/dev/null | head
+ls -la "${OUT}/export/scene.${FORMAT}" 2>/dev/null | head
