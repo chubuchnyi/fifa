@@ -27,7 +27,13 @@ from ..core.correction.engine import (
     resolve_ball,
     resolve_subject_motion,
 )
-from ..core.orchestration import ReconstructionPipeline, assemble_scene, resolve_scene
+from ..core.orchestration import (
+    ReconstructionPipeline,
+    StitchConfig,
+    StitchReport,
+    assemble_scene,
+    resolve_scene,
+)
 from ..core.ports.export import ExportFormat, ExportResult
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation, Viewpoint
@@ -54,6 +60,7 @@ class Application:
     _clips: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scenes: dict[str, Scene] = field(default_factory=dict, repr=False)
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
+    _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
     def _next(self, kind: str) -> int:
@@ -86,16 +93,25 @@ class Application:
 
     # --- reconstruction -------------------------------------------------------
     def run_reconstruction(
-        self, episode_id: str, *, on_ground: np.ndarray | None = None, params: dict | None = None
+        self,
+        episode_id: str,
+        *,
+        on_ground: np.ndarray | None = None,
+        params: dict | None = None,
+        stitch_cfg: StitchConfig | None = None,
     ) -> str:
-        """Run DETECT→TRACK→CALIBRATE→POSE→BALL, assemble the scene, return its id."""
+        """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
+
+        ``stitch_cfg`` (default ``None`` = off) enables structural track-continuity stitching
+        between TRACK and POSE; the report is kept for :meth:`stitch_report`.
+        """
         clip = self._clips[episode_id]
         ep = self._episodes[episode_id]
         p = self.ports
         pipeline = ReconstructionPipeline(
             detector=p.detector, tracker=p.tracker, calibrator=p.calibrator,
             pose=p.pose, ball=p.ball, cache=p.cache, queue=p.queue,
-            model_version=p.model_version,
+            model_version=p.model_version, stitch_cfg=stitch_cfg,
         )
         result = pipeline.run(clip, on_ground=on_ground, params=params)
         scene_id = f"scene-{self._next('scene')}"
@@ -105,7 +121,12 @@ class Application:
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
+        self._scene_stitch[scene_id] = result.stitch
         return scene_id
+
+    def stitch_report(self, scene_id: str) -> StitchReport | None:
+        """The continuity-stitch report for a scene, or ``None`` if stitching was off."""
+        return self._scene_stitch.get(scene_id)
 
     def get_scene(self, scene_id: str) -> Scene:
         return self._scenes[scene_id]

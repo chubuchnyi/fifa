@@ -20,6 +20,7 @@ import numpy as np
 
 from ..adapters.io import FFmpegIngestor
 from ..core.correction.engine import make_offset
+from ..core.orchestration import StitchConfig
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
 from ..core.scene.layers import CorrectionTarget, TargetKind
@@ -70,6 +71,7 @@ def run_dry_run(
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
+    stitch: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -102,12 +104,19 @@ def run_dry_run(
     episode = app.register_clip(clip, name="demo episode")
     print(f"== registered {episode.id} ({episode.n_frames} frames) from {clip.uri}")
 
-    # 2) Reconstruction: DETECT→TRACK→CALIBRATE→POSE→BALL, assemble the proposal scene.
-    scene_id = app.run_reconstruction(episode.id, on_ground=_airborne_on_ground(n))
+    # 2) Reconstruction: DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the proposal scene.
+    stitch_cfg = StitchConfig() if stitch else None
+    scene_id = app.run_reconstruction(
+        episode.id, on_ground=_airborne_on_ground(n), stitch_cfg=stitch_cfg
+    )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
+    sr = app.stitch_report(scene_id)
+    if sr is not None:
+        print(f"== continuity: {sr.n_in}→{sr.n_out} tracklets "
+              f"({len(sr.merges)} merge(s), {len(sr.dropped)} blip(s) dropped)")
 
     # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + radar + UI + textual summary.
     obs_before = app.observe(
@@ -225,6 +234,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tracker-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own TrackingBackend; "
                              "requires --tracker bytetrack")
+    parser.add_argument("--stitch", action="store_true",
+                        help="re-link fragmented tracklets between TRACK and POSE so "
+                             "occluded players don't 'appear from nowhere' (off by default)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -248,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
         ball_backend=args.ball_backend,
         calibrator_backend=args.calibrator_backend,
         tracker_backend=args.tracker_backend,
+        stitch=args.stitch,
     )
 
 
