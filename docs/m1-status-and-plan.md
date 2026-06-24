@@ -307,6 +307,29 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     frames**. Honesty (R-6): both #102 runs reused the #101-class reconstruction, so the
     `calib=PROXY` / low-height-confidence-ball caveats carry over — this validates the *population
     stability* feature, not calibrated accuracy.
+  - **#103 PnLCalib wired into the video path ✅ done & pod-validated 2026-06-24.** The `calib=PROXY`
+    caveat that ran through #101/#102/#102b is now resolved: real field calibration is reachable in
+    the video path via a new opt-in **`--real-calib`** flag on `scripts/demo_video.sh` that points the
+    calib seam at the pod's staged `/workspace/repos/PnLCalib` + `/workspace/weights/pnlcalib/
+    SV_{kp,lines}` unless `.env` already set them (a *committed* flag, because `.env` is git-ignored, so
+    editing it would not be reproducible). **Preflight (box):** PnLCalib loads **in-process inside the
+    pipeline venv `/workspace/.venv`** (torch **2.8.0+cu128**) — both HRNet heads build on CUDA,
+    `torch.load` of the 265 MB `SV_kp`/`SV_lines` works under the 2.8 `weights_only=True` default (the
+    checkpoints are pure `OrderedDict`s), and `shapely` is already installed → **no subprocess bridge
+    and no `weights_only` patch needed.** (Weights actually live at `/workspace/weights/pnlcalib/`, not
+    `…/repos/PnLCalib/weights/`; the `SV_WP_*` files there are 0-byte stubs.) **Clip framing, not the
+    backend, is the limiter:** `pod_real_e2e.sh`'s default `clip.mp4` (tight framing on plain grass, no
+    visible lines) yields **0 landmarks/frame** → identity H / confidence 0 (an honest R-6 fallback,
+    no crash); the `demo_video.sh` default **Colombia 1-0 Congo** broadcast (wide, penalty box + arc +
+    goal in view) yields **10–11 landmarks/frame**. **Validated** on an 8-frame Colombia reconstruction:
+    `== calibration: REAL PnLCalib`, **field calibration confidence 0.61** (per-frame 0.55–0.64),
+    **non-identity homography**, ball **height_confidence 0.42** (vs ~0.25–0.33 under the proxy). A full
+    48-frame `demo_video.sh --real-calib` run confirmed the same in the production path
+    (`== calibration: REAL PnLCalib` → `reconstructed scene-1: 20 subject(s), ball=yes`) and proceeded
+    into the 4-angle Blender render (mp4 pull + pod-stop confirmed in the follow-up commit). **Honesty
+    (R-6):** 0.61 is the calibrator's own
+    inlier×inlier-fraction score (in-sample), **not** independent GT accuracy, and real calibration
+    only fires on landscape-broadcast clips with visible markings.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 

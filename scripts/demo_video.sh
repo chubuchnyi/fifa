@@ -15,6 +15,9 @@
 #   --res WxH       render resolution (default 1280x720)
 #   --samples N     Cycles samples/px (default 32)
 #   --device gpu|cpu  pod render device (default gpu; falls back to CPU automatically)
+#   --real-calib    calibrate the field with REAL PnLCalib on the pod (default: proxy planar calib).
+#                   Points the calib seam at the pod's staged /workspace/repos/PnLCalib + weights
+#                   unless .env already set PNLCALIB_REPO; needs a landscape broadcast clip.
 #   --reuse-scene   reuse an existing pod-side scene.json (skip the ~3min reconstruction; cheap re-render)
 #   --keep-pod      do NOT stop the pod at the end (debugging)
 #   OUT_LOCAL       local output dir (default out/anim)
@@ -41,7 +44,7 @@ die(){  printf '\n%sVIDEO DEMO FAILED: %s%s\n' "$CR" "$*" "$C0" >&2; exit 1; }
 CLIP_LOCAL="${PITCH3D_CLIP_LOCAL:-samples/video/Colombia-1-0-Congo-DR1080p.mp4}"
 FRAMES="${FRAMES:-60}"; CAMERAS="${ANIM_CAMERAS:-broadcast,sideline,top,goal}"
 RES="${ANIM_RES:-1280x720}"; SAMPLES="${ANIM_SAMPLES:-32}"; DEVICE="${ANIM_DEVICE:-gpu}"
-OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}"
+OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}"; REAL_CALIB="${REAL_CALIB:-0}"
 # Direction A polish on by default: re-linked tracklets (--stitch) + gap-fill (--coherence) so animated
 # bodies don't pop in/out, and a 4-frame mesh-opacity ramp at genuine entries/exits. Override with =0.
 STITCH="${STITCH:-1}"; COHERENCE="${COHERENCE:-1}"; FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
@@ -52,15 +55,25 @@ while [ $# -gt 0 ]; do case "$1" in
   --res)      RES="$2"; shift;;
   --samples)  SAMPLES="$2"; shift;;
   --device)   DEVICE="$2"; shift;;
+  --real-calib) REAL_CALIB=1;;
   --reuse-scene) REUSE_SCENE=1;;
   --keep-pod) KEEP_POD=1;;
   -h|--help)  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
-  *)          die "unknown arg: $1 (try --clip PATH | --frames N | --cameras LIST | --res WxH | --samples N | --device gpu|cpu | --keep-pod)";;
+  *)          die "unknown arg: $1 (try --clip PATH | --frames N | --cameras LIST | --res WxH | --samples N | --device gpu|cpu | --real-calib | --keep-pod)";;
 esac; shift; done
 RES_X="${RES%x*}"; RES_Y="${RES#*x}"
 REPO_POD="${PITCH3D_REPO:-/workspace/fifa}"
 OUT_POD="out/anim"
 CLIP_POD="/workspace/$(basename "$CLIP_LOCAL")"
+
+# Real PnLCalib (opt-in via --real-calib): point the calib seam at the pod's staged checkout +
+# weights unless .env already set them. pod_real_e2e.sh swaps the proxy planar calibrator for the
+# wired PnLCalib backend only when PNLCALIB_REPO is a live dir; empty (the default) keeps the proxy.
+if [ "$REAL_CALIB" = 1 ]; then
+  PNLCALIB_REPO="${PNLCALIB_REPO:-/workspace/repos/PnLCalib}"
+  PNLCALIB_WEIGHTS_KP="${PNLCALIB_WEIGHTS_KP:-/workspace/weights/pnlcalib/SV_kp}"
+  PNLCALIB_WEIGHTS_LINES="${PNLCALIB_WEIGHTS_LINES:-/workspace/weights/pnlcalib/SV_lines}"
+fi
 
 POD_UP=0
 cleanup(){
@@ -78,6 +91,7 @@ printf '%s│  pitch3d — broadcast clip → multi-angle 3D animation (POD)    
 printf '%s└──────────────────────────────────────────────────────────────┘%s\n' "$CH" "$C0"
 info "clip=$CLIP_LOCAL frames=$FRAMES cams=$CAMERAS ${RES_X}x${RES_Y} samples=$SAMPLES device=$DEVICE out=$OUT_LOCAL"
 info "polish: stitch=$STITCH coherence=$COHERENCE fade_frames=$FADE_FRAMES"
+if [ -n "${PNLCALIB_REPO:-}" ]; then info "calibration: REAL PnLCalib ($PNLCALIB_REPO)"; else info "calibration: proxy planar"; fi
 
 say "Preflight"
 [ -f "$CLIP_LOCAL" ] && ok "clip present: $CLIP_LOCAL ($(du -h "$CLIP_LOCAL" | cut -f1))" \
