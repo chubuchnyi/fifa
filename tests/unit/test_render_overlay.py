@@ -14,9 +14,12 @@ import pytest
 
 from pitch3d.adapters.fakes import FakeRenderPass
 from pitch3d.adapters.render.overlay import (
+    _BACKGROUND,
     ReprojectionOverlayRenderPass,
     _draw_marker,
+    appearance_alpha,
     confidence_to_color,
+    fade_to_background,
     project_world_points,
     quat_to_rotation_matrix,
 )
@@ -42,6 +45,10 @@ def _scene_with_subject(make_scene, make_motion, transl_z, role=Role.PLAYER):
 
 def _frame0(result) -> bytes:
     return (Path(result.uri) / "frame_00000.png").read_bytes()
+
+
+def _frame(result, i: int) -> bytes:
+    return (Path(result.uri) / f"frame_{i:05d}.png").read_bytes()
 
 
 # --- pure projection maths -----------------------------------------------------
@@ -195,3 +202,77 @@ def test_low_ball_height_confidence_tints_the_ball(tmp_path, make_scene):
     high = make_scene(ball=BallTrack(frames=frames, positions_3d=pos, height_confidence=np.ones(4)))
     low = make_scene(ball=BallTrack(frames=frames, positions_3d=pos, height_confidence=np.zeros(4)))
     assert _render(high, tmp_path, "bh") != _render(low, tmp_path, "bl")
+
+
+# --- entry/exit fade (#98, visual polish) --------------------------------------
+def test_fade_to_background_endpoints_and_clamp():
+    color = (60, 170, 255)
+    assert fade_to_background(color, 1.0) == color        # full opacity → untouched
+    assert fade_to_background(color, 0.0) == _BACKGROUND   # zero opacity → background
+    assert fade_to_background(color, 2.0) == color         # clamps above 1
+    assert fade_to_background(color, -1.0) == _BACKGROUND   # clamps below 0
+    mid = fade_to_background(color, 0.5)
+    for i, c in enumerate(color):
+        assert min(c, _BACKGROUND[i]) <= mid[i] <= max(c, _BACKGROUND[i])
+
+
+def test_appearance_alpha_present_whole_clip_is_opaque():
+    # frames span the rendered clip [0, 5] → neither a genuine entry nor exit → no fade.
+    np.testing.assert_array_equal(appearance_alpha(np.arange(6), 0, 5, fade=4), np.ones(6))
+
+
+def test_appearance_alpha_disabled_is_opaque():
+    np.testing.assert_array_equal(appearance_alpha(np.array([2, 3, 4]), 0, 9, fade=0), np.ones(3))
+
+
+def test_appearance_alpha_ramps_in_at_a_genuine_entry():
+    # first seen at frame 3 but present through the clip end (7) → entry ramp only, then opaque.
+    a = appearance_alpha(np.array([3, 4, 5, 6, 7]), clip_first=0, clip_last=7, fade=2)
+    np.testing.assert_allclose(a, [1 / 3, 2 / 3, 1.0, 1.0, 1.0])
+    assert a[0] < a[1] < a[2]  # strictly ramping up
+
+
+def test_appearance_alpha_ramps_out_at_a_genuine_exit():
+    # present from the clip start (2) but last seen at 6, before the clip end (9) → exit ramp only.
+    a = appearance_alpha(np.array([2, 3, 4, 5, 6]), clip_first=2, clip_last=9, fade=2)
+    np.testing.assert_allclose(a, [1.0, 1.0, 1.0, 2 / 3, 1 / 3])
+    assert a[-1] < a[-2] < a[-3]  # strictly ramping down
+
+
+def test_appearance_alpha_fades_both_sides_of_an_interior_gap():
+    # a real (unbridged) gap between 4 and 11 → exit before it, entry after it.
+    a = appearance_alpha(np.array([3, 4, 11, 12, 13]), clip_first=0, clip_last=20, fade=1)
+    # segment [3,4] exits into the gap; segment [11,12,13] enters out of it (both ends ramp).
+    assert a[1] < 1.0 and a[2] < 1.0          # frame 4 (pre-gap) and 11 (post-gap) are dimmed
+    assert a[0] < 1.0                          # frame 3 also ramps (short pre-gap segment)
+    assert a[3] == 1.0 or a[4] == 1.0          # the post-gap segment settles to opaque
+
+
+def test_appearance_alpha_does_not_fade_clip_boundaries():
+    # touches both clip ends → clipped by the window, not a real entry/exit → stays opaque.
+    np.testing.assert_array_equal(appearance_alpha(np.array([0, 1, 2]), 0, 2, fade=4), np.ones(3))
+
+
+def test_render_fades_a_genuine_entry_but_not_a_settled_frame(tmp_path, make_scene, make_motion):
+    # subject present frames [2..7] of an 8-frame clip → genuine entry at 2, present at the end.
+    subj = Subject(track_id=1, proposal=make_motion(range(2, 8), transl_z=5.0))
+    scene = make_scene(subjects=[subj])
+    cam = _camera(8)
+    faded = ReprojectionOverlayRenderPass(out_dir=tmp_path / "fade", fade_frames=3).render(
+        scene, cam
+    )
+    plain = ReprojectionOverlayRenderPass(out_dir=tmp_path / "plain", fade_frames=0).render(
+        scene, cam
+    )
+    assert _frame(faded, 2) != _frame(plain, 2)   # entry frame is dimmed toward the background
+    assert _frame(faded, 7) == _frame(plain, 7)   # a settled (opaque) frame is untouched
+
+
+def test_render_full_clip_subject_identical_with_fade_on_or_off(tmp_path, make_scene, make_motion):
+    # a subject present across the whole clip never fades → fade on/off render byte-identical.
+    subj = Subject(track_id=1, proposal=make_motion(range(4), transl_z=5.0))
+    scene = make_scene(subjects=[subj])
+    cam = _camera(4)
+    on = ReprojectionOverlayRenderPass(out_dir=tmp_path / "on", fade_frames=4).render(scene, cam)
+    off = ReprojectionOverlayRenderPass(out_dir=tmp_path / "off", fade_frames=0).render(scene, cam)
+    assert _frame0(on) == _frame0(off)

@@ -233,8 +233,18 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
   - Pod hygiene: a pre-validation `git stash@{0}` ("pod-local stale dupes (pre-coherence-validation)")
     holds the box-local edits that were already redundant with `origin/main` (the `file://` decode
     fix + cli lineup, both upstream); preserved (not dropped) so nothing is lost. Pod stopped after.
-  - Remaining in this thread: **#98 renderer fade in/out** for *genuine* entries/exits (so a real
-    substitution still reads as an entrance, not a pop) — `blender_animate.py` + overlay.
+  - **#98 entry/exit fade — overlay half ✅ done** (local, pure numpy/stdlib). The reprojection
+    overlay now ramps a marker's opacity toward the pitch background over `fade_frames` (default 4,
+    `=0` disables) at *genuine* entries/exits **only**: a subject appearing after the clip start,
+    leaving before its end, or either side of an interior gap too long for coherence to bridge —
+    so a real substitution reads as an entrance, not a pop. A subject merely clipped by the window
+    edge is **not** faded (no invented entrance/exit, R-6), and a subject present across the whole
+    clip renders **byte-identical** with fade on/off (back-compat). Pure `appearance_alpha` (segment
+    detection + ramp) and `fade_to_background` (blend) are unit-tested, plus a render-level test that
+    the entry frame dims while a settled frame is untouched (overlay suite 18→27). On-by-default
+    through the composition root (`wiring.py`), so `--render overlay` already fades. **Remaining
+    (pod):** the same fade on the real SMPL-X **mesh** in the Blender video render (material-alpha
+    keyframes) — needs a GPU pod session to validate.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 

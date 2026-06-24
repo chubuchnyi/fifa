@@ -49,6 +49,50 @@ def confidence_to_color(
     return (ch[0], ch[1], ch[2])
 
 
+def fade_to_background(
+    color: tuple[int, int, int], alpha: float, *, bg: tuple[int, int, int] = _BACKGROUND
+) -> tuple[int, int, int]:
+    """Blend ``color`` toward the pitch background by opacity ``alpha`` (1 → color, 0 → bg).
+
+    The overlay has no real alpha channel — a "fade" is a blend toward the background so a marker
+    can ramp in/out instead of popping. ``alpha=1`` leaves the colour untouched (the common case),
+    so a clip with no genuine entries/exits renders exactly as before.
+    """
+    a = float(np.clip(alpha, 0.0, 1.0))
+    out = [int(round(bg[i] * (1.0 - a) + color[i] * a)) for i in range(3)]
+    return (out[0], out[1], out[2])
+
+
+def appearance_alpha(
+    frames: np.ndarray, clip_first: int, clip_last: int, fade: int
+) -> np.ndarray:
+    """Per-frame opacity in ``[0, 1]`` that ramps up at genuine entries and down at genuine exits.
+
+    A *genuine* boundary is a presence edge **interior** to the rendered clip: a subject whose
+    first frame is after the clip start (it walked on / was subbed in), whose last frame is before
+    the clip end (it left), or either side of an interior gap — an absence too long for temporal
+    coherence to bridge (``coherence.fill_pose_gaps`` leaves those as real gaps). A subject simply
+    present at the clip's first/last rendered frame is **not** faded: the window merely clipped it,
+    so inventing a fade there would imply an entrance/exit we have no evidence for (R-6). ``fade <=
+    0`` disables fading (returns all-ones). The input ``frames`` must be sorted ascending.
+    """
+    f = np.asarray(frames, dtype=int).reshape(-1)
+    n = f.shape[0]
+    if fade <= 0 or n == 0:
+        return np.ones(n)
+    breaks = np.nonzero(np.diff(f) > 1)[0]            # index i where f[i+1] is a new segment
+    starts = np.concatenate([[0], breaks + 1])
+    ends = np.concatenate([breaks, [n - 1]])
+    alpha = np.ones(n)
+    for a, b in zip(starts, ends, strict=True):
+        idx = np.arange(a, b + 1)
+        if f[a] > clip_first:                        # genuine entry (after clip start or a gap)
+            alpha[idx] = np.minimum(alpha[idx], (idx - a + 1) / (fade + 1))
+        if f[b] < clip_last:                         # genuine exit (before clip end or a gap)
+            alpha[idx] = np.minimum(alpha[idx], (b - idx + 1) / (fade + 1))
+    return np.clip(alpha, 0.0, 1.0)
+
+
 def quat_to_rotation_matrix(quat: np.ndarray) -> np.ndarray:
     """World→camera rotation ``(3, 3)`` from a (w, x, y, z) quaternion (normalised first)."""
     q = np.asarray(quat, dtype=float).reshape(4)
@@ -128,6 +172,7 @@ class _Marker:
     points: np.ndarray
     color: tuple[int, int, int]
     conf: np.ndarray  # (T,) per-frame confidence in [0, 1]; 1.0 = full (colour untouched)
+    alpha: np.ndarray | None = None  # (T,) per-frame opacity; None → opaque (no entry/exit fade)
 
 
 @dataclass
@@ -141,6 +186,7 @@ class ReprojectionOverlayRenderPass(RenderPass):
 
     out_dir: Path = field(default_factory=lambda: Path("out/render"))
     marker_radius: int = 3
+    fade_frames: int = 4  # ramp opacity over this many frames at genuine entries/exits; 0 = off
 
     def __post_init__(self) -> None:
         self.out_dir = Path(self.out_dir)
@@ -157,6 +203,10 @@ class ReprojectionOverlayRenderPass(RenderPass):
         target = self.out_dir / f"{scene.id}_{quality.value}"
         target.mkdir(parents=True, exist_ok=True)
         markers = _resolved_markers(scene)
+        if self.fade_frames > 0 and camera_path.frames.shape[0]:
+            clip_first, clip_last = int(camera_path.frames[0]), int(camera_path.frames[-1])
+            for m in markers:
+                m.alpha = appearance_alpha(m.frames, clip_first, clip_last, self.fade_frames)
 
         for i, frame in enumerate(camera_path.frames.tolist()):
             fb = np.empty((height, width, 3), dtype=np.uint8)
@@ -232,7 +282,10 @@ def _points_at_frame(
         if hit.size:
             row = int(hit[0])
             pts.append(m.points[row])
-            colors.append(confidence_to_color(m.color, float(m.conf[row])))
+            color = confidence_to_color(m.color, float(m.conf[row]))
+            if m.alpha is not None:
+                color = fade_to_background(color, float(m.alpha[row]))
+            colors.append(color)
     arr = np.asarray(pts, dtype=float).reshape(-1, 3) if pts else np.zeros((0, 3))
     return arr, colors
 
