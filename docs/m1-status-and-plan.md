@@ -325,8 +325,18 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     `== calibration: REAL PnLCalib`, **field calibration confidence 0.61** (per-frame 0.55–0.64),
     **non-identity homography**, ball **height_confidence 0.42** (vs ~0.25–0.33 under the proxy). A full
     48-frame `demo_video.sh --real-calib` run confirmed the same in the production path
-    (`== calibration: REAL PnLCalib` → `reconstructed scene-1: 20 subject(s), ball=yes`) and proceeded
-    into the 4-angle Blender render (mp4 pull + pod-stop confirmed in the follow-up commit). **Honesty
+    (`== calibration: REAL PnLCalib` → `reconstructed scene-1: 20 subject(s), ball=yes`), rendered all
+    4 cameras (`BLENDER_ANIM_OK frames=48 cams=[broadcast,sideline,top,goal] 1280x720 32spp`), and
+    pulled **4 mp4s → `out/anim/video/`** before stopping the pod on exit
+    (`✓ pod stopped — billing back to volume-only`). **Render stage is CPU-bound, not GPU:** with
+    `--device gpu` the OptiX path is genuinely active (acceleration structures + denoising kernels +
+    on-device sampling all in the log), but the scene is tiny (≈20 low-poly bodies + ball), so each
+    render call is ~4.3 s of which only ~1.0 s is GPU sampling (32 spp @ 1280×720) — the other ~3.2 s
+    is host-side scene re-sync (BVH/OptiX-AS rebuild + mesh upload, paid per camera because
+    `blender_animate.py` dirties geometry every frame via `foreach_set`+`update`), plus a one-time
+    ~6 min OptiX kernel compile on frame 0. Net: `nvidia-smi` reads GPU≈0 / CPU-pegged during render —
+    the GPU's real value is in *perception/reconstruction* (calib + pose/ball nets), so the render
+    stage could later be split onto a cheaper CPU box. **Honesty
     (R-6):** 0.61 is the calibrator's own
     inlier×inlier-fraction score (in-sample), **not** independent GT accuracy, and real calibration
     only fires on landscape-broadcast clips with visible markings.
