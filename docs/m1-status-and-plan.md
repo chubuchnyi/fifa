@@ -203,6 +203,38 @@ Stance: fix debt opportunistically in files we're already editing for real reaso
 repo-wide lint sweep as a standalone change (high churn, zero functional value, ungated).
 
 ### Phase D — Polish & observer
+- **Continuity + temporal coherence ✅ done & pod-validated 2026-06-24** (the "players appear
+  from nowhere" fix). Three separable, honest pieces, each at its correct seam:
+  - **Continuity stitching is STRUCTURAL, before POSE** (`core/orchestration/continuity.py`,
+    CLI `--stitch`): re-links fragmented tracklets so an occluded player keeps one identity
+    instead of being re-detected as a new subject. Runs on the tracker output, not as a correction.
+  - **Gap-fill is STRUCTURAL densification** (`core/correction/coherence.py:fill_pose_gaps`): only
+    interior gaps `1 ≤ missing ≤ max_fill_gap` (=12) are bridged — *slerp* for every rotation,
+    *lerp* for translation; measured rows are copied verbatim; longer occlusions are left as true
+    gaps. It can't be a `Correction` because the engine never inserts frames. Bridged frames carry
+    a low `subject_frame_conf` (0.3) so the attention list flags them **inferred, not measured** (R-6).
+  - **Smoothing is a CORRECTION** (`coherence_corrections` → `TEMPORAL_SMOOTHING`, CLI `--coherence`):
+    a normal zero-phase, inspectable, disableable correction layered over the (now dense) proposal —
+    never baked in (ADR-0002).
+  - **Pod validation (real models, real broadcast clip).** Ran the full real golden path
+    (RF-DETR → ByteTrack → SMPLest-X-H → WASB) with both flags on a Colombia broadcast clip:
+    ```
+    cd /workspace/fifa && STITCH=1 COHERENCE=1 PITCH3D_CLIP=/workspace/colombia.mp4 \
+      FRAMES=48 OUT=out/colombia_coh FORMAT=smplx_npz bash scripts/pod_real_e2e.sh
+    ```
+    → `ingested 1920×1080 @ 29.970 fps, 48 frame(s)` → `20 subject(s), ball=yes`;
+    **continuity: 24→20 tracklets (2 merges, 2 blips dropped)** — real ByteTrack fragmentation
+    re-linked; **coherence: bridged 23 gap frame(s) across 2/20 subjects, +20 auto-smoothing
+    correction(s)** — real occlusion gaps filled; `done in 227s`, `scene.smplx_npz` exported
+    (subject ids non-contiguous 1–18, 20, 31 — the fragmentation this fixes). Honesty (R-6): this
+    proves the features **run end-to-end and do genuine non-trivial work on real fragmentation /
+    occlusion** — it is a wiring/runtime proof, **not** a quantitative quality metric (no GT for
+    these clips). Unit suite stays green (339 passed / 7 env-gated skips), no net-new lint/type debt.
+  - Pod hygiene: a pre-validation `git stash@{0}` ("pod-local stale dupes (pre-coherence-validation)")
+    holds the box-local edits that were already redundant with `origin/main` (the `file://` decode
+    fix + cli lineup, both upstream); preserved (not dropped) so nothing is lost. Pod stopped after.
+  - Remaining in this thread: **#98 renderer fade in/out** for *genuine* entries/exits (so a real
+    substitution still reads as an entrance, not a pop) — `blender_animate.py` + overlay.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 
