@@ -8,6 +8,7 @@ from pitch3d.core.correction.coherence import (
     CoherenceConfig,
     add_temporal_coherence,
     coherence_corrections,
+    extend_pose_to_span,
     fill_motion_gaps,
     fill_pose_gaps,
 )
@@ -128,6 +129,86 @@ def test_fill_motion_lifts_and_keeps_shape():
     np.testing.assert_allclose(out.shape.betas, 0.7)  # β is identity, carried through
 
 
+# --- extend_pose_to_span ------------------------------------------------------------
+
+
+def test_extend_trailing_coasts_with_decay():
+    # a runner (+1 z/frame) tracked only on [0,2]; extend to last=5 → it keeps moving but eases.
+    pose = _pose([0, 1, 2], tz=[0.0, 1.0, 2.0])
+    out, added = extend_pose_to_span(pose, 0, 5, decay=0.9, vel_window=3)
+    np.testing.assert_array_equal(out.frames, [0, 1, 2, 3, 4, 5])
+    np.testing.assert_array_equal(added, [3, 4, 5])
+    z = out.transl[:, 2]
+    np.testing.assert_allclose(z[:3], [0, 1, 2])                     # measured rows verbatim
+    np.testing.assert_allclose(z[3:], [3.0, 3.9, 4.71], atol=1e-9)   # decayed coast
+    inc = np.diff(z[2:])                                             # 2→3.0→3.9→4.71
+    assert inc[0] > inc[1] > inc[2] > 0                              # forward, monotonically easing
+
+
+def test_extend_leading_coasts_backward():
+    pose = _pose([3, 4, 5], tz=[3.0, 4.0, 5.0])
+    out, added = extend_pose_to_span(pose, 0, 5, decay=0.9, vel_window=3)
+    np.testing.assert_array_equal(out.frames, [0, 1, 2, 3, 4, 5])
+    np.testing.assert_array_equal(added, [0, 1, 2])
+    z = out.transl[:, 2]
+    np.testing.assert_allclose(z[3:], [3, 4, 5])
+    np.testing.assert_allclose(z[:3], [0.29, 1.1, 2.0], atol=1e-9)
+
+
+def test_extend_standing_holds_position_and_posture():
+    # no translation → velocity 0 → position held; posture frozen at the last measured pose.
+    pose = _pose([0, 1, 2], tz=[0.0, 0.0, 0.0], gz=[0.0, 0.0, 0.7], j0z=[0.2, 0.2, 0.2])
+    out, added = extend_pose_to_span(pose, 0, 5)
+    np.testing.assert_array_equal(added, [3, 4, 5])
+    np.testing.assert_allclose(out.transl[:, 2], 0.0)
+    np.testing.assert_allclose(out.global_orient[3:, 2], 0.7)
+    np.testing.assert_allclose(out.body_pose[3:, 0, 2], 0.2)
+
+
+def test_extend_single_frame_holds_everything():
+    # a player seen once has no measurable motion → hold position + posture both ways.
+    pose = _pose([3], tz=[2.0], gz=[0.5], j0z=[0.1])
+    out, added = extend_pose_to_span(pose, 0, 6)
+    np.testing.assert_array_equal(out.frames, list(range(7)))
+    np.testing.assert_array_equal(added, [0, 1, 2, 4, 5, 6])
+    np.testing.assert_allclose(out.transl[:, 2], 2.0)
+    np.testing.assert_allclose(out.global_orient[:, 2], 0.5)
+    np.testing.assert_allclose(out.body_pose[:, 0, 2], 0.1)
+
+
+def test_extend_noop_when_already_full_span():
+    pose = _pose([0, 1, 2, 3, 4], tz=[0.0, 1.0, 2.0, 3.0, 4.0])
+    out, added = extend_pose_to_span(pose, 0, 4)
+    np.testing.assert_array_equal(out.frames, [0, 1, 2, 3, 4])
+    assert added.size == 0
+
+
+def test_extend_does_not_mutate_input():
+    pose = _pose([2, 3, 4], tz=[2.0, 3.0, 4.0])
+    before_frames = pose.frames.copy()
+    before_tr = pose.transl.copy()
+    extend_pose_to_span(pose, 0, 6)
+    np.testing.assert_array_equal(pose.frames, before_frames)
+    np.testing.assert_array_equal(pose.transl, before_tr)
+
+
+def test_extend_holds_optional_hand_jaw():
+    pose = PoseSequence(
+        frames=np.array([1, 2, 3]),
+        global_orient=np.zeros((3, 3)),
+        body_pose=np.zeros((3, 3, 3)),
+        transl=np.zeros((3, 3)),
+        left_hand_pose=np.full((3, 15, 3), 0.4),
+        right_hand_pose=np.full((3, 15, 3), 0.5),
+        jaw_pose=np.full((3, 3), 0.6),
+    )
+    out, _ = extend_pose_to_span(pose, 0, 5)
+    assert out.left_hand_pose.shape == (6, 15, 3)
+    assert out.right_hand_pose.shape == (6, 15, 3)
+    assert out.jaw_pose.shape == (6, 3)
+    np.testing.assert_allclose(out.jaw_pose, 0.6)
+
+
 # --- coherence_corrections ----------------------------------------------------------
 
 
@@ -229,5 +310,35 @@ def test_add_empty_scene_reports_zero(make_scene):
     out, report = add_temporal_coherence(make_scene(subjects=[]))
     assert report.n_subjects == 0
     assert report.filled_frames == 0
+    assert report.extended_frames == 0
     assert report.corrections_added == 0
     assert out.subjects == []
+
+
+def test_add_extends_partial_subject_to_clip_span(make_scene):
+    # a player tracked only on [2,3] must not evaporate while a full-clip player [0,5] is present:
+    # extend it to the whole span so the on-screen population stays stable.
+    full = Subject(track_id=1, proposal=_motion(_pose(range(6), tz=[0.0, 1, 2, 3, 4, 5])))
+    short = Subject(track_id=2, proposal=_motion(_pose([2, 3], tz=[2.0, 3.0])))
+    out, report = add_temporal_coherence(make_scene(subjects=[full, short]))
+
+    np.testing.assert_array_equal(out.subject(1).proposal.pose.frames, [0, 1, 2, 3, 4, 5])
+    np.testing.assert_array_equal(out.subject(2).proposal.pose.frames, [0, 1, 2, 3, 4, 5])
+
+    cfg = CoherenceConfig()
+    conf2 = out.confidence.subject_frame_conf[2]
+    np.testing.assert_allclose(conf2[[2, 3]], cfg.real_confidence)                 # measured
+    np.testing.assert_allclose(conf2[[0, 1, 4, 5]], cfg.extrapolated_confidence)   # extrapolated
+
+    assert report.subjects_extended == 1   # only the short track needed extension
+    assert report.extended_frames == 4     # frames 0,1,4,5
+
+
+def test_add_can_disable_extension(make_scene):
+    short = Subject(track_id=2, proposal=_motion(_pose([2, 3], tz=[2.0, 3.0])))
+    out, report = add_temporal_coherence(
+        make_scene(subjects=[short]), CoherenceConfig(extend_to_span=False)
+    )
+    np.testing.assert_array_equal(out.subject(2).proposal.pose.frames, [2, 3])
+    assert report.extended_frames == 0
+    assert report.subjects_extended == 0

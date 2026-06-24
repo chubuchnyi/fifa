@@ -124,6 +124,8 @@ def run_dry_run(
     if cr is not None:
         print(f"== coherence: bridged {cr.filled_frames} gap frame(s) across "
               f"{cr.subjects_filled}/{cr.n_subjects} subject(s), "
+              f"extended {cr.extended_frames} edge frame(s) across "
+              f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
 
     # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + radar + UI + textual summary.

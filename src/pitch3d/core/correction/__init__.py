@@ -10,6 +10,7 @@ from .coherence import (
     CoherenceReport,
     add_temporal_coherence,
     coherence_corrections,
+    extend_pose_to_span,
     fill_motion_gaps,
     fill_pose_gaps,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "apply_offset_vector",
     "average_quats",
     "coherence_corrections",
+    "extend_pose_to_span",
     "fill_motion_gaps",
     "fill_pose_gaps",
     "axis_angle_to_matrix",

@@ -11,6 +11,11 @@ in two honest, separable ways:
   occlusion is left as a true gap rather than inventing a second of motion. Bridged frames
   are flagged with a low ``subject_frame_conf`` so the attention list surfaces them as
   inferred, not measured.
+* **Edge extension is STRUCTURAL** (:func:`extend_pose_to_span`): a subject the tracker
+  acquired late or lost early is still physically on the pitch, so instead of letting the
+  renderer blink it out at the clip edges we extend it to the full clip span — posture held,
+  root coasting with a decaying edge velocity ("running keeps running, then eases; standing
+  stays standing"). Extrapolated frames get an even lower ``subject_frame_conf``.
 * **Smoothing is a CORRECTION** (:func:`coherence_corrections`): a normal, inspectable,
   disableable ``TEMPORAL_SMOOTHING`` correction (ADR-0002), zero-phase (centered window),
   layered on top — never baked into the proposal.
@@ -33,7 +38,7 @@ from .engine import interp_rotation, interp_vector, make_smoothing
 
 @dataclass(frozen=True)
 class CoherenceConfig:
-    """Knobs for the gap-fill + auto-smooth pass."""
+    """Knobs for the gap-fill + edge-extend + auto-smooth pass."""
 
     max_fill_gap: int = 12               # bridge interior gaps up to this many missing frames
     smooth_window: int = 5               # centered (zero-phase) smoothing window, frames
@@ -43,6 +48,14 @@ class CoherenceConfig:
     smooth_root_orientation: bool = False  # off by default — can over-flatten fast turns
     filled_confidence: float = 0.3       # subject_frame_conf assigned to bridged frames
     real_confidence: float = 1.0         # subject_frame_conf for measured frames
+    # Edge extension: a tracker-lost player is still physically present, so rather than let the
+    # renderer blink it out at the clip edges we extend each subject to the full clip span —
+    # hold its posture, coast its root with a decaying velocity ("running keeps running, then
+    # eases; standing stays standing"). Bridged interior frames are interpolated as before.
+    extend_to_span: bool = True          # extend every subject to cover the whole clip span
+    extrapolate_decay: float = 0.9       # per-frame geometric velocity decay at the edges
+    extrapolated_confidence: float = 0.2  # subject_frame_conf for extrapolated edge frames
+    extrapolate_velocity_window: int = 3  # frames used to estimate the edge velocity
 
 
 @dataclass
@@ -51,6 +64,8 @@ class CoherenceReport:
 
     filled_frames: int = 0       # total interior frames bridged across all subjects
     subjects_filled: int = 0     # how many subjects had at least one bridged gap
+    extended_frames: int = 0     # total edge frames extrapolated across all subjects
+    subjects_extended: int = 0   # how many subjects were extended to the clip span
     corrections_added: int = 0   # auto smoothing corrections appended
     n_subjects: int = 0
 
@@ -117,6 +132,92 @@ def fill_motion_gaps(motion: SubjectMotion, max_gap: int) -> tuple[SubjectMotion
     return SubjectMotion(shape=motion.copy().shape, pose=new_pose), filled
 
 
+def _geom_steps(k: np.ndarray, decay: float) -> np.ndarray:
+    """Cumulative decayed displacement after ``k`` steps: ``sum_{i=1..k} decay**(i-1)``.
+
+    ``decay == 1`` → ``k`` (constant velocity, never eases); ``decay < 1`` saturates at
+    ``1/(1-decay)`` so an extrapolated runner coasts a *bounded* distance and eases to a stop
+    instead of sliding away forever.
+    """
+    k = np.asarray(k, dtype=float)
+    if abs(decay - 1.0) < 1e-12:
+        return k
+    return (1.0 - np.power(decay, k)) / (1.0 - decay)
+
+
+def _edge_velocity(
+    frames: np.ndarray, values: np.ndarray, window: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Per-frame leading/trailing velocity of ``values`` over a short edge ``window``.
+
+    Returns ``(v_lead, v_trail)``, each shape ``(D,)``. A subject seen only once (``n < 2``)
+    has no measurable motion → zero velocity → the edges hold its position.
+    """
+    n = frames.shape[0]
+    d = values.shape[1]
+    if n < 2:
+        return np.zeros(d), np.zeros(d)
+    w = max(1, min(int(window), n - 1))
+    df_lead = float(frames[w] - frames[0])
+    df_trail = float(frames[-1] - frames[-1 - w])
+    v_lead = (values[w] - values[0]) / df_lead if df_lead else np.zeros(d)
+    v_trail = (values[-1] - values[-1 - w]) / df_trail if df_trail else np.zeros(d)
+    return v_lead, v_trail
+
+
+def extend_pose_to_span(
+    pose: PoseSequence,
+    first: int,
+    last: int,
+    *,
+    decay: float = 0.9,
+    vel_window: int = 3,
+) -> tuple[PoseSequence, np.ndarray]:
+    """Extend a pose to cover ``[first, last]`` by motion-aware edge extrapolation.
+
+    A subject the tracker lost is still physically on the pitch; rather than let the renderer
+    blink it out, we *hold its posture* (every rotation clamps to the nearest measured pose —
+    "standing stays standing") and let the world translation *coast* with a decaying edge
+    velocity ("running keeps running, then eases"). Only leading (``< frames[0]``) and trailing
+    (``> frames[-1]``) frames are added; interior rows are untouched and the input is not
+    mutated. Returns the new pose + the array of added (extrapolated) frame indices.
+    """
+    ef = np.asarray(pose.frames, dtype=int).reshape(-1)
+    if ef.shape[0] == 0:
+        return pose.copy(), np.empty(0, dtype=int)
+    f0, fn = int(ef[0]), int(ef[-1])
+    lead = np.arange(int(first), f0, dtype=int)
+    trail = np.arange(fn + 1, int(last) + 1, dtype=int)
+    added = np.concatenate([lead, trail])
+    if added.size == 0:
+        return pose.copy(), np.empty(0, dtype=int)
+
+    ln, tn = lead.shape[0], trail.shape[0]
+    nf = np.concatenate([lead, ef, trail])
+
+    def _hold(v: np.ndarray) -> np.ndarray:  # posture frozen at the measured edge pose
+        head = np.repeat(v[:1], ln, axis=0)
+        tail = np.repeat(v[-1:], tn, axis=0)
+        return np.concatenate([head, v, tail], axis=0)
+
+    # translation coasts with a decaying edge velocity (held position when velocity is zero)
+    v_lead, v_trail = _edge_velocity(ef, pose.transl, vel_window)
+    tr_head = pose.transl[0][None, :] - v_lead[None, :] * _geom_steps(f0 - lead, decay)[:, None]
+    tr_tail = pose.transl[-1][None, :] + v_trail[None, :] * _geom_steps(trail - fn, decay)[:, None]
+    transl = np.concatenate([tr_head, pose.transl, tr_tail], axis=0)
+
+    new_pose = PoseSequence(
+        frames=nf,
+        global_orient=_hold(pose.global_orient),
+        body_pose=_hold(pose.body_pose),
+        transl=transl,
+        left_hand_pose=None if pose.left_hand_pose is None else _hold(pose.left_hand_pose),
+        right_hand_pose=None if pose.right_hand_pose is None else _hold(pose.right_hand_pose),
+        jaw_pose=None if pose.jaw_pose is None else _hold(pose.jaw_pose),
+    )
+    return new_pose, added
+
+
 def coherence_corrections(
     track_id: int,
     frame_range: tuple[int, int],
@@ -169,8 +270,40 @@ def add_temporal_coherence(
     auto_corrs: list[Correction] = []
     report = CoherenceReport(n_subjects=len(scene.subjects))
 
+    # Clip span = union of every present frame (subjects + ball), matching the range
+    # anim_export.py / blender_animate.py iterate. Extending each subject to this span keeps the
+    # on-screen population stable: a tracker-lost player is reconstructed (held posture + coasting
+    # root, R-6 low confidence) instead of evaporating at the clip edges.
+    span: tuple[int, int] | None = None
+    if cfg.extend_to_span:
+        present = [np.asarray(s.proposal.pose.frames, dtype=int) for s in scene.subjects]
+        present = [f for f in present if f.size]
+        if scene.ball is not None and np.asarray(scene.ball.frames).size:
+            present.append(np.asarray(scene.ball.frames, dtype=int))
+        if present:
+            span = (
+                int(min(int(f.min()) for f in present)),
+                int(max(int(f.max()) for f in present)),
+            )
+
+    # When extending we commit to full presence, so bridge interior gaps of ANY length (both
+    # endpoints are real observations); otherwise respect the conservative max_fill_gap cap.
+    interior_cap = (
+        max(cfg.max_fill_gap, span[1] - span[0]) if span is not None else cfg.max_fill_gap
+    )
+
     for s in scene.subjects:
-        motion, filled = fill_motion_gaps(s.proposal, cfg.max_fill_gap)
+        motion, filled = fill_motion_gaps(s.proposal, interior_cap)
+        extended = np.empty(0, dtype=int)
+        if span is not None:
+            new_pose, extended = extend_pose_to_span(
+                motion.pose,
+                span[0],
+                span[1],
+                decay=cfg.extrapolate_decay,
+                vel_window=cfg.extrapolate_velocity_window,
+            )
+            motion = SubjectMotion(shape=motion.shape, pose=new_pose)
         new_subjects.append(replace(s, proposal=motion))
         frames = motion.pose.frames
         conf = np.full(frames.shape[0], cfg.real_confidence, dtype=float)
@@ -178,6 +311,10 @@ def add_temporal_coherence(
             conf[np.isin(frames, filled)] = cfg.filled_confidence
             report.filled_frames += int(filled.size)
             report.subjects_filled += 1
+        if extended.size:
+            conf[np.isin(frames, extended)] = cfg.extrapolated_confidence
+            report.extended_frames += int(extended.size)
+            report.subjects_extended += 1
         frame_conf[s.track_id] = conf
         corrs = coherence_corrections(s.track_id, (int(frames[0]), int(frames[-1])), cfg)
         auto_corrs.extend(corrs)
