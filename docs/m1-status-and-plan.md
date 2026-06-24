@@ -109,9 +109,34 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   reprojection stats over **only** the confident frames, so the outlier-inflated all-frames RMS no
   longer masks the sub-2 px accuracy where PnLCalib actually locks on. Existing top-level fields are
   unchanged (the measured B1 numbers still reproduce); shared `_pool_summary` keeps both grids identical.
-- Next (box): chase the 25 % miss rate (lower kp threshold / line-only fallback); then evaluate
-  PnLCalib's *own* full camera-calibration module vs our bare DLT; and run B1 over more of the 3143
-  `test` frames than the first 200 (with `on_completed` now separating accuracy from coverage).
+- **MEASURED 2026-06-24 (box, kp-threshold sweep over 400 frames).** Ran the new sweep harness over
+  the first **400** `test` frames (2× the B1 baseline), dialling the PnLCalib keypoint heatmap gate
+  down from its 0.3434 default. Exact command (recorded for reproducibility):
+
+  ```
+  PYTHONPATH=src python scripts/run_calib_eval.py --dataset soccernet \
+      --frames-dir /workspace/SoccerNet/calibration-2023/test/test \
+      --backend pitch3d.adapters.models.pnlcalib_backend:make --device cuda \
+      --limit 400 --threshold-sweep "0.3434,0.25,0.15,0.10"
+  ```
+
+  | kp_th  | completeness | n_completed | on_compl median_m | on_compl acc@5px | all acc@5px |
+  |--------|--------------|-------------|-------------------|------------------|-------------|
+  | 0.3434 | 0.745        | 298         | 0.165             | 0.748            | 0.603       |
+  | 0.25   | 0.793        | 317         | 0.173             | 0.724            | 0.614       |
+  | 0.15   | 0.888        | 355         | 0.200             | 0.658            | 0.608       |
+  | 0.10   | 0.918        | 367         | 0.210             | 0.640            | 0.605       |
+
+  **Honest read (R-6):** the kp gate is a **precision/recall dial, not a free completeness win**.
+  Dropping it lifts completeness 0.745 → 0.918, but the recovered frames are the *hard* ones, so
+  accuracy-where-locked-on degrades in lock-step (`on_completed` line_acc@5px 0.748 → 0.640, median
+  0.165 m → 0.210 m). Net `all_line_acc@5px` stays **flat at ~0.60–0.61** across the whole sweep —
+  the extra calibrated frames are too noisy to add correct lines on balance. Baseline 0.3434
+  **reproduces the prior B1 number (0.745)** on 2× the frames, confirming the measurement is stable.
+- Next (box): the real lever for *better* calibration is **better landmarks, not the gate** —
+  evaluate PnLCalib's *own* full camera-calibration module (lines + circles + L/R disambiguation)
+  vs our bare planar DLT, and/or a line-only fusion that adds correct lines without the keypoint
+  noise. Threshold-tuning is exhausted as a quality lever (the table above).
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in
