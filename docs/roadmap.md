@@ -100,6 +100,7 @@ show up in 3D and export.
 
 | Ticket | Package |
 |---|---|
+| **M2-0 Realism approach spike** — decide the realism strategy before building avatars: textured SMPL-X via *measured pixel-projection* (primary) vs generative avatars (#2); explicitly assess & rule on image upscaler + image-to-3D (see note below); honesty gate = measured over hallucinated. Feeds M2-2. | `adapters/models`, doc |
 | M2-1 Env reconstruction (3DGS/NeRF by camera motion; generative stadium fallback) | `adapters/models` (`EnvReconstructor`) |
 | M2-2 Avatars strategy #1 (textured SMPL-X) + #2 (generative, Rodin-class API) | `adapters/models` (`AvatarBuilder`) |
 | M2-3 `SplatAvatarRenderPass` — assemble photoreal frame from `resolved` | `adapters/render` |
@@ -113,6 +114,21 @@ limited-orbit video from the source clip, **cached**, and clearly flagged "video
 
 **Boundary reminder (R-14/R-15):** seam A only for moderate moves; arbitrary free camera stays on
 the splat/avatar path.
+
+**Realism approach — investigation (M2-0, R-6 honesty, added 2026-06-24):** the realism gap is *3D
+appearance*, not pixel count, so the levers by leverage are: **(1)** texture/appearance on the
+existing tracked SMPL-X by **projecting the player's real broadcast pixels** onto the mesh (M2-2 #1)
+— keeps temporal coherence + rigging and is *measured* (honest); **(2)** Blender materials/lighting
+(grass, PBR kit, shadows, HDRI) — cheap, high payoff; **(3)** clothed-human geometry beyond the naked
+SMPL-X body (ECON/ICON-class), *not* generic image-to-3D. **Assessed & de-prioritized:** *image
+upscalers* (a 2D-pixel tool — they hallucinate detail, can hurt the geometric perception nets, and
+output resolution is set in Blender anyway) and *image-to-3D-object* models (single-shot, un-rigged,
+not temporally coherent → they break our tracked SMPL-X; useful only for static props like
+goals/stands, which broadcast rarely shows cleanly). **Honesty gate (R-6):** generative
+upscale/image-to-3D *hallucinate unmeasured* detail, conflicting with the project's mark-don't-
+fabricate stance — prefer pixel-projection (measured) over generative synthesis, and if generative
+avatars (#2) are used, flag them as synthesized. Realism is a *presentation* layer, sequenced after
+M1's measurement accuracy (calibration/pose), which is the core product value.
 
 ---
 
@@ -190,8 +206,9 @@ core rewrite. Note: seam-B amplification already exercises the same multi-view i
 
 ## Open dependencies / decisions to revisit per milestone
 
-- **M2:** which generative avatar API is primary (realism vs cost vs rig control)? Splat render
-  inside Blender vs external renderer (ADR-0003 default: external + import).
+- **M2:** which generative avatar API is primary (realism vs cost vs rig control)? Resolve via the
+  **M2-0 realism spike** (measured pixel-projection over generative hallucination, R-6 honesty gate).
+  Splat render inside Blender vs external renderer (ADR-0003 default: external + import).
 - **M3:** which ViewSynthesizer backend per seam (seam B favors 3D-consistency, e.g.
   GEN3C/TrajectoryCrafter; seam A favors orbit fidelity, e.g. ReCamMaster) — see ADR-0007.
 - **Cross-cutting:** SMPL-X (hands/face) vs SMPL/SMPL-H (body only) — affects pose dimensions;
