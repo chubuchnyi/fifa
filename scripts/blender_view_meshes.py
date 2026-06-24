@@ -5,8 +5,8 @@ the SAME scene — SMPL-X bodies in team colors on a grass plane under a sun + s
 leaves Blender OPEN with a realtime (MATERIAL-preview) viewport framed through the camera,
 so you can orbit the actual reconstructed crowd live. Needs a display; do NOT pass --background.
 
-Run:
-  DISPLAY=:0 /home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender \
+Run ($PITCH3D_BLENDER points at the Blender 5.x binary; see .env):
+  DISPLAY=:0 "$PITCH3D_BLENDER" \
       --python scripts/blender_view_meshes.py -- --in out/live_real/mesh
 """
 

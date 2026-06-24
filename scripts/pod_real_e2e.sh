@@ -24,12 +24,24 @@ CLIP="${PITCH3D_CLIP:-/workspace/clip.mp4}"
 FRAMES="${FRAMES:-8}"
 OUT="${OUT:-out/run}"
 
+# Optional REAL calibration: set PNLCALIB_REPO (+ its weights) to swap the proxy field
+# calibrator for the wired PnLCalib backend (ADR-0006 dotted path). Empty/absent -> proxy.
+CALIB_ARGS=()
+if [ -n "${PNLCALIB_REPO:-}" ] && [ -d "${PNLCALIB_REPO}" ]; then
+  CALIB_ARGS=(--calibrator keypoints
+              --calibrator-backend pitch3d.adapters.models.pnlcalib_backend:make)
+  echo "== calibration: REAL PnLCalib (${PNLCALIB_REPO})"
+else
+  echo "== calibration: proxy (set PNLCALIB_REPO to a staged checkout to enable real PnLCalib)"
+fi
+
 cd "$REPO"
 echo "== pod real E2E :: frames=${FRAMES} out=${OUT} clip=${CLIP} =="
 t0=$(date +%s)
 PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
   --detector rfdetr --tracker bytetrack --device cuda \
+  "${CALIB_ARGS[@]}" \
   --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
   --render overlay --export gltf --format smplx_npz --out-dir "$OUT"

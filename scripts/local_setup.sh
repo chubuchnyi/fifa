@@ -35,6 +35,7 @@ SKIP_TORCH="${PITCH3D_SKIP_TORCH:-0}"
 SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-SMPL-X/models}"
 
 cd "$(dirname "$0")/.."   # repo root, regardless of where this is invoked from
+set -a; [ -f .env ] && . ./.env; set +a   # machine paths/keys (PITCH3D_BLENDER, ...) from .env
 
 echo "== pitch3d local setup (CPU) =="
 echo "repo:    $(pwd)"
@@ -95,7 +96,6 @@ echo
 echo "== demo assets =="
 BLENDER=""
 for cand in "${PITCH3D_BLENDER:-}" \
-            "/home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender" \
             "$(command -v blender 2>/dev/null || true)"; do
   if [ -n "${cand}" ] && [ -x "${cand}" ]; then BLENDER="${cand}"; break; fi
 done

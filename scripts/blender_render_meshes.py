@@ -4,8 +4,8 @@ This is the real Blender skinned-mesh demo: it builds each SMPL-X body as a Blen
 drops them onto a grass ground plane with a sun + sky, frames them with a camera, and
 renders with Cycles (CPU, so it works headless without a GPU/display).
 
-Run headless:
-  /home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender --background \
+Run headless ($PITCH3D_BLENDER points at the Blender 5.x binary; see .env):
+  "$PITCH3D_BLENDER" --background \
       --python scripts/blender_render_meshes.py -- \
       --in out/cuda/mesh --out out/cuda/mesh/blender_scene.png
 """

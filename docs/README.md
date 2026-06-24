@@ -34,6 +34,7 @@ Each doc has one job. If two docs seem to say the same thing, the table below sa
 
 | Doc | What it is |
 |---|---|
+| [`demo.md`](demo.md) | **The one-command demo:** `scripts/demo.sh` runs the whole pipeline (real GPU perception → render → export → bodies) and narrates each step. Start here to *show* the product. |
 | [`blender-demo.md`](blender-demo.md) | Turn an `smplx_npz` export into a skinned **SMPL-X Blender render** (close-up + scene) — the real body mesh, not the `--observer blender` box proxies. |
 
 ## Running on a GPU box

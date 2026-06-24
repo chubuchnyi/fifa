@@ -38,12 +38,15 @@ the same mesh **without Blender** (quick look / pod sanity check).
 # 1. forward the export to Blender-ready geometry (repo venv)
 .venv/bin/python scripts/smplx_export_meshes.py            # writes out/cuda/mesh/mesh_subject_*.npz
 
-# 2. render with Blender (headless, Cycles CPU)
-/home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender --background \
+# 2. render with Blender (headless, Cycles CPU) — $PITCH3D_BLENDER comes from .env
+"$PITCH3D_BLENDER" --background \
     --python scripts/blender_render_meshes.py -- \
     --in out/cuda/mesh --out out/cuda/mesh/blender_scene.png
 # -> out/cuda/mesh/blender_scene.png  +  blender_scene_hero.png
 ```
+
+> The fastest path is [`scripts/demo.sh`](../scripts/demo.sh) (see [`demo.md`](demo.md)) — it runs
+> both steps for you (and the GPU half) with `.env`-driven paths.
 
 ## Live, interactive GUI
 
@@ -53,7 +56,7 @@ headless still. Needs a display — on a local GNOME/Wayland box pass the sessio
 
 ```bash
 XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 DISPLAY=:0 \
-  /home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender \
+  "$PITCH3D_BLENDER" \
   --python scripts/blender_view_meshes.py -- --in out/live_real/mesh
 # log prints `BLENDER_VIEW_READY -> N bodies ...`; the window opens framed through the camera.
 ```

@@ -31,6 +31,10 @@ import smplx  # noqa: E402
 import torch  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
+from pitch3d.env import load_env  # noqa: E402
+
+load_env()  # any path below may be overridden by the repo-root .env (pod defaults stand otherwise)
+
 MODELS = os.environ.get(
     "PITCH3D_SMPLX_MODELS", "/workspace/repos/SMPLest-X/human_models/human_model_files"
 )

@@ -13,6 +13,9 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
+# Machine-specific config (absolute paths / access details). Template: .env.example
+.env
+
 # Claude Code runtime state (local-only: lock files, scheduled-task bookkeeping)
 .claude/
 

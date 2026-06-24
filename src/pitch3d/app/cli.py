@@ -160,8 +160,17 @@ def run_dry_run(
     result = app.export(scene_id, export_format, str(export_path))
     print(f"== export[{result.fmt.value}]: {', '.join(result.paths) or '(no paths)'}")
 
-    print("\nDRY-RUN OK — reconstruct → observe → attention → preview → edit → resolve → "
-          "observe → render → export completed on fakes.")
+    lineup = {
+        "detect": detector, "track": tracker, "calibrate": calibrator, "pose": pose,
+        "ball": ball, "render": render, "export": export, "observe": observer,
+    }
+    real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
+    fake = [k for k, v in lineup.items() if v == "fake"]
+    print("\nOK — reconstruct → observe → attention → preview → edit → resolve → "
+          "observe → render → export completed.")
+    print(f"  device: {device}")
+    print(f"  real adapters: {', '.join(real) if real else '(none — fully on fakes)'}")
+    print(f"  fake adapters: {', '.join(fake) if fake else '(none — fully real)'}")
     return 0
 
 

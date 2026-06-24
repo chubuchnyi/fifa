@@ -5,7 +5,7 @@ here (in the repo venv). Writes one mesh_<name>.npz {verts (V,3) world z-up, fac
 color (3,)} per subject; scripts/blender_render_meshes.py then loads these and renders a lit,
 shadowed scene with the real Blender engine.
 
-Env (defaults target the local machine; override for the pod):
+Env (machine paths come from the repo-root .env; see .env.example):
   PITCH3D_SMPLX_MODELS  dir containing smplx/SMPLX_NEUTRAL.npz
   PITCH3D_NPZ_DIR       dir of subject_*.npz (pipeline --format smplx_npz export)
   PITCH3D_MESH_OUT      output dir for mesh_*.npz
@@ -22,11 +22,13 @@ import numpy as np
 import smplx
 import torch
 
-MODELS = os.environ.get("PITCH3D_SMPLX_MODELS", "/home/chubuchnyi/AVATAR/SMPL-X/models")
-NPZ_DIR = os.environ.get(
-    "PITCH3D_NPZ_DIR", "/home/chubuchnyi/AVATAR/out/cuda/export/scene.smplx_npz"
-)
-OUT = os.environ.get("PITCH3D_MESH_OUT", "/home/chubuchnyi/AVATAR/out/cuda/mesh")
+from pitch3d.env import load_env
+
+load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, never hard-coded
+
+MODELS = os.environ.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models")
+NPZ_DIR = os.environ.get("PITCH3D_NPZ_DIR", "out/cuda/export/scene.smplx_npz")
+OUT = os.environ.get("PITCH3D_MESH_OUT", "out/cuda/mesh")
 FRAME = int(os.environ.get("PITCH3D_MESH_FRAME", "0"))
 
 # Real SMPLest-X output lives in an image/camera frame whose vertical axis points DOWN, so
