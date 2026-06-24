@@ -94,11 +94,48 @@ PYTHONPATH=src python scripts/run_pose_eval.py --dataset 3dpw \
 - **Joint convention.** 3DPW ships SMPL 24-joint world positions; SMPL's body skeleton (idx 0–21)
   is identical to SMPL-X's, so GT and a SMPL-X backend's FK are selected with the **same**
   `SMPLX_TO_CANONICAL` tuple (e.g. `spine` = joint 6 on both sides) — a like-for-like MPJPE.
-- **Status — honest.** Parsing + projection geometry are unit-tested end-to-end against a
-  synthetic 3DPW-shaped pickle (`tests/unit/test_eval_3dpw.py`); `diagnose_3dpw_scene` +
-  a hard depth check catch an inverted `cam_poses` convention. What still needs a **real run**
-  (their 3DPW download + a GPU for the SMPLest-X backend) is the first actual number — the
-  plumbing no longer is the blocker.
+- **Status — MEASURED 2026-06-24.** Parsing + projection geometry are unit-tested end-to-end
+  against a synthetic 3DPW-shaped pickle (`tests/unit/test_eval_3dpw.py`); `diagnose_3dpw_scene` +
+  a hard depth check catch an inverted `cam_poses` convention. The **first real run** is now done:
+  3DPW staged on the pod via `scripts/get_3dpw.sh`, after a `file://`-prefix decode fix in
+  `detection.py:_iter_frames` (the loader sets `clip_uri = file://<dir>`, which `os.path.isdir`
+  rejected). The geometry diagnostic came back **clean** on every sequence (`depth_positive_fraction
+  = 1.0` → `cam_poses` IS world→camera as assumed; `in_frame` 0.82–1.0).
+
+#### First measured number — SMPLest-X-H on 3DPW `test` (2026-06-24)
+
+Off-the-shelf **SMPLest-X-H** (0.69 B, `smplest_x_h`), **condition A** (GT camera, no PnLCalib),
+**no Procrustes / no PA**, all 16 `SMPLX_TO_CANONICAL` joints, `--stride 30`, single-subject seqs:
+
+| sequence | frames | depth>0 | in-frame | Local MPJPE (m) |
+|---|---|---|---|---|
+| `downtown_downstairs_00`   | 22 | 1.00 | 0.99 | **0.500** |
+| `downtown_stairs_00`       | 40 | 1.00 | 1.00 | **0.520** |
+| `downtown_weeklyMarket_00` | 36 | 1.00 | 0.82 | **0.513** |
+| **mean** | 98 | — | — | **≈ 0.51** |
+
+`global == local` per row because condition A seats the prediction's pelvis exactly at the GT root
+(`_place_subject`), so the root term is zero in both. **Reading (R-6):** this is the harness's own
+root-relative metric on our canonical joints — **not** the official starter-kit evaluator — and
+3DPW is *out-of-domain* (no soccer, close-range handheld). The 0.51 m sits between the ~0.6 m
+zero/T-pose floor and SMART's published **0.054 m**, i.e. an *un-tuned* net captures some
+articulation but the no-PA metric + global-orientation error dominate — **confirming the prior that
+the SMART recipe (not the backbone) buys the jump.** It does not overturn the SMPLest-X pick.
+Reproduce with the §0b command per sequence (envs: `PITCH3D_SMPLESTX_REPO`, `PITCH3D_SMPLESTX_CKPT=smplest_x_h`,
+`PITCH3D_DEVICE=cuda`, `PITCH3D_SMPLX_MODEL_PATH=…/SMPLest-X/human_models/human_model_files`).
+
+> **3DPW licence — cite ECCV'18.** Using 3DPW obligates the citation below (`scripts/get_3dpw.sh`
+> points here for it):
+>
+> ```bibtex
+> @inproceedings{vonMarcard2018,
+>   title     = {Recovering Accurate 3D Human Pose in The Wild Using IMUs and a Moving Camera},
+>   author    = {von Marcard, Timo and Henschel, Roberto and Black, Michael J. and
+>                Rosenhahn, Bodo and Pons-Moll, Gerard},
+>   booktitle = {European Conference on Computer Vision (ECCV)},
+>   year      = {2018},
+> }
+> ```
 
 ---
 

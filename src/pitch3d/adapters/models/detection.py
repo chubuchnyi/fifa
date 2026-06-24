@@ -183,18 +183,19 @@ def _iter_frames(clip: ClipRef):  # pragma: no cover - heavy decode path (needs 
     import cv2
 
     wanted = [int(f) for f in clip.frames.tolist()]
-    if os.path.isdir(clip.uri):
+    path = clip.uri[len("file://"):] if clip.uri.startswith("file://") else clip.uri
+    if os.path.isdir(path):
         files = sorted(
-            f for f in os.listdir(clip.uri) if f.lower().endswith((".png", ".jpg", ".jpeg"))
+            f for f in os.listdir(path) if f.lower().endswith((".png", ".jpg", ".jpeg"))
         )
         for idx in wanted:
-            img = cv2.imread(os.path.join(clip.uri, files[idx]))
+            img = cv2.imread(os.path.join(path, files[idx]))
             if img is None:
-                raise FileNotFoundError(f"frame {idx} unreadable in {clip.uri}")
+                raise FileNotFoundError(f"frame {idx} unreadable in {path}")
             yield idx, img
         return
 
-    cap = cv2.VideoCapture(clip.uri)
+    cap = cv2.VideoCapture(path)
     try:
         for idx in wanted:
             cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
