@@ -40,7 +40,11 @@ SCENE_JSON="$OUT/export/scene.json"
 if [ "${REUSE_SCENE:-0}" = 1 ] && [ -f "$SCENE_JSON" ]; then
   echo "== reuse scene: $SCENE_JSON exists, skipping reconstruction (REUSE_SCENE=1) =="
 else
+  # Forward continuity (--stitch) + temporal coherence (--coherence) into the reconstruction so the
+  # animated bodies inherit the re-linked tracklets + gap-fill; pod_real_e2e.sh gates on these env
+  # vars (off unless =1). Default off here to preserve direct-call behaviour; demo_video.sh sets them.
   FORMAT=json OUT="$OUT" FRAMES="$FRAMES" \
+    STITCH="${STITCH:-0}" COHERENCE="${COHERENCE:-0}" \
     PITCH3D_REPO="$REPO" PITCH3D_PY="$PY" PITCH3D_CLIP="$CLIP" \
     bash scripts/pod_real_e2e.sh
 fi

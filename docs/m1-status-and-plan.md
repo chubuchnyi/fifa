@@ -242,9 +242,18 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     clip renders **byte-identical** with fade on/off (back-compat). Pure `appearance_alpha` (segment
     detection + ramp) and `fade_to_background` (blend) are unit-tested, plus a render-level test that
     the entry frame dims while a settled frame is untouched (overlay suite 18→27). On-by-default
-    through the composition root (`wiring.py`), so `--render overlay` already fades. **Remaining
-    (pod):** the same fade on the real SMPL-X **mesh** in the Blender video render (material-alpha
-    keyframes) — needs a GPU pod session to validate.
+    through the composition root (`wiring.py`), so `--render overlay` already fades.
+  - **#100 entry/exit fade — mesh half ✅ done** (local Blender 5.1.2 validation, no pod needed for
+    the render path). `anim_export.py` bakes the same `appearance_alpha` per-frame vector into each
+    `anim_subject_*.npz` (`PITCH3D_FADE_FRAMES`, default 4), and `blender_animate.py` drives it into
+    the Cycles **Principled BSDF `Alpha`** input per frame — each frame renders independently with
+    `write_still`, so no material keyframes are needed. Validated locally: MSE-vs-opaque-reference
+    decreases monotonically as alpha rises 0.25→1.0, and an alpha=1.0 frame is byte-identical to the
+    opaque reference (full-clip bodies unchanged, back-compat). `demo_video.sh` now defaults
+    `STITCH=1 COHERENCE=1` and forwards `PITCH3D_FADE_FRAMES` end-to-end (→ `pod_make_video.sh` →
+    `pod_real_e2e.sh` / `anim_export.py`), so the pod video inherits continuity + gap-fill + mesh
+    fade. **Remaining (pod):** one GPU run to render the fresh Colombia multi-angle video and eyeball
+    the substitution fade on real footage (#101).
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 

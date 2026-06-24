@@ -61,13 +61,15 @@ assert mesh_files, f"no anim_subject_*.npz in {IN}"
 # Each subject covers its OWN (possibly partial) frame range — real tracks come and go (a player
 # tracked only on frames 24-25 must not truncate the whole clip). So we key everything by GLOBAL
 # frame index and toggle each body's visibility per frame.
-bodies = []          # (object, mesh_datablock, verts (Ti,V,3), {global_frame: row})
+bodies = []          # (object, mesh, verts (Ti,V,3), {global_frame: row}, bsdf, alpha (Ti,))
 all_frames = set()
 lo = np.array([np.inf, np.inf, np.inf])
 hi = -lo
 for mp in mesh_files:
     d = np.load(mp)
     verts, faces, col, frames = d["verts"], d["faces"], d["color"], d["frames"]
+    # Per-frame opacity baked by anim_export.py (#98/#100); absent in older exports → opaque.
+    alpha = d["alpha"] if "alpha" in d.files else np.ones(len(frames), dtype=np.float32)
     me = bpy.data.meshes.new(os.path.basename(mp))
     me.from_pydata(verts[0].tolist(), [], faces.tolist())
     me.update()
@@ -82,7 +84,7 @@ for mp in mesh_files:
     bsdf.inputs["Roughness"].default_value = 0.6
     me.materials.append(mat)
     frame_row = {int(f): i for i, f in enumerate(frames)}
-    bodies.append((ob, me, verts, frame_row))
+    bodies.append((ob, me, verts, frame_row, bsdf, alpha))
     all_frames.update(frame_row)
     lo = np.minimum(lo, verts.reshape(-1, 3).min(0))
     hi = np.maximum(hi, verts.reshape(-1, 3).max(0))
@@ -188,13 +190,16 @@ assert gframes, "no frames to render (empty export?)"
 rendered = 0
 for gf in gframes:
     visible = 0
-    for ob, me, verts, frame_row in bodies:
+    for ob, me, verts, frame_row, bsdf, alpha in bodies:
         row = frame_row.get(gf)
         if row is None:
             ob.hide_render = True
             continue
         ob.hide_render = False
         visible += 1
+        # Ramp opacity at genuine entries/exits (Cycles honours the Principled BSDF Alpha input
+        # directly); a body present across the whole clip stays at alpha 1.0 → opaque as before.
+        bsdf.inputs["Alpha"].default_value = float(alpha[row])
         me.vertices.foreach_set("co", np.ascontiguousarray(verts[row], dtype=np.float32).ravel())
         me.update()
     if ball_ob is not None:

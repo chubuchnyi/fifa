@@ -18,6 +18,8 @@
 #   --reuse-scene   reuse an existing pod-side scene.json (skip the ~3min reconstruction; cheap re-render)
 #   --keep-pod      do NOT stop the pod at the end (debugging)
 #   OUT_LOCAL       local output dir (default out/anim)
+#   STITCH/COHERENCE  forward-continuity + temporal-coherence into reconstruction (default 1; =0 to disable)
+#   PITCH3D_FADE_FRAMES  entry/exit mesh-opacity ramp length in frames (default 4; 0 = hard pop)
 #
 # Machine paths/keys come from the repo-root .env (see .env.example). The pod is ALWAYS stopped on
 # exit (even on error) unless --keep-pod — GPU time is billed.
@@ -40,6 +42,9 @@ CLIP_LOCAL="${PITCH3D_CLIP_LOCAL:-samples/video/Colombia-1-0-Congo-DR1080p.mp4}"
 FRAMES="${FRAMES:-60}"; CAMERAS="${ANIM_CAMERAS:-broadcast,sideline,top,goal}"
 RES="${ANIM_RES:-1280x720}"; SAMPLES="${ANIM_SAMPLES:-32}"; DEVICE="${ANIM_DEVICE:-gpu}"
 OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}"
+# Direction A polish on by default: re-linked tracklets (--stitch) + gap-fill (--coherence) so animated
+# bodies don't pop in/out, and a 4-frame mesh-opacity ramp at genuine entries/exits. Override with =0.
+STITCH="${STITCH:-1}"; COHERENCE="${COHERENCE:-1}"; FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
 while [ $# -gt 0 ]; do case "$1" in
   --clip)     CLIP_LOCAL="$2"; shift;;
   --frames)   FRAMES="$2"; shift;;
@@ -72,6 +77,7 @@ printf '%s┌──────────────────────�
 printf '%s│  pitch3d — broadcast clip → multi-angle 3D animation (POD)    │%s\n' "$CH" "$C0"
 printf '%s└──────────────────────────────────────────────────────────────┘%s\n' "$CH" "$C0"
 info "clip=$CLIP_LOCAL frames=$FRAMES cams=$CAMERAS ${RES_X}x${RES_Y} samples=$SAMPLES device=$DEVICE out=$OUT_LOCAL"
+info "polish: stitch=$STITCH coherence=$COHERENCE fade_frames=$FADE_FRAMES"
 
 say "Preflight"
 [ -f "$CLIP_LOCAL" ] && ok "clip present: $CLIP_LOCAL ($(du -h "$CLIP_LOCAL" | cut -f1))" \
@@ -113,7 +119,9 @@ info "Blender installs on first use (pip bpy, cached on the volume); Cycles rend
   export PITCH3D_WASB_REPO='${PITCH3D_WASB_REPO:-/workspace/repos/WASB-SBDT}' PITCH3D_WASB_CKPT='${PITCH3D_WASB_CKPT:-/workspace/weights/wasb/wasb_soccer_best.pth.tar}' PITCH3D_WASB_DATASET='${PITCH3D_WASB_DATASET:-soccer}'
   export PNLCALIB_REPO='${PNLCALIB_REPO:-}' PNLCALIB_WEIGHTS_KP='${PNLCALIB_WEIGHTS_KP:-}' PNLCALIB_WEIGHTS_LINES='${PNLCALIB_WEIGHTS_LINES:-}'
   export PITCH3D_BLENDER_TARBALL_URL='${PITCH3D_BLENDER_TARBALL_URL:-}'
+  export PITCH3D_FADE_FRAMES='$FADE_FRAMES'
   FRAMES='$FRAMES' OUT='$OUT_POD' REUSE_SCENE='$REUSE_SCENE' \
+  STITCH='$STITCH' COHERENCE='$COHERENCE' \
   ANIM_DEVICE='$DEVICE' ANIM_RES_X='$RES_X' ANIM_RES_Y='$RES_Y' ANIM_SAMPLES='$SAMPLES' \
   ANIM_CAMERAS='$CAMERAS' bash scripts/pod_make_video.sh
 " || die "pod video generation failed (see output above)"

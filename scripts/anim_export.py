@@ -26,6 +26,7 @@ import numpy as np
 import smplx
 import torch
 
+from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.env import load_env
@@ -35,6 +36,9 @@ load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, nev
 MODELS = os.environ.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models")
 SCENE_JSON = os.environ.get("PITCH3D_SCENE_JSON", "out/anim/export/scene.json")
 OUT = os.environ.get("PITCH3D_ANIM_OUT", "out/anim/mesh")
+# Entry/exit opacity fade (#98/#100): bake a per-frame alpha into each subject npz so the Blender
+# render can ramp a body in/out at GENUINE entries/exits instead of popping it. 0 disables (opaque).
+FADE_FRAMES = int(os.environ.get("PITCH3D_FADE_FRAMES", "4"))
 
 # Same orientation gotcha as smplx_export_meshes.py: real SMPLest-X output is camera-frame
 # (y-down) → map to z-up world with new = [x, z, -y]; a fake/canonical export needs the plain
@@ -47,6 +51,16 @@ else:
 os.makedirs(OUT, exist_ok=True)
 scene = load_scene(SCENE_JSON)
 assert scene.subjects, f"no subjects in {SCENE_JSON}"
+
+# Rendered clip span = union of every present frame (subjects + ball) — the same range
+# blender_animate.py iterates. A subject touching this span's edge was clipped by the window, not a
+# genuine entry/exit, so it is NOT faded. Frames are resolve-invariant (the engine never inserts
+# rows; coherence gap-fill is already baked into the proposal), so proposal frames are exact here.
+_present = [np.asarray(s.proposal.pose.frames, dtype=int) for s in scene.subjects]
+if scene.ball is not None and np.asarray(scene.ball.frames).size:
+    _present.append(np.asarray(scene.ball.frames, dtype=int))
+clip_first = int(min(int(f[0]) for f in _present if f.size))
+clip_last = int(max(int(f[-1]) for f in _present if f.size))
 
 # Team colours when the tracker classified them (team A vs B reads clearly in the render);
 # otherwise fall back to a distinct per-subject palette.
@@ -78,6 +92,7 @@ for i, subj in enumerate(scene.subjects):
     transl = np.asarray(motion.pose.transl, dtype=np.float32)  # (T,3) z-up world
     verts = out.vertices.numpy() @ R_SMPLX_TO_OURS.T + transl[:, None, :]  # (T,V,3)
     color = np.asarray(team_color.get(subj.team_id, palette[i % 10]), dtype=np.float32)
+    alpha = appearance_alpha(frames, clip_first, clip_last, FADE_FRAMES)  # (T,) in [0,1]
     dst = os.path.join(OUT, f"anim_subject_{subj.track_id}.npz")
     np.savez(
         dst,
@@ -85,6 +100,7 @@ for i, subj in enumerate(scene.subjects):
         faces=model.faces.astype(np.int32),
         color=color,
         frames=frames.astype(np.int64),
+        alpha=alpha.astype(np.float32),
     )
     span = float(np.linalg.norm(transl.max(0) - transl.min(0)))
     print(
