@@ -27,6 +27,9 @@ Examples::
     PYTHONPATH=src python scripts/run_calib_eval.py --dataset soccernet \
         --frames-dir /workspace/SoccerNet/calibration-2023/test --limit 200 \
         --backend pitch3d.adapters.models.pnlcalib_backend:make
+
+    # A/B the calibration lever — same backend, full camera module instead of bare DLT:
+    #   add --solver camera  (default --solver dlt)
 """
 
 from __future__ import annotations
@@ -74,6 +77,10 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--min-lines", type=int, default=4,
                    help="keep frames with >= this many straight pitch lines (SoccerNet uses > 4)")
     p.add_argument("--device", default="cuda", help="calibrator inference device (soccernet mode)")
+    p.add_argument("--solver", choices=["dlt", "camera"], default="dlt",
+                   help="dlt: bare planar DLT over the backend's keypoints "
+                        "(KeypointFieldCalibrator); camera: PnLCalib's full camera module — "
+                        "points + lines (CameraModuleFieldCalibrator). Same backend, diff solve.")
     # PnLCalib heatmap-gate overrides (the completeness lever). Single values override the backend's
     # env defaults; --threshold-sweep runs several kp gates and tabulates completeness vs accuracy.
     p.add_argument("--kp-threshold", type=float, default=None,
@@ -94,12 +101,14 @@ def _apply_threshold_env(kp_threshold: float | None, line_threshold: float | Non
 
 
 def _calibrate_and_score(
-    frames: list, frames_dir: str, spec: str, device: str, thresholds: tuple[float, ...]
+    frames: list, frames_dir: str, spec: str, device: str, thresholds: tuple[float, ...],
+    solver: str = "dlt",
 ) -> dict:
     """Resolve the dotted calibrator, run it over the SoccerNet clip, and score the homographies."""
     clip = as_clip(frames, frames_dir)
-    calibrator = _resolve_calibrator(spec, device)
-    print(f"[soccernet] calibrating {clip.n_frames} frames from {frames_dir}", file=sys.stderr)
+    calibrator = _resolve_calibrator(spec, device, solver)
+    print(f"[soccernet] calibrating {clip.n_frames} frames from {frames_dir} "
+          f"(solver={solver})", file=sys.stderr)
     fc = calibrator.calibrate(clip)
     return evaluate_calibration(
         frames, fc.homographies, confidence=fc.confidence, thresholds_px=thresholds
@@ -142,7 +151,7 @@ def main(argv: list[str] | None = None) -> dict:
             _apply_threshold_env(kp_th, args.line_threshold)
             rows.append(
                 (kp_th, _calibrate_and_score(frames, args.frames_dir, args.backend,
-                                             args.device, thresholds))
+                                             args.device, thresholds, args.solver))
             )
         summary = summarize_threshold_sweep(rows)
         print(format_sweep_table(summary), file=sys.stderr)
@@ -154,7 +163,9 @@ def main(argv: list[str] | None = None) -> dict:
         return payload
 
     _apply_threshold_env(args.kp_threshold, args.line_threshold)
-    grid = _calibrate_and_score(frames, args.frames_dir, args.backend, args.device, thresholds)
+    grid = _calibrate_and_score(
+        frames, args.frames_dir, args.backend, args.device, thresholds, args.solver
+    )
     print(json.dumps({
         "dataset": "soccernet", "backend": args.backend,
         "n_frames": grid["n_frames"], "grid": grid,
@@ -162,18 +173,32 @@ def main(argv: list[str] | None = None) -> dict:
     return grid
 
 
-def _resolve_calibrator(spec: str, device: str):
-    """Wrap a dotted ``KeypointBackend`` (e.g. PnLCalib) in the robust DLT calibrator.
+def _resolve_calibrator(spec: str, device: str, solver: str = "dlt"):
+    """Wrap a dotted PnLCalib backend in the chosen calibrator — the A/B switch for the lever.
 
-    Mirrors the pipeline's ``--calibrator keypoints --calibrator-backend <spec>`` seam (ADR-0006):
-    the dotted path resolves to a :class:`KeypointBackend` (per-frame pitch landmarks), which
-    :class:`KeypointFieldCalibrator` turns into the per-frame image→world homography via RANSAC +
-    confidence-weighted DLT. Temporal smoothing is **off** (``smooth_window=1``) because each
-    SoccerNet image is an independent broadcast view, not a contiguous clip.
+    Mirrors the pipeline's ``--calibrator keypoints --calibrator-backend <spec>`` seam (ADR-0006).
+    The **same** dotted backend implements both protocols, so ``--solver`` only changes the solve:
+
+    * ``dlt`` → resolve as a :class:`KeypointBackend` (per-frame pitch landmarks) and let
+      :class:`KeypointFieldCalibrator` fit the homography via RANSAC + confidence-weighted DLT.
+    * ``camera`` → resolve as a :class:`HomographyBackend` (PnLCalib's full camera module — points
+      **and** lines) and let :class:`CameraModuleFieldCalibrator` score + smooth its homographies.
+
+    Temporal smoothing is **off** (``smooth_window=1``) either way, because each SoccerNet image is
+    an independent broadcast view, not a contiguous clip.
     """
+    from pitch3d.app.wiring import _resolve_backend
+
+    if solver == "camera":
+        from pitch3d.adapters.models import CameraModuleFieldCalibrator
+        from pitch3d.adapters.models.calibration import HomographyBackend
+
+        return CameraModuleFieldCalibrator(
+            backend=_resolve_backend(spec, HomographyBackend), smooth_window=1, device=device
+        )
+
     from pitch3d.adapters.models import KeypointFieldCalibrator
     from pitch3d.adapters.models.calibration import KeypointBackend
-    from pitch3d.app.wiring import _resolve_backend
 
     return KeypointFieldCalibrator(
         backend=_resolve_backend(spec, KeypointBackend), smooth_window=1, device=device

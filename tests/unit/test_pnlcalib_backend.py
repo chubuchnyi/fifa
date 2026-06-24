@@ -2,7 +2,8 @@
 
 The detection path needs PnLCalib + CUDA + weights (box only), so here we pin only what must hold
 on any machine: the module imports without the heavy stack, ``make()`` builds an env-configured
-backend that satisfies the :class:`KeypointBackend` protocol the dotted-path seam checks, and the
+backend that satisfies **both** the :class:`KeypointBackend` (DLT path) and
+:class:`HomographyBackend` (camera-module path) protocols the dotted-path seam checks, and the
 ``PNLCALIB_*`` environment knobs actually land on the backend.
 """
 
@@ -10,7 +11,7 @@ from __future__ import annotations
 
 import importlib
 
-from pitch3d.adapters.models.calibration import KeypointBackend
+from pitch3d.adapters.models.calibration import HomographyBackend, KeypointBackend
 
 
 def test_module_is_import_safe() -> None:
@@ -19,12 +20,15 @@ def test_module_is_import_safe() -> None:
     assert hasattr(mod, "make")
 
 
-def test_make_satisfies_keypoint_backend_protocol() -> None:
+def test_make_satisfies_both_backend_protocols() -> None:
     from pitch3d.adapters.models.pnlcalib_backend import make
 
     backend = make()
+    # One backend, two solver paths the eval A/Bs via --solver dlt|camera.
     assert isinstance(backend, KeypointBackend)  # runtime_checkable: has detect_keypoints
+    assert isinstance(backend, HomographyBackend)  # runtime_checkable: has calibrate_frames
     assert callable(backend.detect_keypoints)
+    assert callable(backend.calibrate_frames)
 
 
 def test_make_reads_env(monkeypatch) -> None:
@@ -44,6 +48,17 @@ def test_make_reads_env(monkeypatch) -> None:
     assert backend.device == "cpu"
     assert backend.kp_threshold == 0.2
     assert backend.line_threshold == 0.5
+    assert backend.pnl_refine is True  # camera-path PnL line refinement defaults on
+
+
+def test_make_reads_pnl_refine_flag(monkeypatch) -> None:
+    from pitch3d.adapters.models.pnlcalib_backend import make
+
+    assert make().pnl_refine is True  # unset → default on
+    for raw, expected in [("0", False), ("false", False), ("no", False),
+                          ("1", True), ("true", True), ("on", True)]:
+        monkeypatch.setenv("PNLCALIB_PNL_REFINE", raw)
+        assert make().pnl_refine is expected
 
 
 def test_make_kwargs_override_env(monkeypatch) -> None:

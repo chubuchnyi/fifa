@@ -1,8 +1,12 @@
 """FieldCalibrator adapters — shared port contract + DLT/scoring/smoothing (FR-7, M1).
 
-The real pitch-keypoint adapter is exercised with an *injected* stub backend, so its pure half
-(normalized-DLT homography, reprojection scoring, last-good carry, temporal smoothing) is
-verified with **no model, no cv2, no GPU** — the same AC-7 discipline the fakes follow.
+Both real calibrators are exercised with an *injected* stub backend, so their pure halves are
+verified with **no model, no cv2, no GPU** — the same AC-7 discipline the fakes follow:
+
+* :class:`KeypointFieldCalibrator` (DLT path) — normalized-DLT homography, RANSAC outlier
+  rejection, reprojection scoring, last-good carry, temporal smoothing.
+* :class:`CameraModuleFieldCalibrator` (camera-module path) — scores + smooths a backend's
+  full-solve homographies, plus the ``cam_params`` → image→world conversion round-trip.
 """
 
 from __future__ import annotations
@@ -14,13 +18,17 @@ import pytest
 
 from pitch3d.adapters.fakes import FakeFieldCalibrator
 from pitch3d.adapters.models.calibration import (
+    CameraModuleFieldCalibrator,
+    FrameHomography,
     FrameKeypoints,
+    HomographyBackend,
     KeypointBackend,
     KeypointFieldCalibrator,
     PitchKeypointBackend,
     _apply_homography,
     _confidence_from_error,
     _temporal_smooth,
+    image_to_world_from_cam_params,
     reprojection_error,
     solve_homography,
     solve_homography_ransac,
@@ -69,6 +77,26 @@ class _StubKeypointBackend:
 def _keypoints_calibrator(frames=(0, 1, 2), smooth_window=1) -> KeypointFieldCalibrator:
     per = {int(f): (_IMAGE, _WORLD) for f in frames}
     return KeypointFieldCalibrator(backend=_StubKeypointBackend(per), smooth_window=smooth_window)
+
+
+class _StubHomographyBackend:
+    """Returns canned per-frame :class:`FrameHomography` — stands in for the full camera module."""
+
+    def __init__(self, per: dict[int, FrameHomography]):
+        self.per = per
+
+    def calibrate_frames(self, clip: ClipRef) -> list[FrameHomography]:
+        return [self.per[int(f)] for f in clip.frames.tolist()]
+
+
+def _camera_calibrator(frames=(0, 1, 2), smooth_window=1) -> CameraModuleFieldCalibrator:
+    per = {
+        int(f): FrameHomography(frame=int(f), homography=_H_GT, rep_err_px=0.0, n_landmarks=7)
+        for f in frames
+    }
+    return CameraModuleFieldCalibrator(
+        backend=_StubHomographyBackend(per), smooth_window=smooth_window
+    )
 
 
 # --- pure homography maths -----------------------------------------------------
@@ -140,7 +168,8 @@ def test_temporal_smoothing_box_averages_window():
 
 # --- adapter behaviour ---------------------------------------------------------
 @pytest.mark.parametrize(
-    "make", [FakeFieldCalibrator, _keypoints_calibrator], ids=["fake", "keypoints"]
+    "make", [FakeFieldCalibrator, _keypoints_calibrator, _camera_calibrator],
+    ids=["fake", "keypoints", "camera"],
 )
 def test_calibrator_port_contract(make):
     cal = make()
@@ -201,6 +230,106 @@ def test_backends_satisfy_protocol():
 def test_frame_keypoints_rejects_ragged():
     with pytest.raises(ValueError, match="ragged"):
         FrameKeypoints(frame=0, image_uv=np.zeros((3, 2)), world_xy=np.zeros((2, 2)))
+
+
+# --- camera-module calibrator (full PnLCalib solve) ----------------------------
+def _cam_params(fx=1400.0, fy=1350.0, px=480.0, py=270.0):
+    """A valid pinhole camera (orthonormal tilt, elevated position) → PnLCalib cam_params."""
+    theta = 1.2  # tilt about X so the camera looks down at the pitch (ground homography invertible)
+    rotation = np.array(
+        [[1.0, 0.0, 0.0],
+         [0.0, np.cos(theta), -np.sin(theta)],
+         [0.0, np.sin(theta), np.cos(theta)]]
+    )
+    return {
+        "x_focal_length": fx,
+        "y_focal_length": fy,
+        "principal_point": [px, py],
+        "position_meters": [3.0, -10.0, -20.0],
+        "rotation_matrix": rotation.tolist(),
+    }
+
+
+def test_image_to_world_from_cam_params_round_trips_ground_plane():
+    # Build the forward projection P exactly like PnLCalib's projection_from_cam_params, project
+    # centre-origin ground points to image, and assert the converted H recovers world from image.
+    cam_params = _cam_params()
+    it = np.eye(4)[:-1]
+    it[:, -1] = -np.asarray(cam_params["position_meters"])
+    k = np.array([[cam_params["x_focal_length"], 0.0, cam_params["principal_point"][0]],
+                  [0.0, cam_params["y_focal_length"], cam_params["principal_point"][1]],
+                  [0.0, 0.0, 1.0]])
+    p = k @ (np.asarray(cam_params["rotation_matrix"]) @ it)
+    world = np.array([[0.0, 0.0], [20.0, 10.0], [-15.0, 8.0], [5.0, -12.0], [30.0, 25.0]])
+    img = np.array([(p @ [x, y, 0.0, 1.0])[:2] / (p @ [x, y, 0.0, 1.0])[2] for x, y in world])
+
+    h = image_to_world_from_cam_params(cam_params)
+    np.testing.assert_allclose(_apply_homography(h, img), world, atol=1e-6)
+    assert h[2, 2] == pytest.approx(1.0)  # normalised
+
+
+def test_image_to_world_from_cam_params_raises_on_degenerate_camera():
+    # A camera whose third row is collinear with the plane → singular ground homography.
+    bad = _cam_params()
+    bad["rotation_matrix"] = np.zeros((3, 3)).tolist()
+    with pytest.raises(np.linalg.LinAlgError):
+        image_to_world_from_cam_params(bad)
+
+
+def test_camera_solved_frame_recovers_world_and_scores_high():
+    result = _camera_calibrator(frames=(0,)).calibrate(_clip(frames=(0,)))
+    np.testing.assert_allclose(result.image_to_world(0, _IMAGE), _WORLD, atol=1e-6)
+    assert result.confidence[0] > 0.99  # rep_err 0 px → near-1 confidence
+
+
+def test_camera_rep_err_scales_confidence():
+    # conf_scale_px maps the solve's pixel reprojection error to confidence: 0→1, scale→0.5.
+    per = {0: FrameHomography(frame=0, homography=_H_GT, rep_err_px=5.0)}
+    cal = CameraModuleFieldCalibrator(backend=_StubHomographyBackend(per), conf_scale_px=5.0)
+    result = cal.calibrate(_clip(frames=(0,)))
+    assert result.confidence[0] == pytest.approx(0.5)
+
+
+def test_camera_unsolved_frame_carries_last_good_at_zero_confidence():
+    per = {
+        0: FrameHomography(frame=0, homography=_H_GT, rep_err_px=0.0),
+        1: FrameHomography(frame=1, homography=None),  # solve failed for this view
+    }
+    cal = CameraModuleFieldCalibrator(backend=_StubHomographyBackend(per))
+    result = cal.calibrate(_clip(frames=(0, 1)))
+    np.testing.assert_allclose(result.homographies[1], result.homographies[0], atol=1e-12)
+    assert result.confidence[0] > 0.99 and result.confidence[1] == 0.0
+
+
+def test_camera_first_frame_unsolved_falls_back_to_identity():
+    per = {0: FrameHomography(frame=0, homography=None)}
+    cal = CameraModuleFieldCalibrator(backend=_StubHomographyBackend(per))
+    result = cal.calibrate(_clip(frames=(0,)))
+    np.testing.assert_allclose(result.homographies[0], np.eye(3))
+    assert result.confidence[0] == 0.0
+
+
+def test_camera_missing_backend_is_actionable():
+    with pytest.raises(ValueError, match="HomographyBackend"):
+        CameraModuleFieldCalibrator().calibrate(_clip(frames=(0,)))
+
+
+def test_camera_provenance():
+    info = CameraModuleFieldCalibrator(smooth_window=3, conf_scale_px=5.0).info()
+    assert info.name == "PnLCalib-Camera"
+    assert info.backend.value == "local"
+    assert info.params["smooth_window"] == 3
+    assert info.params["conf_scale_px"] == 5.0
+
+
+def test_homography_backend_satisfies_protocol():
+    assert isinstance(_StubHomographyBackend({}), HomographyBackend)
+
+
+def test_frame_homography_reshapes_and_allows_none():
+    fh = FrameHomography(frame=0, homography=np.arange(9, dtype=float))
+    assert fh.homography.shape == (3, 3)
+    assert FrameHomography(frame=1, homography=None).homography is None
 
 
 @pytest.mark.skipif(

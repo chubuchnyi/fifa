@@ -139,6 +139,18 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   evaluate PnLCalib's *own* full camera-calibration module (lines + circles + L/R disambiguation)
   vs our bare planar DLT, and/or a line-only fusion that adds correct lines without the keypoint
   noise. Threshold-tuning is exhausted as a quality lever (the table above).
+  **Camera-module lever WIRED 2026-06-24 (code-complete, pending pod A/B).** The same PnLCalib
+  backend now implements a second path: `_PnLCalibBackend.calibrate_frames()` runs the full
+  `FramebyFrameCalib` (points **and** lines, mode + RANSAC voting, optional PnL line refinement) and
+  emits a per-frame image→world homography, converted from the solved `cam_params` in the *same*
+  centre-origin metric frame as the DLT path (`image_to_world_from_cam_params`, verified against
+  PnLCalib's own `projection_from_cam_params`). A new pure `CameraModuleFieldCalibrator` +
+  `HomographyBackend` protocol score/smooth it (sibling to `KeypointFieldCalibrator`/`KeypointBackend`),
+  and `run_calib_eval.py --solver dlt|camera` A/Bs them through the one dotted-path seam. Pure half
+  is unit-tested with no GPU (conversion round-trip + scoring/last-good-carry); ruff+mypy clean.
+  **Still pending:** the box A/B (camera vs DLT on SoccerNet `test`: completeness, `on_completed`
+  median_m, line_acc@5px) — numbers land here once measured. `PNLCALIB_PNL_REFINE` toggles the PnL
+  line refinement (default on).
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in

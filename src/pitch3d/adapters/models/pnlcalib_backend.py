@@ -1,12 +1,20 @@
-"""PnLCalib pitch-keypoint backend — the real ``KeypointBackend`` for the B1 SoccerNet eval.
+"""PnLCalib pitch backend — the real ``KeypointBackend`` **and** ``HomographyBackend`` (B1 eval).
 
 Wraps the public **PnLCalib** field-calibration network (two HRNet heads — pitch *keypoints* and
-pitch *lines*; Gutiérrez-Pérez & Agudo, 2024) as a
-:class:`pitch3d.adapters.models.calibration.KeypointBackend`. Per frame it runs both heads,
-decodes pitch landmarks with PnLCalib's own heatmap post-processing, and pairs each detected
-landmark id with its known pitch-plane world coordinate (metres, centre-origin, ``Z = 0``). The
-robust homography solve (RANSAC + confidence-weighted DLT + temporal smoothing) is done downstream
-by :class:`KeypointFieldCalibrator`; this adapter only emits the image↔world correspondences.
+pitch *lines*; Gutiérrez-Pérez & Agudo, 2024). One backend, two solver paths so the eval can A/B
+them through the same dotted-path seam:
+
+* :meth:`detect_keypoints` (``KeypointBackend``) — emits raw image↔world landmark correspondences
+  and lets the downstream :class:`KeypointFieldCalibrator` fit a planar homography by **bare DLT**
+  (points only; the line head is used only to complete extra keypoints, then discarded).
+* :meth:`calibrate_frames` (``HomographyBackend``) — runs PnLCalib's **full camera module**
+  (:class:`FramebyFrameCalib` — points **and** lines, mode + RANSAC voting, optional PnL line
+  refinement) on the box and emits a ready image→world homography per frame, which
+  :class:`CameraModuleFieldCalibrator` only scores + smooths. This is the stronger lever.
+
+Both share the same front half (:meth:`_infer_frame`: resize → both HRNet heads → heatmap decode).
+World coords are metres, centre-origin, ``Z = 0`` — identical frame for both paths, so their output
+homographies are directly comparable.
 
 It is the heavy backend injected through the dotted-path seam (ADR-0006)::
 
@@ -25,12 +33,15 @@ without editing any wiring:
     * ``PNLCALIB_DEVICE`` — torch device (``cuda:0``)
     * ``PNLCALIB_KP_THRESHOLD`` — keypoint heatmap gate (``0.3434``, PnLCalib's own default)
     * ``PNLCALIB_LINE_THRESHOLD`` — line heatmap gate (``0.7867``, PnLCalib's own default)
+    * ``PNLCALIB_PNL_REFINE`` — camera-path PnL line refinement (``1``/true default; only affects
+      :meth:`calibrate_frames`)
 
 The world tables (``keypoint_world_coords_2D`` / ``…aux…``, already centre-origin in PnLCalib's
 ``utils.utils_calib``) are **imported from the installed PnLCalib**, never copied, so the id→world
 mapping always matches the weights actually loaded. All heavy imports (torch, cv2, PnLCalib) are
-lazy, so importing this module is cheap and dependency-free — only :meth:`detect_keypoints` pulls
-the stack. PnLCalib needs ``shapely`` (``pip install shapely`` into the box venv).
+lazy, so importing this module is cheap and dependency-free — only the work methods
+(:meth:`detect_keypoints` / :meth:`calibrate_frames`) pull the stack. PnLCalib needs ``shapely``
+(``pip install shapely`` into the box venv).
 """
 
 from __future__ import annotations
@@ -41,7 +52,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ...core.ports.io import ClipRef
-from .calibration import FrameKeypoints
+from .calibration import FrameHomography, FrameKeypoints, image_to_world_from_cam_params
 
 # PnLCalib resizes every frame to this fixed input before the HRNet heads; its heatmap decoding
 # returns landmark coords in this space, and ``complete_keypoints(normalize=True)`` divides by it.
@@ -61,31 +72,47 @@ class _PnLCalibBackend:
     device: str = "cuda:0"
     kp_threshold: float = 0.3434
     line_threshold: float = 0.7867
+    pnl_refine: bool = True
     _state: dict = field(default_factory=dict, init=False, repr=False)
+
+    def _infer_frame(  # pragma: no cover - heavy path
+        self, s: dict, bgr: np.ndarray
+    ) -> tuple[dict, dict, int, int]:
+        """Run both HRNet heads on one BGR frame → ``(kp_dict, lines_dict, w_orig, h_orig)``.
+
+        The shared front half of both backends: resize → keypoint + line heads → PnLCalib heatmap
+        decode → ``complete_keypoints(normalize=True)``. The dicts are **normalised** ``[0, 1]`` (as
+        PnLCalib's own ``inference.py`` produces them): :meth:`detect_keypoints` multiplies them to
+        original px itself, while :meth:`calibrate_frames` hands them to a ``denormalize=True``
+        camera that scales them by the original frame dims. ``lines_dict`` is discarded by the DLT
+        path but is the camera module's key extra constraint, so it is always returned here.
+        """
+        torch, cv2, Image = s["torch"], s["cv2"], s["Image"]
+        h_orig, w_orig = bgr.shape[:2]
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        tensor = s["to_tensor"](Image.fromarray(rgb)).float().unsqueeze(0)
+        if tensor.shape[-1] != _INPUT_W:
+            tensor = s["resize"](tensor)
+        tensor = tensor.to(self.device)
+        with torch.no_grad():
+            heatmaps = s["model"](tensor)
+            heatmaps_l = s["model_l"](tensor)
+        kp_raw = s["get_kp"](heatmaps[:, :-1, :, :])
+        line_raw = s["get_line"](heatmaps_l[:, :-1, :, :])
+        kp_list = s["coords_to_dict"](kp_raw, threshold=self.kp_threshold)
+        line_list = s["coords_to_dict"](line_raw, threshold=self.line_threshold)
+        kp_dict, lines_dict = s["complete"](
+            kp_list[0], line_list[0], w=_INPUT_W, h=_INPUT_H, normalize=True
+        )
+        return kp_dict, lines_dict, int(w_orig), int(h_orig)
 
     def detect_keypoints(self, clip: ClipRef) -> list[FrameKeypoints]:
         """Detect pitch landmarks per frame of ``clip`` (a video file or a directory of frames)."""
         s = self._load()
-        torch, cv2, Image = s["torch"], s["cv2"], s["Image"]
 
         out: list[FrameKeypoints] = []
         for idx, bgr in s["iter_frames"](clip):
-            h_orig, w_orig = bgr.shape[:2]
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-            tensor = s["to_tensor"](Image.fromarray(rgb)).float().unsqueeze(0)
-            if tensor.shape[-1] != _INPUT_W:
-                tensor = s["resize"](tensor)
-            tensor = tensor.to(self.device)
-            with torch.no_grad():
-                heatmaps = s["model"](tensor)
-                heatmaps_l = s["model_l"](tensor)
-            kp_raw = s["get_kp"](heatmaps[:, :-1, :, :])
-            line_raw = s["get_line"](heatmaps_l[:, :-1, :, :])
-            kp_list = s["coords_to_dict"](kp_raw, threshold=self.kp_threshold)
-            line_list = s["coords_to_dict"](line_raw, threshold=self.line_threshold)
-            kp_dict, _ = s["complete"](
-                kp_list[0], line_list[0], w=_INPUT_W, h=_INPUT_H, normalize=True
-            )
+            kp_dict, _lines, w_orig, h_orig = self._infer_frame(s, bgr)
 
             uv, world, conf = [], [], []
             for kid, d in kp_dict.items():
@@ -99,6 +126,46 @@ class _PnLCalibBackend:
                     image_uv=np.asarray(uv, dtype=float).reshape(-1, 2),
                     world_xy=np.asarray(world, dtype=float).reshape(-1, 2),
                     confidence=np.asarray(conf, dtype=float).reshape(-1),
+                )
+            )
+        return out
+
+    def calibrate_frames(self, clip: ClipRef) -> list[FrameHomography]:
+        """Full camera-module solve per frame of ``clip`` → image→world homographies.
+
+        The camera-module counterpart of :meth:`detect_keypoints`: instead of emitting raw
+        correspondences for a downstream DLT, it feeds the detected keypoints **and pitch lines**
+        into PnLCalib's :class:`FramebyFrameCalib` and runs ``heuristic_voting`` (mode + RANSAC
+        sweep, optional PnL line refinement), then converts the winning camera parameters to an
+        image→world homography in the same centre-origin metric frame the DLT path uses. A frame
+        whose solve fails (no consensus, or a degenerate/singular camera) is emitted with
+        ``homography=None`` so the calibrator can surface it as zero-confidence drift (R-6), never a
+        crash that aborts the whole clip.
+        """
+        s = self._load()
+        cam_cls = s["cam_cls"]
+
+        out: list[FrameHomography] = []
+        for idx, bgr in s["iter_frames"](clip):
+            kp_dict, lines_dict, w_orig, h_orig = self._infer_frame(s, bgr)
+            n_landmarks = len(kp_dict)
+            homography: np.ndarray | None = None
+            rep_err: float | None = None
+            try:
+                cam = cam_cls(iwidth=w_orig, iheight=h_orig, denormalize=True)
+                cam.update(kp_dict, lines_dict)
+                result = cam.heuristic_voting(refine_lines=self.pnl_refine)
+                if result is not None:
+                    rep_err = float(result["rep_err"])
+                    homography = image_to_world_from_cam_params(result["cam_params"])
+            except Exception:  # noqa: BLE001 — degenerate view → unsolved frame, not a clip-killer
+                homography, rep_err = None, None
+            out.append(
+                FrameHomography(
+                    frame=int(idx),
+                    homography=homography,
+                    rep_err_px=rep_err,
+                    n_landmarks=int(n_landmarks),
                 )
             )
         return out
@@ -122,6 +189,7 @@ class _PnLCalibBackend:
         from model.cls_hrnet_l import get_cls_net as get_cls_net_l
         from PIL import Image
         from utils.utils_calib import (
+            FramebyFrameCalib,  # full camera-module solve: points + lines, mode/RANSAC sweep
             keypoint_aux_world_coords_2D,  # already centre-origin: [x-52.5, y-34]
             keypoint_world_coords_2D,
         )
@@ -155,6 +223,7 @@ class _PnLCalibBackend:
             "get_line": get_keypoints_from_heatmap_batch_maxpool_l,
             "coords_to_dict": coords_to_dict,
             "complete": complete_keypoints,
+            "cam_cls": FramebyFrameCalib,
             "kw": keypoint_world_coords_2D,
             "ka": keypoint_aux_world_coords_2D,
             "iter_frames": _iter_frames,
@@ -195,4 +264,13 @@ def make(
         device=os.environ.get("PNLCALIB_DEVICE", "cuda:0"),
         kp_threshold=kp_th,
         line_threshold=line_th,
+        pnl_refine=_env_flag("PNLCALIB_PNL_REFINE", default=True),
     )
+
+
+def _env_flag(name: str, *, default: bool) -> bool:
+    """Read a boolean env var (``1/0``, ``true/false``, ``yes/no``); unset → ``default``."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}

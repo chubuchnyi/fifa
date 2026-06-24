@@ -63,6 +63,34 @@ class FrameKeypoints:
                 raise ValueError(f"ragged keypoint confidence at frame {self.frame}")
 
 
+@dataclass
+class FrameHomography:
+    """Backend output for one frame: a full-camera-module image→world homography (or ``None``).
+
+    The camera-module counterpart of :class:`FrameKeypoints`: instead of raw landmark
+    correspondences (which a downstream DLT would then fit), the backend has *already* run a full
+    field-calibration solve (e.g. PnLCalib's ``FramebyFrameCalib`` — points **and** lines) and emits
+    the resulting image→world homography directly.
+
+    Attributes:
+        frame: Source frame index.
+        homography: ``(3, 3)`` image→world homography (pitch-plane metres, centre-origin), or
+            ``None`` when the solve failed for this frame (too few landmarks / degenerate view).
+        rep_err_px: The solve's own reprojection error in **pixels** (lower is better), used to
+            score confidence downstream; ``None`` when unavailable / unsolved.
+        n_landmarks: Detected pitch landmarks that fed the solve (diagnostic only).
+    """
+
+    frame: int
+    homography: np.ndarray | None
+    rep_err_px: float | None = None
+    n_landmarks: int = 0
+
+    def __post_init__(self) -> None:
+        if self.homography is not None:
+            self.homography = np.asarray(self.homography, dtype=float).reshape(3, 3)
+
+
 @runtime_checkable
 class KeypointBackend(Protocol):
     """The heavy half: detect matched pitch landmarks per frame.
@@ -73,6 +101,23 @@ class KeypointBackend(Protocol):
 
     def detect_keypoints(self, clip: ClipRef) -> list[FrameKeypoints]:
         """Return one :class:`FrameKeypoints` per processed frame of ``clip``."""
+        ...
+
+
+@runtime_checkable
+class HomographyBackend(Protocol):
+    """The heavy half for the camera-module solver: emit a per-frame image→world homography.
+
+    The camera-module counterpart of :class:`KeypointBackend`. Where that protocol stops at raw
+    landmark correspondences (leaving the homography fit to the pure DLT calibrator), this one runs
+    a *full* field-calibration solve on the box (points **and** pitch lines, e.g. PnLCalib's
+    ``FramebyFrameCalib`` + heuristic voting) and returns the homography directly. Kept behind this
+    protocol so :class:`CameraModuleFieldCalibrator`'s scoring + smoothing stays testable with a
+    stub returning canned :class:`FrameHomography` — no GPU.
+    """
+
+    def calibrate_frames(self, clip: ClipRef) -> list[FrameHomography]:
+        """Return one :class:`FrameHomography` per processed frame of ``clip``."""
         ...
 
 
@@ -300,6 +345,114 @@ class KeypointFieldCalibrator(FieldCalibrator):
 
     def _backend(self) -> KeypointBackend:
         return self.backend or PitchKeypointBackend(device=self.device)
+
+
+def image_to_world_from_cam_params(cam_params: dict) -> np.ndarray:
+    """Convert a PnLCalib camera-module ``cam_params`` dict to a ``(3, 3)`` image→world homography.
+
+    The camera module solves a full pinhole camera ``P = K · [R | t]`` (3×4), mapping centre-origin
+    world metres ``[X, Y, Z, 1]ᵀ`` to image pixels. On the pitch plane ``Z = 0`` the third column
+    drops out, so the world→image map is the ``(3, 3)`` ``H_w→i = P[:, (0, 1, 3)]``; we invert and
+    renormalise it to get image→world in the **same** centre-origin metric frame the DLT path uses
+    (``keypoint_world_coords_2D``), making it a drop-in for :class:`FieldCalibration`.
+
+    Args:
+        cam_params: PnLCalib ``cam_params`` with keys ``x_focal_length``, ``y_focal_length``,
+            ``principal_point`` (2,), ``position_meters`` (3,), ``rotation_matrix`` (3×3).
+
+    Returns:
+        ``(3, 3)`` image→world homography, normalised so ``H[2, 2] == 1``.
+
+    Raises:
+        numpy.linalg.LinAlgError: If the world→image plane map is singular (degenerate view) — the
+            caller turns this into a ``None`` :class:`FrameHomography` for that frame.
+    """
+    fx = float(cam_params["x_focal_length"])
+    fy = float(cam_params["y_focal_length"])
+    px, py = (float(v) for v in cam_params["principal_point"])
+    position = np.asarray(cam_params["position_meters"], dtype=float).reshape(3)
+    rotation = np.asarray(cam_params["rotation_matrix"], dtype=float).reshape(3, 3)
+
+    extrinsic = np.eye(4, dtype=float)[:-1]  # (3, 4): [I | 0]
+    extrinsic[:, -1] = -position  # camera at `position`, so translate world by −position
+    intrinsic = np.array([[fx, 0.0, px], [0.0, fy, py], [0.0, 0.0, 1.0]], dtype=float)
+    projection = intrinsic @ (rotation @ extrinsic)  # (3, 4) world→image
+
+    h_w2i = projection[:, [0, 1, 3]]  # drop Z column (pitch plane Z=0) → (3, 3) world→image
+    h_i2w = np.linalg.inv(h_w2i)  # raises LinAlgError on a singular/degenerate view
+    return h_i2w / h_i2w[2, 2] if abs(h_i2w[2, 2]) > 1e-12 else h_i2w
+
+
+@dataclass
+class CameraModuleFieldCalibrator(FieldCalibrator):
+    """Full-camera-module field calibrator (FR-7) — scores + smooths a backend's per-frame solve.
+
+    The camera-module sibling of :class:`KeypointFieldCalibrator`. Where that class fits a planar
+    DLT from *points only* in-process, this one delegates the whole solve to a
+    :class:`HomographyBackend` that runs PnLCalib's ``FramebyFrameCalib`` on the box — points
+    **and** pitch lines, RANSAC/mode sweep, L/R plane disambiguation — and emits a ready image→world
+    homography per frame. The pure half here is the *honest bookkeeping*: score each solved frame by
+    its reprojection error (pixels), carry the last good homography through unsolved frames at
+    confidence 0 (drift surfaced, never hidden — R-6), and apply optional temporal smoothing.
+
+    Attributes:
+        backend: The full-solve homography backend. Required — there is no in-process fallback (the
+            camera module lives on the GPU box); ``calibrate`` raises if it is ``None``.
+        smooth_window: Centred temporal-smoothing window in frames (1 disables smoothing).
+        conf_scale_px: Reprojection error (**pixels**) that maps to confidence 0.5.
+        device: Inference device, forwarded for provenance only (the backend owns the model).
+    """
+
+    backend: HomographyBackend | None = None
+    smooth_window: int = 1
+    conf_scale_px: float = 5.0
+    device: str = "cuda"
+
+    def info(self) -> ModelInfo:
+        return ModelInfo(
+            name="PnLCalib-Camera",
+            backend=Backend.LOCAL,
+            params={
+                "smooth_window": self.smooth_window,
+                "conf_scale_px": self.conf_scale_px,
+                "device": self.device,
+            },
+        )
+
+    def calibrate(self, clip: ClipRef) -> FieldCalibration:
+        if self.backend is None:
+            raise ValueError(
+                "CameraModuleFieldCalibrator needs a HomographyBackend (the full camera-module "
+                "solve runs on the GPU box); inject one or use KeypointFieldCalibrator (DLT)."
+            )
+        per = self.backend.calibrate_frames(clip)
+        if not per:
+            raise ValueError("homography backend returned no frames")
+
+        homs: list[np.ndarray] = []
+        confs: list[float] = []
+        frames: list[int] = []
+        last_good: np.ndarray | None = None
+        for fh in per:
+            if fh.homography is not None:
+                h = fh.homography
+                rep = fh.rep_err_px
+                err = rep if rep is not None and np.isfinite(rep) else 0.0
+                conf = _confidence_from_error(err, self.conf_scale_px)
+                last_good = h
+            else:
+                h = last_good if last_good is not None else np.eye(3)
+                conf = 0.0  # unsolved frame: carry last good, but flag zero confidence (R-6)
+            homs.append(h)
+            confs.append(conf)
+            frames.append(int(fh.frame))
+
+        smoothed = _temporal_smooth(np.stack(homs), self.smooth_window)
+        return FieldCalibration(
+            homographies=smoothed,
+            frames=np.asarray(frames, dtype=int),
+            confidence=np.asarray(confs, dtype=float),
+        )
 
 
 @dataclass

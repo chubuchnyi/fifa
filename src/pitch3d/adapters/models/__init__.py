@@ -20,7 +20,11 @@ from ...core.scene.camera import CameraTrack
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .ball import TrackNetBackend, TrackNetBallTracker
-from .calibration import KeypointFieldCalibrator, PitchKeypointBackend
+from .calibration import (
+    CameraModuleFieldCalibrator,
+    KeypointFieldCalibrator,
+    PitchKeypointBackend,
+)
 from .detection import DETECTOR_CLASS_MAPS, RFDETRBackend, RFDETRDetector
 from .pose import GVHMRBackend, GVHMRPoseEstimator
 from .tracking import ByteTrackBackend, ByteTrackTracker
@@ -64,6 +68,7 @@ __all__ = [
     "ApiAvatarBuilder",
     "ByteTrackBackend",
     "ByteTrackTracker",
+    "CameraModuleFieldCalibrator",
     "GVHMRBackend",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
