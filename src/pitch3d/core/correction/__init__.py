@@ -5,6 +5,14 @@
 
 from __future__ import annotations
 
+from .coherence import (
+    CoherenceConfig,
+    CoherenceReport,
+    add_temporal_coherence,
+    coherence_corrections,
+    fill_motion_gaps,
+    fill_pose_gaps,
+)
 from .engine import (
     apply_offset_rotation,
     apply_offset_vector,
@@ -34,9 +42,15 @@ from .rotations import (
 )
 
 __all__ = [
+    "CoherenceConfig",
+    "CoherenceReport",
+    "add_temporal_coherence",
     "apply_offset_rotation",
     "apply_offset_vector",
     "average_quats",
+    "coherence_corrections",
+    "fill_motion_gaps",
+    "fill_pose_gaps",
     "axis_angle_to_matrix",
     "axis_angle_to_quat",
     "compose_axis_angle",

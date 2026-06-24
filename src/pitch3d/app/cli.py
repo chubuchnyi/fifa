@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from ..adapters.io import FFmpegIngestor
+from ..core.correction.coherence import CoherenceConfig
 from ..core.correction.engine import make_offset
 from ..core.orchestration import StitchConfig
 from ..core.ports.io import ClipRef
@@ -71,7 +72,7 @@ def run_dry_run(
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
-    stitch: bool = False,
+    stitch: bool = False, coherence: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -106,8 +107,10 @@ def run_dry_run(
 
     # 2) Reconstruction: DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the proposal scene.
     stitch_cfg = StitchConfig() if stitch else None
+    coherence_cfg = CoherenceConfig() if coherence else None
     scene_id = app.run_reconstruction(
-        episode.id, on_ground=_airborne_on_ground(n), stitch_cfg=stitch_cfg
+        episode.id, on_ground=_airborne_on_ground(n),
+        stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg,
     )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
@@ -117,6 +120,11 @@ def run_dry_run(
     if sr is not None:
         print(f"== continuity: {sr.n_in}→{sr.n_out} tracklets "
               f"({len(sr.merges)} merge(s), {len(sr.dropped)} blip(s) dropped)")
+    cr = app.coherence_report(scene_id)
+    if cr is not None:
+        print(f"== coherence: bridged {cr.filled_frames} gap frame(s) across "
+              f"{cr.subjects_filled}/{cr.n_subjects} subject(s), "
+              f"+{cr.corrections_added} auto-smoothing correction(s)")
 
     # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + radar + UI + textual summary.
     obs_before = app.observe(
@@ -237,6 +245,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stitch", action="store_true",
                         help="re-link fragmented tracklets between TRACK and POSE so "
                              "occluded players don't 'appear from nowhere' (off by default)")
+    parser.add_argument("--coherence", action="store_true",
+                        help="bridge short interior pose gaps (slerp/lerp) + add auto "
+                             "temporal-smoothing corrections (off by default)")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -261,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         calibrator_backend=args.calibrator_backend,
         tracker_backend=args.tracker_backend,
         stitch=args.stitch,
+        coherence=args.coherence,
     )
 
 

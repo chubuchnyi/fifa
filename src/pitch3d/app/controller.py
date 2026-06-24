@@ -18,6 +18,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..core.agent import scene_summary, standard_viewpoints
+from ..core.correction.coherence import (
+    CoherenceConfig,
+    CoherenceReport,
+    add_temporal_coherence,
+)
 from ..core.correction.engine import (
     make_keyframes,
     make_offset,
@@ -61,6 +66,7 @@ class Application:
     _scenes: dict[str, Scene] = field(default_factory=dict, repr=False)
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
+    _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
     def _next(self, kind: str) -> int:
@@ -99,11 +105,17 @@ class Application:
         on_ground: np.ndarray | None = None,
         params: dict | None = None,
         stitch_cfg: StitchConfig | None = None,
+        coherence_cfg: CoherenceConfig | None = None,
     ) -> str:
         """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
 
         ``stitch_cfg`` (default ``None`` = off) enables structural track-continuity stitching
         between TRACK and POSE; the report is kept for :meth:`stitch_report`.
+
+        ``coherence_cfg`` (default ``None`` = off) densifies short interior pose gaps and
+        appends auto temporal-smoothing corrections after assembly; the report is kept for
+        :meth:`coherence_report`. It runs before the camera so the static track spans the
+        now-dense frame set.
         """
         clip = self._clips[episode_id]
         ep = self._episodes[episode_id]
@@ -118,15 +130,23 @@ class Application:
         scene = assemble_scene(
             result, scene_id=scene_id, episode_id=ep.id, source_id=ep.source_id
         )
+        coherence_rep: CoherenceReport | None = None
+        if coherence_cfg is not None:
+            scene, coherence_rep = add_temporal_coherence(scene, coherence_cfg)
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
         self._scene_stitch[scene_id] = result.stitch
+        self._scene_coherence[scene_id] = coherence_rep
         return scene_id
 
     def stitch_report(self, scene_id: str) -> StitchReport | None:
         """The continuity-stitch report for a scene, or ``None`` if stitching was off."""
         return self._scene_stitch.get(scene_id)
+
+    def coherence_report(self, scene_id: str) -> CoherenceReport | None:
+        """The temporal-coherence report for a scene, or ``None`` if coherence was off."""
+        return self._scene_coherence.get(scene_id)
 
     def get_scene(self, scene_id: str) -> Scene:
         return self._scenes[scene_id]

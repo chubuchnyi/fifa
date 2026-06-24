@@ -69,6 +69,7 @@ python -m pitch3d --out-dir out/dryrun                   # or: pitch3d-dryrun --
 #        --calibrator keypoints  --pose gvhmr  --ball tracknet  --render overlay  --export gltf
 #        --observer blender                      # real proxy SCENE_3D via blender --background (CPU)
 #        --stitch                                 # re-link fragmented tracklets before POSE (continuity; off by default)
+#        --coherence                              # bridge short pose gaps (slerp/lerp) + auto temporal-smoothing corrections (off by default)
 #        --device cpu|cuda  --detector-classes coco|sports  --detector-weights PATH  # CPU validation vs GPU prod (ADR-0009)
 #   e.g. fully-real-but-no-GPU render + export path:
 #        PYTHONPATH=src python3 -m pitch3d --clip clip.mp4 --render overlay --export gltf --format smplx_npz
