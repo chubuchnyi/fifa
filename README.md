@@ -16,7 +16,10 @@ and easy manual correction that **propagates across frames**.
 > root Empty) becomes a `ROOT_TRANSLATION` `Correction` through the **same** `apply_offset` use-case
 > the LLM drives — the host owns the scene, Blender just reports world positions (ADR-0010). The
 > host side (the `radar_to_world` inverse, the `subject_<id>` id↔name contract, and the socket edit
-> loop) is unit-tested headlessly; only the GUI session needs a Blender binary + a display. See
+> loop) is unit-tested headlessly; only the GUI session needs a Blender binary + a display. The
+> **calibrator** is the first backend benchmarked on *independent* real data — on SoccerNet
+> `calibration-2023` the injected PnLCalib backend registers the pitch to a **0.236 m median** on the
+> ¾ of broadcast frames where it locks on (completeness, not planar accuracy, is the limiter; B1). See
 > [`docs/roadmap.md`](docs/roadmap.md) for per-step state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).
