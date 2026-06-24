@@ -19,6 +19,7 @@ Env (machine paths come from the repo-root .env; see .env.example):
 Run:  .venv/bin/python scripts/anim_export.py
 """
 
+import glob
 import os
 
 import matplotlib
@@ -49,6 +50,14 @@ else:
     R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
 
 os.makedirs(OUT, exist_ok=True)
+# The pod-side OUT dir lives on the persistent volume and is reused across runs, so a track
+# that existed only in a PRIOR run (e.g. anim_subject_22.npz) would otherwise linger and be
+# globbed by blender_animate.py — rendering a phantom body this scene never had. Purge the
+# per-subject + ball artifacts up front so the mesh dir reflects EXACTLY this scene.
+for _stale in glob.glob(os.path.join(OUT, "anim_subject_*.npz")) + [os.path.join(OUT, "ball.npz")]:
+    if os.path.exists(_stale):
+        os.remove(_stale)
+
 scene = load_scene(SCENE_JSON)
 assert scene.subjects, f"no subjects in {SCENE_JSON}"
 

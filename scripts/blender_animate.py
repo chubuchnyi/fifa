@@ -182,7 +182,13 @@ if DEVICE == "gpu":
         print(f"BLENDER_ANIM_GPU failed ({exc}) -> CPU")
 
 for name, _ in cameras:
-    os.makedirs(os.path.join(OUT, name), exist_ok=True)
+    cam_out = os.path.join(OUT, name)
+    os.makedirs(cam_out, exist_ok=True)
+    # Same reused-dir hazard as the npz export: a prior run with MORE frames would leave
+    # frame_NNNN.png files that ffmpeg's glob would splice into this clip. Clear them so each
+    # camera's PNG sequence is exactly this run's frames.
+    for _stale in glob.glob(os.path.join(cam_out, "frame_*.png")):
+        os.remove(_stale)
 
 # ── animate over the GLOBAL frame range; per frame, show only bodies present then ─
 gframes = sorted(all_frames)[::STEP]
