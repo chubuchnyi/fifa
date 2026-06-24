@@ -35,6 +35,63 @@ claude mcp add runpod -e RUNPOD_API_KEY=rpa_xxx -- npx -y @runpod/mcp-server@lat
 → *Settings → SSH Public Keys*. It auto-injects into every pod on boot, so you skip the per-pod
 `PUBLIC_KEY` + restart dance in step 3.
 
+## 0c. The pod tool — `scripts/pod.sh` (use this, not ad-hoc commands)
+
+**Stop hand-rolling pod commands.** [`scripts/pod.sh`](../scripts/pod.sh) is the one entry point
+for the day-to-day "bring a box up, reach it, shut it down" loop. It wraps `runpodctl` and encodes
+the one lesson that kept biting us: we keep **several identical pods** (`pitch3d-pro4500*`) on the
+**same persistent network volume** (`nnqs4k4vy5`, EU-RO-1 — `/workspace` survives stop/start) but on
+**different host machines**, and the *"not enough free GPUs on the host"* failure is **host-specific**.
+So when one pod won't resume, the fix is just to try the next identical pod — `up` does that for you.
+
+```bash
+scripts/pod.sh status      # every pod: id / state / name / ssh endpoint + balance & spend/hr
+scripts/pod.sh up          # ensure ONE pod is RUNNING (reuse a live one, else resume each
+                           #   EXITED pod until a host places the GPU); prints a ready ssh cmd
+scripts/pod.sh ssh '<cmd>' # run <cmd> on the running pod (no arg → interactive shell)
+scripts/pod.sh down        # stop ALL running pods — run this the moment the box is idle ($)
+```
+
+**The standard agent loop is exactly three calls:** `up` → do work via `ssh '<cmd>'` → `down`.
+`up` is idempotent and cost-safe — it **reuses** an already-running pod instead of starting a second,
+and it auto-`stop`s any pod it resumed that fails to get an endpoint (so a starved host never bills
+idle). If **all** pods are starved, `up` exits non-zero and prints the escalation path (wait & retry →
+ask RunPod support for a GPU **migration** to a host with free Blackwell stock → create a fresh pod
+per §2).
+
+**Auth (one-time).** `pod.sh` calls `runpodctl`, which reads `~/.runpod/config.toml` (`apikey`).
+If that key is blank (the file ships empty), the same key already lives in the RunPod **MCP** server
+env in `~/.claude.json` — repopulate the CLI config from it once, no secret typed by hand:
+
+```bash
+python3 - <<'PY'
+import json, pathlib
+cj = json.loads(pathlib.Path.home().joinpath(".claude.json").read_text())
+key = None
+def walk(o):
+    global key
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if k == "RUNPOD_API_KEY" and isinstance(v, str) and v: key = v
+            else: walk(v)
+    elif isinstance(o, list):
+        for x in o: walk(x)
+walk(cj)
+assert key, "no RUNPOD_API_KEY in ~/.claude.json"
+pathlib.Path.home().joinpath(".runpod", "config.toml").write_text(
+    f"apikey = '{key}'\napiurl = 'https://api.runpod.io/graphql'\n")
+print("runpodctl config written; key", key[:6] + "…" + key[-4:])
+PY
+runpodctl me     # verify: prints email / balance
+```
+
+`~/.runpod/config.toml` lives **outside the repo**, so the key never enters git. Env knobs:
+`POD_SSH_KEY` (default `~/.ssh/id_ed25519_runpod`), `POD_NAME_GLOB` (default `pitch3d`),
+`START_TIMEOUT` (per-pod resume wait, default 90 s), `RUNPODCTL` (binary path).
+
+> The sections below (§1–§5) are the **from-scratch** path — picking a GPU, *creating* a pod,
+> SSH internals, cost. Once a pod exists, you almost never touch them: `scripts/pod.sh` is the loop.
+
 ## 1. Pick the GPU + check stock
 
 `runpodctl gpu`, or MCP `list-gpu-types` with `searchTerm: "RTX 4090"`. Price/quality pick for
