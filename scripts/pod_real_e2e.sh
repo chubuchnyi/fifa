@@ -13,6 +13,8 @@
 #   FRAMES=8                                --frames
 #   OUT=out/run                             --out-dir (relative to repo)
 #   FORMAT=smplx_npz                        --format (json carries the ball; smplx_npz = bodies)
+#   STITCH=1                                --stitch    (continuity; off unless =1)
+#   COHERENCE=1                             --coherence (gap-fill + smoothing; off unless =1)
 # The SMPLest-X backend reads its own env (PITCH3D_SMPLESTX_REPO / _CKPT / _DEVICE;
 # defaults /workspace/repos/SMPLest-X + smplest_x_h on cuda) — see the backend factory.
 # The WASB ball backend likewise reads PITCH3D_WASB_REPO / _CKPT / _DATASET / _DEVICE
@@ -37,13 +39,21 @@ else
   echo "== calibration: proxy (set PNLCALIB_REPO to a staged checkout to enable real PnLCalib)"
 fi
 
+# Optional continuity (Step 1-2) + temporal coherence (Step 3). Both off unless set to 1:
+#   STITCH=1     re-link fragmented tracklets before POSE so occluded players don't
+#                'appear from nowhere' (real ByteTrack fragments under occlusion).
+#   COHERENCE=1  bridge short interior pose gaps (slerp/lerp) + auto temporal-smoothing.
+COH_ARGS=()
+if [ "${STITCH:-0}" = "1" ]; then COH_ARGS+=(--stitch); echo "== continuity: --stitch ON"; fi
+if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
+
 cd "$REPO"
 echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} =="
 t0=$(date +%s)
 PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
   --detector rfdetr --tracker bytetrack --device cuda \
-  "${CALIB_ARGS[@]}" \
+  "${CALIB_ARGS[@]}" "${COH_ARGS[@]}" \
   --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
   --render overlay --export gltf --format "$FORMAT" --out-dir "$OUT"
