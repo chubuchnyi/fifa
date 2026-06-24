@@ -162,9 +162,30 @@ class _PnLCalibBackend:
         return self._state
 
 
-def make() -> _PnLCalibBackend:
-    """Zero-arg factory (ADR-0006 seam) → an env-configured PnLCalib ``KeypointBackend``."""
+def make(
+    *,
+    kp_threshold: float | None = None,
+    line_threshold: float | None = None,
+) -> _PnLCalibBackend:
+    """Zero-arg factory (ADR-0006 seam) → an env-configured PnLCalib ``KeypointBackend``.
+
+    The dotted-path seam calls this with no arguments, so configuration comes from the environment
+    (see the module docstring). ``kp_threshold`` / ``line_threshold`` may be passed explicitly to
+    override the ``PNLCALIB_*_THRESHOLD`` env defaults — used by the calibration eval's threshold
+    sweep to trade completeness against accuracy (precedence: explicit kwarg > env > PnLCalib
+    default). Building the backend is torch-free; the heavy stack loads only on first detect call.
+    """
     repo = os.environ.get("PNLCALIB_REPO", "/workspace/repos/PnLCalib")
+    kp_th = (
+        kp_threshold
+        if kp_threshold is not None
+        else float(os.environ.get("PNLCALIB_KP_THRESHOLD", "0.3434"))
+    )
+    line_th = (
+        line_threshold
+        if line_threshold is not None
+        else float(os.environ.get("PNLCALIB_LINE_THRESHOLD", "0.7867"))
+    )
     return _PnLCalibBackend(
         repo=repo,
         weights_kp=os.environ.get("PNLCALIB_WEIGHTS_KP", "/workspace/weights/pnlcalib/SV_kp"),
@@ -172,6 +193,6 @@ def make() -> _PnLCalibBackend:
             "PNLCALIB_WEIGHTS_LINES", "/workspace/weights/pnlcalib/SV_lines"
         ),
         device=os.environ.get("PNLCALIB_DEVICE", "cuda:0"),
-        kp_threshold=float(os.environ.get("PNLCALIB_KP_THRESHOLD", "0.3434")),
-        line_threshold=float(os.environ.get("PNLCALIB_LINE_THRESHOLD", "0.7867")),
+        kp_threshold=kp_th,
+        line_threshold=line_th,
     )

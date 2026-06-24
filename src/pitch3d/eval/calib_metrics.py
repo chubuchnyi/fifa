@@ -203,3 +203,57 @@ def evaluate_calibration(
             world_pool_c, px_pool_c, ok_lines_c, total_lines_c, thresholds_px
         )
     return grid
+
+
+def _as_float(v: object) -> float | None:
+    """Coerce a grid value to ``float`` for tabulation, or ``None`` if it is absent/non-numeric."""
+    return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def summarize_threshold_sweep(
+    rows: list[tuple[float, dict[str, object]]],
+) -> list[dict[str, float | None]]:
+    """Reduce ``(kp_threshold, eval-grid)`` pairs to a compact completeness-vs-accuracy comparison.
+
+    The B1 limiter is **completeness** (how often PnLCalib emits ≥ 4 landmarks), gated by its
+    keypoint/line heatmap thresholds. Lowering the threshold recovers more frames but admits noisier
+    landmarks, so the honest readout pairs ``completeness`` against the accuracy *where the
+    calibrator locked on* (the ``on_completed`` sub-grid). One row per swept threshold.
+    """
+    out: list[dict[str, float | None]] = []
+    for kp_th, grid in rows:
+        oc = grid.get("on_completed")
+        oc = oc if isinstance(oc, dict) else {}
+        out.append(
+            {
+                "kp_threshold": float(kp_th),
+                "n_frames": _as_float(grid.get("n_frames")),
+                "completeness": _as_float(grid.get("completeness")),
+                "n_completed": _as_float(grid.get("n_completed")),
+                "on_completed_median_m": _as_float(oc.get("reproj_median_m")),
+                "on_completed_line_acc@5px": _as_float(oc.get("line_acc@5px")),
+                "all_line_acc@5px": _as_float(grid.get("line_acc@5px")),
+            }
+        )
+    return out
+
+
+def format_sweep_table(summary: list[dict[str, float | None]]) -> str:
+    """Render :func:`summarize_threshold_sweep` rows as an aligned text table (box-run readout)."""
+    cols: tuple[tuple[str, str, str], ...] = (
+        ("kp_th", "kp_threshold", "{:.4g}"),
+        ("n_frames", "n_frames", "{:.0f}"),
+        ("complete", "completeness", "{:.3f}"),
+        ("n_compl", "n_completed", "{:.0f}"),
+        ("oc_med_m", "on_completed_median_m", "{:.3f}"),
+        ("oc_acc@5", "on_completed_line_acc@5px", "{:.3f}"),
+        ("all_acc@5", "all_line_acc@5px", "{:.3f}"),
+    )
+
+    def cell(fmt: str, v: float | None) -> str:
+        return "—" if v is None else fmt.format(v)
+
+    lines = ["  ".join(f"{head:>9}" for head, _, _ in cols)]
+    for row in summary:
+        lines.append("  ".join(f"{cell(fmt, row.get(key)):>9}" for _, key, fmt in cols))
+    return "\n".join(lines)

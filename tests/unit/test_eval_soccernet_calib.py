@@ -14,9 +14,11 @@ import pytest
 
 from pitch3d.eval.calib_metrics import (
     evaluate_calibration,
+    format_sweep_table,
     frame_metrics,
     frame_pixel_errors,
     frame_world_errors,
+    summarize_threshold_sweep,
 )
 from pitch3d.eval.datasets_soccernet import (
     load_calib_annotation,
@@ -120,3 +122,23 @@ def test_on_completed_excludes_failed_frames() -> None:
     assert isinstance(on_completed, dict)
     assert on_completed["reproj_rms_m"] < 1e-6  # the two confident frames are essentially exact
     assert on_completed["line_acc@5px"] == 1.0
+
+
+def test_threshold_sweep_summary_and_table() -> None:
+    # Stand in for a box sweep: a higher kp threshold leaves one frame uncalibrated (completeness
+    # 0.5), a lower one calibrates both (1.0). The summary must surface completeness against the
+    # accuracy where the calibrator locked on, and the table must render one row per threshold.
+    frames, true_h = synthetic_calib_frames(n_frames=2, seed=7)
+    grid_hi = evaluate_calibration(frames, true_h, confidence=np.array([1.0, 0.0]))
+    grid_lo = evaluate_calibration(frames, true_h, confidence=np.array([1.0, 1.0]))
+
+    summary = summarize_threshold_sweep([(0.3434, grid_hi), (0.15, grid_lo)])
+    assert [r["kp_threshold"] for r in summary] == [0.3434, 0.15]
+    assert summary[0]["completeness"] == pytest.approx(0.5)
+    assert summary[1]["completeness"] == pytest.approx(1.0)
+    assert summary[0]["n_completed"] == 1.0
+    assert summary[0]["on_completed_line_acc@5px"] == 1.0  # accurate where it locked on
+
+    table = format_sweep_table(summary)
+    assert "complete" in table  # header present
+    assert table.count("\n") == 2  # header + two data rows

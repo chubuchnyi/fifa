@@ -44,3 +44,18 @@ def test_make_reads_env(monkeypatch) -> None:
     assert backend.device == "cpu"
     assert backend.kp_threshold == 0.2
     assert backend.line_threshold == 0.5
+
+
+def test_make_kwargs_override_env(monkeypatch) -> None:
+    # The threshold sweep passes explicit thresholds; an explicit kwarg must win over the env
+    # default (precedence: kwarg > env > PnLCalib default), without touching other env-set fields.
+    from pitch3d.adapters.models.pnlcalib_backend import make
+
+    monkeypatch.setenv("PNLCALIB_KP_THRESHOLD", "0.3434")
+    monkeypatch.setenv("PNLCALIB_LINE_THRESHOLD", "0.7867")
+
+    backend = make(kp_threshold=0.15, line_threshold=0.6)
+    assert backend.kp_threshold == 0.15  # kwarg wins
+    assert backend.line_threshold == 0.6
+    # An omitted kwarg still falls back to the env value.
+    assert make(kp_threshold=0.15).line_threshold == 0.7867

@@ -33,11 +33,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import numpy as np
 
-from pitch3d.eval.calib_metrics import evaluate_calibration
+from pitch3d.eval.calib_metrics import (
+    evaluate_calibration,
+    format_sweep_table,
+    summarize_threshold_sweep,
+)
 from pitch3d.eval.datasets_soccernet import (
     as_clip,
     load_calib_dir,
@@ -69,15 +74,45 @@ def _parse(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--min-lines", type=int, default=4,
                    help="keep frames with >= this many straight pitch lines (SoccerNet uses > 4)")
     p.add_argument("--device", default="cuda", help="calibrator inference device (soccernet mode)")
+    # PnLCalib heatmap-gate overrides (the completeness lever). Single values override the backend's
+    # env defaults; --threshold-sweep runs several kp gates and tabulates completeness vs accuracy.
+    p.add_argument("--kp-threshold", type=float, default=None,
+                   help="override PnLCalib keypoint heatmap gate (lower → more frames, noisier)")
+    p.add_argument("--line-threshold", type=float, default=None,
+                   help="override PnLCalib line heatmap gate")
+    p.add_argument("--threshold-sweep", default=None,
+                   help="comma-separated kp thresholds to sweep, e.g. '0.3434,0.25,0.15'")
     return p.parse_args(argv)
+
+
+def _apply_threshold_env(kp_threshold: float | None, line_threshold: float | None) -> None:
+    """Push explicit threshold overrides into the env the dotted backend reads (PnLCalib seam)."""
+    if kp_threshold is not None:
+        os.environ["PNLCALIB_KP_THRESHOLD"] = str(kp_threshold)
+    if line_threshold is not None:
+        os.environ["PNLCALIB_LINE_THRESHOLD"] = str(line_threshold)
+
+
+def _calibrate_and_score(
+    frames: list, frames_dir: str, spec: str, device: str, thresholds: tuple[float, ...]
+) -> dict:
+    """Resolve the dotted calibrator, run it over the SoccerNet clip, and score the homographies."""
+    clip = as_clip(frames, frames_dir)
+    calibrator = _resolve_calibrator(spec, device)
+    print(f"[soccernet] calibrating {clip.n_frames} frames from {frames_dir}", file=sys.stderr)
+    fc = calibrator.calibrate(clip)
+    return evaluate_calibration(
+        frames, fc.homographies, confidence=fc.confidence, thresholds_px=thresholds
+    )
 
 
 def main(argv: list[str] | None = None) -> dict:
     args = _parse(argv)
     thresholds = tuple(float(t) for t in args.thresholds.split(",") if t.strip())
-    confidence = None
 
     if args.dataset == "synthetic":
+        if args.threshold_sweep:
+            raise SystemExit("--threshold-sweep needs --dataset soccernet (no backend to sweep)")
         frames, true_h = synthetic_calib_frames(n_frames=args.frames, seed=args.seed)
         if args.backend == "oracle":
             homographies = true_h
@@ -85,30 +120,44 @@ def main(argv: list[str] | None = None) -> dict:
             homographies = _perturb(true_h, args.perturb_sigma, args.seed)
         else:
             raise SystemExit("synthetic dataset takes --backend oracle|perturb (no real images)")
-    else:
-        if not args.frames_dir:
-            raise SystemExit("--frames-dir is required for --dataset soccernet")
-        frames = load_calib_dir(args.frames_dir, min_lines=args.min_lines, limit=args.limit)
-        if not frames:
-            raise SystemExit(
-                f"no annotated frames with >= {args.min_lines} lines in {args.frames_dir}"
-            )
-        clip = as_clip(frames, args.frames_dir)
-        calibrator = _resolve_calibrator(args.backend, args.device)
-        print(f"[soccernet] calibrating {clip.n_frames} frames from {args.frames_dir}",
-              file=sys.stderr)
-        fc = calibrator.calibrate(clip)
-        homographies = fc.homographies
-        confidence = fc.confidence
+        grid = evaluate_calibration(frames, homographies, confidence=None, thresholds_px=thresholds)
+        print(json.dumps({
+            "dataset": args.dataset, "backend": args.backend,
+            "n_frames": grid["n_frames"], "grid": grid,
+        }, indent=2))
+        return grid
 
-    grid = evaluate_calibration(
-        frames, homographies, confidence=confidence, thresholds_px=thresholds
-    )
+    if not args.frames_dir:
+        raise SystemExit("--frames-dir is required for --dataset soccernet")
+    frames = load_calib_dir(args.frames_dir, min_lines=args.min_lines, limit=args.limit)
+    if not frames:
+        raise SystemExit(f"no annotated frames with >= {args.min_lines} lines in {args.frames_dir}")
+
+    if args.threshold_sweep:
+        kp_values = [float(t) for t in args.threshold_sweep.split(",") if t.strip()]
+        if not kp_values:
+            raise SystemExit("--threshold-sweep needs comma-separated kp thresholds")
+        rows: list[tuple[float, dict]] = []
+        for kp_th in kp_values:
+            _apply_threshold_env(kp_th, args.line_threshold)
+            rows.append(
+                (kp_th, _calibrate_and_score(frames, args.frames_dir, args.backend,
+                                             args.device, thresholds))
+            )
+        summary = summarize_threshold_sweep(rows)
+        print(format_sweep_table(summary), file=sys.stderr)
+        payload = {
+            "dataset": "soccernet", "backend": args.backend,
+            "threshold_sweep": summary, "grids": [g for _, g in rows],
+        }
+        print(json.dumps(payload, indent=2))
+        return payload
+
+    _apply_threshold_env(args.kp_threshold, args.line_threshold)
+    grid = _calibrate_and_score(frames, args.frames_dir, args.backend, args.device, thresholds)
     print(json.dumps({
-        "dataset": args.dataset,
-        "backend": args.backend,
-        "n_frames": grid["n_frames"],
-        "grid": grid,
+        "dataset": "soccernet", "backend": args.backend,
+        "n_frames": grid["n_frames"], "grid": grid,
     }, indent=2))
     return grid
 

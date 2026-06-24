@@ -16,9 +16,11 @@ from .bodymodel import (
 )
 from .calib_metrics import (
     evaluate_calibration,
+    format_sweep_table,
     frame_metrics,
     frame_pixel_errors,
     frame_world_errors,
+    summarize_threshold_sweep,
 )
 from .dataset import PoseEvalScene, evaluate_dataset
 from .datasets_soccernet import (
@@ -71,4 +73,6 @@ __all__ = [
     "frame_pixel_errors",
     "frame_metrics",
     "evaluate_calibration",
+    "summarize_threshold_sweep",
+    "format_sweep_table",
 ]
