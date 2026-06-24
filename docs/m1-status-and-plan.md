@@ -252,8 +252,26 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     opaque reference (full-clip bodies unchanged, back-compat). `demo_video.sh` now defaults
     `STITCH=1 COHERENCE=1` and forwards `PITCH3D_FADE_FRAMES` end-to-end (→ `pod_make_video.sh` →
     `pod_real_e2e.sh` / `anim_export.py`), so the pod video inherits continuity + gap-fill + mesh
-    fade. **Remaining (pod):** one GPU run to render the fresh Colombia multi-angle video and eyeball
-    the substitution fade on real footage (#101).
+    fade.
+  - **#101 fresh pod video ✅ done & pod-validated 2026-06-24** (real golden path, mesh-fade live).
+    One command — `OUT_LOCAL=out/anim_coh bash scripts/demo_video.sh --clip
+    samples/video/Colombia-1-0-Congo-DR1080p.mp4 --frames 48` (STITCH/COHERENCE/fade now default) —
+    brought up the pod, reconstructed, animated, rendered 4 angles, pulled the mp4s, and **stopped the
+    pod**. Reconstruction: `ingested 1920×1080 @ 29.970fps, 48 frame(s)` → `20 subject(s), ball=yes`;
+    **continuity 24→20 tracklets** (2 merges, 2 blips), **coherence bridged 23 gap frame(s) across
+    2/20 subjects, +20 smoothing** (matches the prior validation), `done in 258s`. **Mesh fade is
+    genuinely exercised:** 6/20 subjects are partial-range (frames 33/40/38/43/38 and a B-team
+    substitute at **11/48**), and the rendered body count falls **20→16** by the last frame, so those
+    exits ramp out via the baked `alpha` instead of popping; the 14 full-clip bodies stay opaque.
+    Render: `BLENDER_ANIM_OK frames=48 cams=[broadcast,sideline,top,goal] 1280×720 32spp` on **OptiX /
+    RTX PRO 4500 Blackwell** (low `nvidia-smi` GPU% is a sampling artifact — sub-second bursts between
+    CPU-bound per-frame BVH re-sync; GPU memory ~1.8 GB confirms the device is live). Output: 4 mp4s
+    under `out/anim_coh/video/` (48f @ 25fps, verified). **Honesty (R-6):** `pose=SMPLest-X-H` ran for
+    real (checkpoint loaded, 687 M params / 0.69B); detect=RF-DETR, track=ByteTrack real; **calibration
+    was the PROXY** (`PNLCALIB_REPO` unset), so the resolved ball (48f) sits at low height-confidence
+    (~0.25) on the proxy plane — this is a runtime/feature proof of the fade on real fragmentation, not
+    a calibrated-accuracy result. Two extracted broadcast frames render cleanly (bodies + motion +
+    pitch, correct angle); a frame-by-frame eyeball of the opacity ramp was not done.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 
