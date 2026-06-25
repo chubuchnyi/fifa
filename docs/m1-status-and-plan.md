@@ -139,7 +139,7 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   evaluate PnLCalib's *own* full camera-calibration module (lines + circles + L/R disambiguation)
   vs our bare planar DLT, and/or a line-only fusion that adds correct lines without the keypoint
   noise. Threshold-tuning is exhausted as a quality lever (the table above).
-  **Camera-module lever WIRED 2026-06-24 (code-complete, pending pod A/B).** The same PnLCalib
+  **Camera-module lever WIRED 2026-06-24, A/B measured 2026-06-25.** The same PnLCalib
   backend now implements a second path: `_PnLCalibBackend.calibrate_frames()` runs the full
   `FramebyFrameCalib` (points **and** lines, mode + RANSAC voting, optional PnL line refinement) and
   emits a per-frame image→world homography, converted from the solved `cam_params` in the *same*
@@ -148,9 +148,26 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   `HomographyBackend` protocol score/smooth it (sibling to `KeypointFieldCalibrator`/`KeypointBackend`),
   and `run_calib_eval.py --solver dlt|camera` A/Bs them through the one dotted-path seam. Pure half
   is unit-tested with no GPU (conversion round-trip + scoring/last-good-carry); ruff+mypy clean.
-  **Still pending:** the box A/B (camera vs DLT on SoccerNet `test`: completeness, `on_completed`
-  median_m, line_acc@5px) — numbers land here once measured. `PNLCALIB_PNL_REFINE` toggles the PnL
-  line refinement (default on).
+  **Measured 2026-06-25 (box A/B, SoccerNet `test`, first 200 frames, same set, kp/line gate
+  0.3434/0.7867, smooth_window=1).** Both solvers are driven by the *same* PnLCalib detector, so they
+  share completeness — only the solve differs. `on_completed` = the frames that actually solve:
+
+  | metric (on_completed) | DLT (bare planar) | Camera module (pts+lines) |
+  |---|---|---|
+  | completeness | 0.745 (149/200) | 0.740 (148/200) |
+  | reproj median | **0.170 m** / 1.38 px | 0.179 m / 1.45 px |
+  | line_acc@5px | 0.757 | **0.811** |
+  | line_acc@10px | 0.846 | **0.905** |
+  | reproj p95 | 6.41 m | **1.15 m** |
+
+  Verdict (R-6 honest): **median accuracy is a wash** (camera ~1 cm worse, within noise) and
+  **completeness is unchanged** (same detector/gate — the solve method cannot recover a frame the
+  detector dropped). The camera module's real wins are **line registration** (+5–6 pp at both 5/10 px;
+  all-frames line_acc@5px 0.618→0.661) and **tail robustness** — it all but eliminates the
+  near-singular blow-ups the bare DLT occasionally emits (on_completed reproj p95 6.41→1.15 m;
+  all-frames pixel RMS ~5e14→~1e3 px). So the camera path buys *reliability + better lines*, not a
+  lower central error; **completeness, not the solver, stays the limiter.** `PNLCALIB_PNL_REFINE`
+  toggles the PnL line refinement (default on).
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in
