@@ -242,8 +242,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="avatar builder; 'textured' = measured pixel-projection onto the "
                              "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
                              "the SMPL-X-meshing heavy half is an unwired stub (use 'fake')")
-    parser.add_argument("--render", default="fake", choices=["fake", "overlay"],
-                        help="render pass; 'overlay' is real + dependency-free (reprojection PNGs)")
+    parser.add_argument("--render", default="fake", choices=["fake", "overlay", "splat"],
+                        help="render pass; 'overlay' reprojects PNGs, 'splat' rasterises the "
+                             "measured avatar meshes (both real + dependency-free)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
                         help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
     parser.add_argument("--observer", default="fake", choices=["fake", "blender"],

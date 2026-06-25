@@ -24,6 +24,7 @@ from pitch3d.adapters.models.avatar import (
     SyntheticAvatarMeshBackend,
     TexturedSmplxAvatarBuilder,
     aggregate_observations,
+    read_vertex_colored_ply,
     sample_vertex_colors,
     vertex_normals,
     write_vertex_colored_ply,
@@ -120,6 +121,21 @@ def _parse_ply(path: Path) -> tuple[int, int, list[int]]:
     body = lines[lines.index("end_header") + 1:]
     measured = [int(body[i].split()[6]) for i in range(nv)]
     return nv, nf, measured
+
+
+def test_read_vertex_colored_ply_round_trips(tmp_path):
+    # The reader is the exact inverse of the writer — geometry, colour and the R-6 measured flag all
+    # survive, so a RenderPass consuming the asset sees what the builder wrote.
+    verts = np.array([[0.0, 0.0, 0.0], [1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    faces = np.array([[0, 1, 2]])
+    rgb = np.array([[10, 20, 30], [127, 127, 127], [200, 100, 50]], dtype=np.uint8)
+    measured = np.array([True, False, True])
+    uri = write_vertex_colored_ply(tmp_path / "rt.ply", verts, faces, rgb, measured)
+    v, f, c, m = read_vertex_colored_ply(Path(uri))
+    np.testing.assert_allclose(v, verts)
+    np.testing.assert_array_equal(f, faces)
+    np.testing.assert_array_equal(c, rgb)
+    assert m.dtype == bool and m.tolist() == [True, False, True]
 
 
 def test_write_ply_carries_geometry_color_and_measured_flag(tmp_path):

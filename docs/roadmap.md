@@ -154,8 +154,20 @@ resolve → observe → **avatar** → render → export`). An injectable, depen
 textured` exercises projection without weights — `--avatar-backend
 pitch3d.adapters.models.avatar:SyntheticAvatarMeshBackend` yields a genuine 2/3-coverage PLY (one
 vertex off-frame, honestly unmeasured). The heavy SMPL-X meshing half stays gated behind the
-`avatar` extra. **Next: M2-3 `SplatAvatarRenderPass`** — render the vertex-coloured mesh from the
-`resolved` scene.
+`avatar` extra.
+
+**Progress — M2-3 `SplatAvatarRenderPass` wired E2E (2026-06-25):** the first render pass that
+consumes the M2-2 assets. It reads each avatar's vertex-coloured PLY (new paired
+`read_vertex_colored_ply`), places the canonical mesh at the subject's *resolved* per-frame root,
+projects every vertex through the camera and paints **z-buffered colour splats** onto per-frame
+PNGs (pure numpy + the stdlib PNG encoder shared with the overlay pass — no Blender/GPU). R-6
+travels into the picture: a `measured=0` vertex renders in a distinct *unmeasured tint*, not its
+fabricated placeholder, so unobserved body regions are *visibly* marked. Wired as `--render splat`
+(`default_ports(render="splat")`); the dry-run `--avatar textured … --render splat` renders the
+measured meshes E2E (decoded frame: measured colour + black + the R-6 tint, never a faked colour).
+Honest limits, deferred to heavier upgrades: vertex splats (no triangle fill) and root-translation
+placement only (no per-frame limb re-posing — needs the SMPL-X model). **Next: M2-4** (edit↔render
+sync — resolved already drives every render rep) / **M2-1** env reconstruction.
 
 ---
 

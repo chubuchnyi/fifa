@@ -229,6 +229,34 @@ def write_vertex_colored_ply(
     return str(path)
 
 
+def read_vertex_colored_ply(
+    path: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Inverse of :func:`write_vertex_colored_ply` — parse our ASCII PLY back into arrays.
+
+    Returns ``(vertices (V, 3) float, faces (F, 3) int, rgb (V, 3) uint8, measured (V,) bool)`` so a
+    RenderPass can consume the measured avatar asset — including the R-6 ``measured`` flag — without
+    trimesh/PIL. Assumes our own fixed header (``x y z red green blue measured``).
+    """
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    nv = next(int(ln.split()[-1]) for ln in lines if ln.startswith("element vertex"))
+    nf = next(int(ln.split()[-1]) for ln in lines if ln.startswith("element face"))
+    body = lines[lines.index("end_header") + 1:]
+    verts = np.empty((nv, 3), dtype=float)
+    rgb = np.empty((nv, 3), dtype=np.uint8)
+    measured = np.empty(nv, dtype=bool)
+    for i in range(nv):
+        p = body[i].split()
+        verts[i] = (float(p[0]), float(p[1]), float(p[2]))
+        rgb[i] = (int(p[3]), int(p[4]), int(p[5]))
+        measured[i] = bool(int(p[6]))
+    faces = np.empty((nf, 3), dtype=int)
+    for j in range(nf):
+        p = body[nv + j].split()
+        faces[j] = (int(p[1]), int(p[2]), int(p[3]))
+    return verts, faces, rgb, measured
+
+
 @dataclass
 class TexturedSmplxAvatarBuilder(AvatarBuilder):
     """Measured textured-SMPL-X avatar (M2-2 #1) — pure projection/sampling over a backend.

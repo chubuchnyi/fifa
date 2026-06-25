@@ -95,8 +95,10 @@ def default_ports(
     (TrackNet 2D, ``ball`` extra). ``avatar``: ``"fake"`` or ``"textured"`` (measured
     pixel-projection onto the tracked SMPL-X — the M2-0 *primary* realism path: the projection /
     visibility / per-vertex-colour-averaging half runs with no GPU, the SMPL-X meshing heavy half
-    is gated behind the ``avatar`` extra). ``render``: ``"fake"`` or ``"overlay"`` (reproject the
-    resolved 3D back onto per-frame PNGs — dependency-free, no extra). ``export``: ``"fake"``
+    is gated behind the ``avatar`` extra). ``render``: ``"fake"``, ``"overlay"`` (reproject the
+    resolved 3D back onto per-frame PNGs — dependency-free, no extra) or ``"splat"`` (M2-3: splat
+    the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts). ``export``:
+    ``"fake"``
     or ``"gltf"`` (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the
     ``export`` extra).
     ``observer``: ``"fake"`` (stdlib PNGs) or ``"blender"`` (real proxy ``SCENE_3D`` via a
@@ -225,8 +227,12 @@ def default_ports(
         from ..adapters.render import ReprojectionOverlayRenderPass
 
         rnd = ReprojectionOverlayRenderPass(out_dir=out / "render")
+    elif render == "splat":
+        from ..adapters.render import SplatAvatarRenderPass
+
+        rnd = SplatAvatarRenderPass(out_dir=out / "render")
     else:
-        raise ValueError(f"unknown render {render!r}; expected 'fake' or 'overlay'")
+        raise ValueError(f"unknown render {render!r}; expected 'fake', 'overlay' or 'splat'")
 
     if export == "fake":
         exp: Exporter = FakeExporter()
