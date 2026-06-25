@@ -11,6 +11,7 @@ directly (single source of truth, ADR-0002).
 from __future__ import annotations
 
 import itertools
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,9 +41,10 @@ from ..core.orchestration import (
     resolve_scene,
 )
 from ..core.ports.export import ExportFormat, ExportResult
-from ..core.ports.io import ClipRef
+from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
+from ..core.scene.assets import RenderAssetRef
 from ..core.scene.camera import CameraTrack
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.review import AttentionItem, attention_list
@@ -250,6 +252,32 @@ class Application:
     def export(self, scene_id: str, fmt: str, out_path: str) -> ExportResult:
         scene = self.resolved(scene_id)
         return self.ports.exporter.export(scene, ExportFormat(fmt), out_path)
+
+    # --- photoreal assets (avatars) -------------------------------------------
+    def build_avatars(
+        self, scene_id: str, *, ref_crops: dict[int, Sequence[CropRef]] | None = None
+    ) -> list[RenderAssetRef]:
+        """Build a per-subject avatar asset and attach it to the scene's ``render_assets``.
+
+        Consumes the *resolved* scene's subjects (single source of truth), so edits/refits are
+        reflected in the geometry the builder sees. The configured :class:`AvatarBuilder` yields a
+        :class:`RenderAssetRef` per subject — a measured textured-SMPL-X PLY for ``--avatar
+        textured`` (vertices never seen front-facing stay ``measured=0``, R-6) or a marker for
+        ``--avatar fake``. Each ref is attached to the *stored* scene (replacing any same-id ref) so
+        render/export/observe can consume it. ``ref_crops`` maps a subject ``track_id`` to its
+        reference crops (the heavy backend's sampling hint); the pipeline does not source crops yet,
+        so an empty list is passed by default.
+        """
+        resolved = self.resolved(scene_id)
+        crops = ref_crops or {}
+        refs = [
+            self.ports.avatar.build(subject, crops.get(subject.track_id, []))
+            for subject in resolved.subjects
+        ]
+        stored = self._scenes[scene_id]
+        new_ids = {ref.id for ref in refs}
+        stored.render_assets = [a for a in stored.render_assets if a.id not in new_ids] + refs
+        return refs
 
     # --- internals ------------------------------------------------------------
     def _corr_id(self) -> str:

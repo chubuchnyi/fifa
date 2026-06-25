@@ -26,6 +26,8 @@ no GPU**:
 
 Swap it in via ``default_ports(avatar="textured")`` (wiring) or inject a vendored backend by
 dotted path with ``--avatar-backend pkg.module:Factory`` (ADR-0006) — one fake replaced at a time.
+For demos/CI a dependency-free :class:`SyntheticAvatarMeshBackend` drives the real measured path
+end-to-end (tiny synthetic mesh, no SMPL-X/GPU) so the dry-run exercises this code, not a marker.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ import numpy as np
 from ...core.ports.io import CropRef
 from ...core.ports.reconstruction import AvatarBuilder
 from ...core.scene.assets import RenderAssetKind, RenderAssetRef, SynthViewRef
-from ...core.scene.camera import CameraTrack
+from ...core.scene.camera import CameraIntrinsics, CameraTrack
 from ...core.scene.projection import camera_center, project_world_points_with_depth
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
@@ -337,3 +339,33 @@ class SmplxTextureBackend:
                 ) from exc
             self._model = object()
         return self._model
+
+
+@dataclass
+class SyntheticAvatarMeshBackend:
+    """A dependency-free, injectable :class:`AvatarMeshBackend` for demos/CI — no SMPL-X, no GPU.
+
+    Yields a tiny synthetic mesh + one camera-facing frame so the *real* measured path (vertex
+    normals -> front-facing/z-buffer visibility -> per-vertex colour averaging -> measured PLY) runs
+    end-to-end. By construction one of the three vertices projects off-frame and stays
+    ``measured=0`` (R-6 partial coverage, 2/3). It deliberately ignores the subject's real pose and
+    uses no broadcast pixels — it exercises the pipeline, it does **not** claim a real appearance;
+    that is :class:`SmplxTextureBackend`'s job once wired. Inject with
+    ``--avatar-backend pitch3d.adapters.models.avatar:SyntheticAvatarMeshBackend``.
+    """
+
+    def observe(
+        self, subject: Subject, ref_crops: Sequence[CropRef]
+    ) -> AvatarMeshObservations:
+        intr = CameraIntrinsics(fx=50.0, fy=50.0, cx=32.0, cy=24.0, width=64, height=48)
+        camera = CameraTrack.identity(intr, 1)
+        # One triangle facing the camera (face normal -> -Z so all three verts are front-facing);
+        # v0 lands on the lone coloured pixel, v2 on an in-frame black pixel, v1 projects off the
+        # right edge and is never measured -> genuine 2/3 coverage through the real projection path.
+        verts_world = np.array([[0.0, 0.0, 5.0], [5.0, 0.0, 5.0], [0.0, 0.5, 5.0]])
+        canonical = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        faces = np.array([[0, 2, 1]])
+        image = np.zeros((48, 64, 3), dtype=np.uint8)
+        image[24, 32] = (200, 100, 50)
+        frame = FrameObservation(frame=0, vertices_world=verts_world, camera=camera, image=image)
+        return AvatarMeshObservations(canonical_vertices=canonical, faces=faces, frames=[frame])

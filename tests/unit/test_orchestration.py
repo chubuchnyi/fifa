@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pitch3d.adapters.fakes import InProcessJobQueue, MemoryCache
@@ -16,6 +18,7 @@ from pitch3d.core.ports.pose import PoseEstimator
 from pitch3d.core.ports.reconstruction import AvatarBuilder, EnvReconstructor
 from pitch3d.core.ports.render import RenderPass
 from pitch3d.core.ports.view_synthesizer import ViewSynthesizer
+from pitch3d.core.scene.assets import RenderAssetKind
 
 
 def test_content_key_canonical_and_sensitive():
@@ -77,3 +80,45 @@ def test_resolve_scene_bakes_corrections_without_mutating_input(reconstructed):
     dz = (resolved.subject(track_id).proposal.pose.transl[0, 2]
           - stored.subject(track_id).proposal.pose.transl[0, 2])
     assert dz == pytest.approx(1.0)
+
+
+# --- build_avatars (the AVATAR controller stage) ------------------------------
+def test_build_avatars_attaches_one_ref_per_subject(reconstructed):
+    app, scene_id = reconstructed
+    refs = app.build_avatars(scene_id)
+    scene = app.get_scene(scene_id)
+    assert len(refs) == len(scene.subjects) > 0
+    assert all(r.kind == RenderAssetKind.AVATAR_TEXTURED_SMPLX for r in refs)
+    # attached to the STORED scene, one stable id per subject (render/export can consume them)
+    assert {a.id for a in scene.render_assets} == {f"avatar-{s.track_id}" for s in scene.subjects}
+
+
+def test_build_avatars_is_idempotent_same_id_replaces(reconstructed):
+    app, scene_id = reconstructed
+    app.build_avatars(scene_id)
+    first = list(app.get_scene(scene_id).render_assets)
+    app.build_avatars(scene_id)                 # rebuild over the same subjects
+    second = app.get_scene(scene_id).render_assets
+    assert len(second) == len(first)            # same-id refs replace, never accumulate
+    assert {a.id for a in second} == {a.id for a in first}
+
+
+def test_build_avatars_textured_synthetic_backend_writes_measured_ply(tmp_path, clip):
+    # End-to-end controller path on the REAL measured-projection adapter, fed by the injectable
+    # dependency-free backend (no SMPL-X, no GPU): each subject yields a genuine 2/3-coverage
+    # textured PLY carrying the per-vertex measured flag — one vertex honestly unmeasured (R-6).
+    from pitch3d.app import build_app
+    from pitch3d.app.wiring import default_ports
+
+    backend = "pitch3d.adapters.models.avatar:SyntheticAvatarMeshBackend"
+    ports = default_ports(out_dir=tmp_path / "out", avatar="textured", avatar_backend=backend)
+    app = build_app(out_dir=tmp_path / "out", ports=ports)
+    scene_id = app.run_reconstruction(app.register_clip(clip, name="t").id)
+
+    refs = app.build_avatars(scene_id)
+    assert refs, "reconstructed scene has subjects"
+    for r in refs:
+        assert r.kind == RenderAssetKind.AVATAR_TEXTURED_SMPLX
+        assert r.extra["n_vertices"] == 3 and r.extra["n_measured"] == 2
+        assert 0.0 < r.extra["coverage"] < 1.0          # partial coverage, not fabricated
+        assert "property uchar measured" in Path(r.uri).read_text()

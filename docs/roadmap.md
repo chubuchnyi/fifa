@@ -144,6 +144,19 @@ keeps measured pixel-projection **primary** and routes those candidates to M3 (#
 synthesized. (The brief's stated "current stack" assumes GVHMR/WHAM + ByteTrack; the actually-wired
 calibration is PnLCalib — it is a *target* design, not the repo state.)
 
+**Progress — M2-2 #1 wired E2E (2026-06-25):** the measured textured-SMPL-X `AvatarBuilder`
+(projection → front-face/z-buffer visibility → per-vertex colour averaging, R-6: never-seen verts
+stay `measured=0`) is now wired through the pipeline, not just unit-tested. New controller stage
+`Application.build_avatars` consumes the *resolved* scene's subjects and attaches one
+`RenderAssetRef` per subject to the scene; the CLI dry-run runs it as stage 9 (`reconstruct → … →
+resolve → observe → **avatar** → render → export`). An injectable, dependency-free
+`SyntheticAvatarMeshBackend` (no SMPL-X, no GPU) drives the *real* measured path E2E so CI/`--avatar
+textured` exercises projection without weights — `--avatar-backend
+pitch3d.adapters.models.avatar:SyntheticAvatarMeshBackend` yields a genuine 2/3-coverage PLY (one
+vertex off-frame, honestly unmeasured). The heavy SMPL-X meshing half stays gated behind the
+`avatar` extra. **Next: M2-3 `SplatAvatarRenderPass`** — render the vertex-coloured mesh from the
+`resolved` scene.
+
 ---
 
 ## M3 — Quality & polish ⬜  (+ ViewSynthesizer **seam B**)

@@ -168,14 +168,33 @@ def run_dry_run(
     obs_after = app.observe(scene_id, frame=mid_frame, quality="preview")
     _print_observation(obs_after, label="observe:after")
 
-    # 9) Render the RESOLVED scene (proposal ⊕ corrections), single source of truth.
+    # 9) AVATAR: build a per-subject render asset, attached to the scene (photoreal stage #1). The
+    #    gated heavy path (`--avatar textured` with no backend) is reported, not fatal — honest
+    #    about what it can't measure yet (R-6); the golden path still renders/exports.
+    try:
+        avatar_refs = app.build_avatars(scene_id)
+        print(f"\n== avatar[{avatar}]: built {len(avatar_refs)} asset(s) → {out_dir / 'assets'}")
+        for r in avatar_refs:
+            x = r.extra
+            if "coverage" in x:
+                detail = f"coverage={x['coverage']:.2f} {x['n_measured']}/{x['n_vertices']} verts"
+            else:
+                detail = f"ref_crops={x.get('ref_crops', 0)}"
+            print(f"    subject {r.subject_track_id}: {r.kind.value} — {detail}")
+    except (NotImplementedError, RuntimeError) as exc:
+        print(
+            f"\n== avatar[{avatar}]: skipped — heavy backend not wired "
+            f"({type(exc).__name__}); inject --avatar-backend or use --avatar fake"
+        )
+
+    # 10) Render the RESOLVED scene (proposal ⊕ corrections), single source of truth.
     render_result = app.render(scene_id, quality="preview")
     print(
         f"\n== render: {render_result.n_frames} frame(s), "
         f"is_video={render_result.is_video} → {render_result.uri}"
     )
 
-    # 10) Export (canonical JSON is a real round-trip; other formats are honest fakes).
+    # 11) Export (canonical JSON is a real round-trip; other formats are honest fakes).
     export_path = out_dir / "export" / f"scene.{export_format}"
     export_path.parent.mkdir(parents=True, exist_ok=True)
     result = app.export(scene_id, export_format, str(export_path))
@@ -188,7 +207,7 @@ def run_dry_run(
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
     print("\nOK — reconstruct → observe → attention → preview → edit → resolve → "
-          "observe → render → export completed.")
+          "observe → avatar → render → export completed.")
     print(f"  device: {device}")
     print(f"  real adapters: {', '.join(real) if real else '(none — fully on fakes)'}")
     print(f"  fake adapters: {', '.join(fake) if fake else '(none — fully real)'}")

@@ -21,6 +21,7 @@ from pitch3d.adapters.models.avatar import (
     AvatarMeshObservations,
     FrameObservation,
     SmplxTextureBackend,
+    SyntheticAvatarMeshBackend,
     TexturedSmplxAvatarBuilder,
     aggregate_observations,
     sample_vertex_colors,
@@ -203,3 +204,19 @@ def test_default_backend_heavy_path_is_gated():
     assert isinstance(builder._backend(), SmplxTextureBackend)
     with pytest.raises((NotImplementedError, RuntimeError)):
         builder._backend().observe(Subject(track_id=1, proposal=None), [])  # type: ignore[arg-type]
+
+
+# --- SyntheticAvatarMeshBackend (the injectable, dependency-free measured path) -------------
+def test_synthetic_backend_drives_builder_to_measured_ply(tmp_path, make_motion):
+    # The injectable no-SMPL-X/no-GPU backend runs the *real* projection → sampling → aggregation
+    # path end-to-end: of its 3 synthetic verts, two land on the image and one projects off-frame,
+    # so the builder yields a genuine 2/3-coverage textured PLY with one honest measured=0 (R-6).
+    builder = TexturedSmplxAvatarBuilder(backend=SyntheticAvatarMeshBackend(), out_dir=tmp_path)
+    ref = builder.build(Subject(track_id=3, proposal=make_motion([0])), [])
+    assert ref.kind == RenderAssetKind.AVATAR_TEXTURED_SMPLX
+    assert ref.extra["n_vertices"] == 3
+    assert ref.extra["n_measured"] == 2
+    assert 0.0 < ref.extra["coverage"] < 1.0
+    nv, nf, flags = _parse_ply(Path(ref.uri))
+    assert (nv, nf) == (3, 1)
+    assert sum(flags) == 2
