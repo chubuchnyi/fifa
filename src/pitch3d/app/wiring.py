@@ -100,7 +100,10 @@ def default_ports(
     vertex ``measured=1``, rendered by the splat pass; 3DGS/NeRF/generative env stay gated, R-8).
     ``render``: ``"fake"``, ``"overlay"`` (reproject the
     resolved 3D back onto per-frame PNGs — dependency-free, no extra), ``"splat"`` (M2-3: splat
-    the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts) or ``"orbit"``
+    the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts — the no-dep
+    debug viz), ``"cycles"`` (M2-7: render those same measured meshes through Blender/Cycles for a
+    real photoreal frame, R-6 tint intact, rigid-root placement only — needs ``$PITCH3D_BLENDER``)
+    or ``"orbit"``
     (M2-5: ViewSynthesizer seam-A limited-orbit re-shoot of the source clip — a photoreal *video,
     not editable*; the authoritative cached path is ``Application.render_orbit``). ``export``:
     ``"fake"``
@@ -239,13 +242,17 @@ def default_ports(
         from ..adapters.render import SplatAvatarRenderPass
 
         rnd = SplatAvatarRenderPass(out_dir=out / "render")
+    elif render == "cycles":
+        from ..adapters.render import CyclesRenderPass
+
+        rnd = CyclesRenderPass(out_dir=out / "render")
     elif render == "orbit":
         from ..adapters.render import ViewSynthOrbitRenderPass
 
         rnd = ViewSynthOrbitRenderPass(synthesizer=vs)
     else:
         raise ValueError(
-            f"unknown render {render!r}; expected 'fake', 'overlay', 'splat' or 'orbit'"
+            f"unknown render {render!r}; expected 'fake', 'overlay', 'splat', 'cycles' or 'orbit'"
         )
 
     if export == "fake":

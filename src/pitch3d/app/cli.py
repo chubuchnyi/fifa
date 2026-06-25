@@ -271,10 +271,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="avatar builder; 'textured' = measured pixel-projection onto the "
                              "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
                              "the SMPL-X-meshing heavy half is an unwired stub (use 'fake')")
-    parser.add_argument("--render", default="fake", choices=["fake", "overlay", "splat", "orbit"],
+    parser.add_argument("--render", default="fake",
+                        choices=["fake", "overlay", "splat", "cycles", "orbit"],
                         help="render pass; 'overlay' reprojects PNGs, 'splat' rasterises the "
-                             "measured avatar meshes (both real + dependency-free), 'orbit' is the "
-                             "ViewSynthesizer seam-A limited-orbit re-shoot (video, not editable)")
+                             "measured avatar meshes (both real + dependency-free), 'cycles' "
+                             "renders those meshes photoreal via Blender/Cycles (M2-7, needs "
+                             "$PITCH3D_BLENDER), 'orbit' is the ViewSynthesizer seam-A "
+                             "limited-orbit re-shoot (video, not editable)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
                         help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
     parser.add_argument("--observer", default="fake", choices=["fake", "blender"],

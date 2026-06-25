@@ -36,6 +36,7 @@ from ...core.scene.scene import Scene
 from .proxy import ProxyPlan, build_proxy_plan, write_plan
 
 _SCRIPT = Path(__file__).with_name("_script.py")
+_CYCLES_SCRIPT = Path(__file__).with_name("_cycles_script.py")
 _SUCCESS = "PITCH3D_BLENDER_OK"
 _QUALITY_MAX_PX = {RenderQuality.PREVIEW: 480, RenderQuality.FINAL: 1280}
 
@@ -100,6 +101,47 @@ def run_blender(
     if out_blend is not None and not Path(out_blend).is_file():
         raise RuntimeError(f"Blender did not produce expected .blend {out_blend}")
     return {"blend": str(out_blend) if out_blend is not None else None, "renders": renders}
+
+
+def run_cycles_render(
+    plan_path: str | Path,
+    *,
+    mesh_dir: str | Path,
+    render_dir: str | Path,
+    n_frames: int,
+    blender: str | None = None,
+    timeout: float = 600.0,
+) -> list[str]:
+    """Drive Blender once to Cycles-render a :class:`~.cycles_plan.CyclesPlan` (M2-7).
+
+    Invokes ``_cycles_script.py`` with the already-written plan JSON + the avatar-mesh NPZ dir,
+    writing ``frame_{i:05d}.png`` into ``render_dir``. Returns the produced PNG paths after checking
+    every promised frame exists. Raises :class:`RuntimeError` if Blender is absent, exits non-zero,
+    omits the success sentinel, or drops a frame. Cycles is CPU-bound here (~seconds/frame), so the
+    timeout is generous; the caller scales the camera to a low-res preview to keep it cheap (UX-9).
+    """
+    binary = _require_blender(blender)
+    render_dir = Path(render_dir)
+    render_dir.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        binary, "--background", "--factory-startup", "--python", str(_CYCLES_SCRIPT),
+        "--", "--plan", str(plan_path), "--mesh-dir", str(mesh_dir),
+        "--render-dir", str(render_dir),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=False)
+    if proc.returncode != 0 or _SUCCESS not in proc.stdout:
+        tail = (proc.stdout + "\n" + proc.stderr)[-2000:]
+        raise RuntimeError(
+            f"Blender Cycles render failed (rc={proc.returncode}). Output tail:\n{tail}"
+        )
+
+    paths: list[str] = []
+    for i in range(int(n_frames)):
+        path = render_dir / f"frame_{i:05d}.png"
+        if not path.is_file():
+            raise RuntimeError(f"Blender Cycles did not produce expected frame {path}")
+        paths.append(str(path))
+    return paths
 
 
 @dataclass
@@ -197,4 +239,5 @@ __all__ = [
     "BlenderSceneObserver",
     "locate_blender",
     "run_blender",
+    "run_cycles_render",
 ]

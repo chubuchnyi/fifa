@@ -1,13 +1,16 @@
 """Real render passes (FR-14, UX-3).
 
-Three implementations satisfy :class:`RenderPass`. **Wired now:**
+Four implementations satisfy :class:`RenderPass`. **Wired now:**
 :class:`ReprojectionOverlayRenderPass` — a Blender-free pass that reprojects the resolved 3D
 scene back onto per-frame PNGs (pure numpy + stdlib), so the mono pipeline is visually
 inspectable today; :class:`SplatAvatarRenderPass` (M2-3) — splats the MEASURED M2-2 avatar
-meshes onto per-frame PNGs with a z-buffer, tinting never-observed vertices (R-6); and
-:class:`ViewSynthOrbitRenderPass` (M2-5) — wraps a :class:`ViewSynthesizer` seam-A orbit
-(:meth:`ViewSynthesizer.render_orbit`) as a render pass producing a limited-orbit **video, not
-editable** (ADR-0007). Use :class:`pitch3d.adapters.fakes.FakeRenderPass` for the no-IO dry-run.
+meshes onto per-frame PNGs with a z-buffer (the no-dependency debug viz), tinting never-observed
+vertices (R-6); :class:`CyclesRenderPass` (M2-7) — the real *photoreal* path, rendering those same
+measured meshes through Blender/Cycles out of process (ADR-0003), R-6 tint intact, rigid-root
+placement only (LBS=M2-8); and :class:`ViewSynthOrbitRenderPass` (M2-5) — wraps a
+:class:`ViewSynthesizer` seam-A orbit (:meth:`ViewSynthesizer.render_orbit`) as a render pass
+producing a limited-orbit **video, not editable** (ADR-0007). Use
+:class:`pitch3d.adapters.fakes.FakeRenderPass` for the no-IO dry-run.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from ...core.scene.assets import SynthViewRef
 from ...core.scene.camera import CameraTrack
 from ...core.scene.scene import Scene
 from .avatar_splat import SplatAvatarRenderPass
+from .cycles import CyclesRenderPass
 from .overlay import ReprojectionOverlayRenderPass
 
 
@@ -86,6 +90,7 @@ class ViewSynthOrbitRenderPass(RenderPass):
 
 
 __all__ = [
+    "CyclesRenderPass",
     "ReprojectionOverlayRenderPass",
     "SplatAvatarRenderPass",
     "ViewSynthOrbitRenderPass",

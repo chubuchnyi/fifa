@@ -1,0 +1,158 @@
+"""Cycles render pass (M2-7) — the pure camera/placement/lens maths + a Blender-gated smoke render.
+
+The error-prone half (OpenCV→Blender camera conversion, root placement, ``K``→lens mapping, plan
+assembly + JSON round-trip) is tested with no Blender via strong invariants: the conversion is
+checked by transforming a world point into Blender camera-local coords and matching the OpenCV
+optical flip, and the placement is checked against the splat pass's exact ``canonical @ rot.T +
+transl`` formula so the two passes cannot drift. One integration test actually drives Cycles when a
+Blender binary is present, asserting a non-empty photoreal PNG comes out.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from pitch3d.adapters.blender import locate_blender
+from pitch3d.adapters.blender._cycles_script import _parse_args
+from pitch3d.adapters.blender.cycles_plan import (
+    CyclesMeshRef,
+    blender_lens_params,
+    build_cycles_plan,
+    cv_to_blender_camera_matrix,
+    load_cycles_plan,
+    root_object_matrix,
+    write_cycles_plan,
+)
+from pitch3d.adapters.models.avatar import write_vertex_colored_ply
+from pitch3d.adapters.render.cycles import CyclesRenderPass
+from pitch3d.core.correction.rotations import axis_angle_to_matrix
+from pitch3d.core.ports.render import RenderQuality
+from pitch3d.core.scene.assets import RenderAssetKind, RenderAssetRef
+from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
+from pitch3d.core.scene.provenance import Backend, ModelInfo
+from pitch3d.core.scene.subject import Subject
+
+_FLIP = np.diag([1.0, -1.0, -1.0])  # OpenCV optical → Blender camera axis flip
+
+
+def _camera(n: int = 1, w: int = 64, h: int = 48) -> CameraTrack:
+    intr = CameraIntrinsics(fx=50.0, fy=50.0, cx=w / 2.0, cy=h / 2.0, width=w, height=h)
+    return CameraTrack.identity(intr, n)
+
+
+# --- camera conversion: the whole OpenCV→Blender invariant ---------------------
+def test_cv_to_blender_matches_optical_flip_and_centre():
+    # For any world point P: Blender camera-local coords (matrix_worldᵀ applied) must equal the
+    # OpenCV camera coords with the y/z optical flip — and the camera centre is the OpenCV -Rᵀt.
+    rng = np.random.default_rng(0)
+    rot = axis_angle_to_matrix(rng.normal(size=3))
+    t = rng.normal(size=3)
+    p = rng.normal(size=3)
+    matrix = cv_to_blender_camera_matrix(rot, t)
+    rot_b, centre = matrix[:3, :3], matrix[:3, 3]
+
+    x_cv = rot @ p + t
+    blender_local = rot_b.T @ (p - centre)
+    np.testing.assert_allclose(blender_local, _FLIP @ x_cv, atol=1e-9)
+    np.testing.assert_allclose(centre, -rot.T @ t, atol=1e-9)
+
+
+def test_identity_camera_looks_along_world_plus_z():
+    # An identity OpenCV camera (R=I, t=0) looks +Z world; the Blender camera looks down local -Z,
+    # so its world-space view direction (−column 2 of matrix_world) must be +Z, centre at origin.
+    matrix = cv_to_blender_camera_matrix(np.eye(3), np.zeros(3))
+    np.testing.assert_allclose(matrix[:3, 3], 0.0, atol=1e-12)
+    np.testing.assert_allclose(-matrix[:3, 2], [0.0, 0.0, 1.0], atol=1e-12)
+
+
+# --- placement: identical to the splat pass ------------------------------------
+def test_root_object_matrix_matches_splat_placement():
+    rng = np.random.default_rng(1)
+    aa, transl = rng.normal(size=3), rng.normal(size=3)
+    canonical = rng.normal(size=(5, 3))
+    matrix = root_object_matrix(aa, transl)
+    homo = np.concatenate([canonical, np.ones((5, 1))], axis=1)
+    placed = (homo @ matrix.T)[:, :3]
+    expected = canonical @ axis_angle_to_matrix(aa).T + transl  # the splat formula, verbatim
+    np.testing.assert_allclose(placed, expected, atol=1e-9)
+
+
+# --- intrinsics → Blender lens/sensor/shift ------------------------------------
+def test_blender_lens_params_square_centred():
+    intr = CameraIntrinsics(
+        fx=1000.0, fy=1000.0, cx=(1280 - 1) / 2.0, cy=(720 - 1) / 2.0, width=1280, height=720
+    )
+    p = blender_lens_params(intr)
+    assert p["sensor_fit"] == "HORIZONTAL"
+    assert p["pixel_aspect_x"] == 1.0 and abs(p["pixel_aspect_y"] - 1.0) < 1e-12
+    assert abs(p["lens_mm"] - 1000.0 * 36.0 / 1280.0) < 1e-9
+    assert abs(p["shift_x"]) < 1e-12 and abs(p["shift_y"]) < 1e-12
+
+
+def test_blender_lens_params_anisotropic_pixels_ride_aspect():
+    intr = CameraIntrinsics(fx=1200.0, fy=1000.0, cx=640.0, cy=360.0, width=1280, height=720)
+    p = blender_lens_params(intr)
+    assert abs(p["pixel_aspect_y"] / p["pixel_aspect_x"] - 1200.0 / 1000.0) < 1e-9
+
+
+# --- plan assembly: frame count, present/absent visibility, JSON round-trip ----
+def test_build_plan_frames_and_absent_subject_hidden(make_motion, make_scene):
+    subj = Subject(track_id=7, proposal=make_motion([0, 2], transl_z=5.0))  # absent at frame 1
+    scene = make_scene(subjects=[subj])
+    mesh = CyclesMeshRef("avatar_7", "avatar_7.npz", 7)
+    plan = build_cycles_plan(scene, _camera(3), meshes=[mesh])
+    assert len(plan.frames) == 3
+    assert [f.placements[0].visible for f in plan.frames] == [True, False, True]
+
+
+def test_plan_json_round_trip(tmp_path, make_motion, make_scene):
+    subj = Subject(track_id=7, proposal=make_motion([0, 1], transl_z=5.0))
+    scene = make_scene(subjects=[subj])
+    plan = build_cycles_plan(
+        scene, _camera(2), meshes=[CyclesMeshRef("avatar_7", "avatar_7.npz", 7)],
+        samples=12, device="CPU",
+    )
+    back = load_cycles_plan(write_cycles_plan(plan, tmp_path / "plan.json"))
+    assert back.scene_id == plan.scene_id and back.samples == 12 and len(back.frames) == 2
+    np.testing.assert_allclose(
+        back.frames[0].camera_matrix_world, plan.frames[0].camera_matrix_world
+    )
+    np.testing.assert_allclose(
+        back.frames[1].placements[0].matrix_world, plan.frames[1].placements[0].matrix_world
+    )
+
+
+# --- the in-Blender script's arg parser is pure (no bpy) -----------------------
+def test_cycles_script_parses_flags():
+    argv = ["blender", "--python", "x.py", "--",
+            "--plan", "p.json", "--mesh-dir", "m", "--render-dir", "r"]
+    assert _parse_args(argv) == {"plan": "p.json", "mesh_dir": "m", "render_dir": "r"}
+
+
+# --- Blender-gated: a real Cycles photoreal frame comes out --------------------
+@pytest.mark.skipif(locate_blender() is None, reason="needs a Blender binary (env/PATH)")
+def test_cycles_render_produces_a_nonempty_frame(tmp_path, make_motion, make_scene):
+    verts = np.array([[0.0, 0.0, 0.0], [0.4, 0.0, 0.0], [0.0, 0.0, 0.6]])
+    faces = np.array([[0, 1, 2]])
+    rgb = np.array([[210, 90, 40]] * 3, dtype=np.uint8)
+    uri = write_vertex_colored_ply(
+        tmp_path / "avatar_7.ply", verts, faces, rgb, np.array([True, True, True])
+    )
+    ref = RenderAssetRef(
+        id="a-7", kind=RenderAssetKind.AVATAR_TEXTURED_SMPLX, uri=uri,
+        model=ModelInfo(name="t", backend=Backend.FAKE), subject_track_id=7,
+    )
+    subj = Subject(track_id=7, proposal=make_motion([0], transl_z=8.0))
+    scene = make_scene(subjects=[subj])
+    scene.render_assets = [ref]
+
+    res = CyclesRenderPass(out_dir=tmp_path / "render", samples=4).render(
+        scene, _camera(1, w=160, h=120), RenderQuality.FINAL
+    )
+    frame = Path(res.uri) / "frame_00000.png"
+    assert res.n_frames == 1 and not res.is_video
+    assert frame.is_file() and frame.stat().st_size > 0
+    assert "cycles" in res.note and "avatars=1" in (Path(res.uri) / "manifest.txt").read_text()

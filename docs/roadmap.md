@@ -113,7 +113,7 @@ per M2-0). The numpy vertex-splat pass (M2-3) is debug-grade scaffolding, not th
 | M2-4 Edit↔render sync wiring (resolved drives every render rep) | `app`, `adapters/render` |
 | **M2-5 ViewSynthesizer seam A** — `render_orbit` as a `RenderPass` for limited orbits | `adapters/viewsynth`, `adapters/render` |
 | M2-6 Render preview (fast low-q) for both paths | `adapters/render` |
-| **M2-7 Real photoreal renderer** — Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import); replaces the numpy splat pass as the photoreal path (splat stays the no-dep debug viz) | `adapters/render`, `adapters/blender` |
+| **M2-7 Real photoreal renderer ✅ (2026-06-25)** — `CyclesRenderPass`: Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import), the photoreal path alongside the no-dep splat debug viz. Rigid-root placement (LBS=M2-8), neutral ground (material=M2-9), R-6 tint intact | `adapters/render`, `adapters/blender` |
 | **M2-8 Posed, textured avatar** — `SmplxTextureBackend.observe()` per-frame SMPL-X LBS (geometry follows the edited pose, incl. limbs) + surface texture/material from the measured pixel-projection (extend M2-2 #1 per-vertex → texture; R-6 marks unmeasured) | `adapters/models` (`hmr`/`avatar` extra, GPU) |
 | **M2-9 Measured env materials + lighting** — grass PBR for the measured pitch + scene lighting/HDRI; stadium stays gated/marked (R-8 → M3) | `adapters/models`, `adapters/blender` |
 | **M2-10 Edit↔render sync + photoreal `observe`** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no manual redo (AC-4 proper); `observe` returns photoreal multi-view (A-8); seam-A orbit becomes a re-render of the 3D scene at orbit cameras, no generative (A-9) | `app`, `adapters/render`, `adapters/viewsynth` |
@@ -256,16 +256,44 @@ pass is deliberately left full-res (it is the reprojection inspector, not a TZ r
 camera at ¼ the pixels); `--render orbit` re-shoots the orbit at 640×360 with the 6-frame count
 preserved and `is_video=True`. Honest scope (R-6): the lever changes *resolution only* — final-grade
 fidelity (texture, AA, real generative steps) still rides the heavy backends, which stay gated.
-**Honest status (re-assessed 2026-06-25): the M2 GOAL — a photoreal render — is NOT met.** M2-0…M2-6
-delivered the render-pass *architecture* (seam, edit↔render sync on the rigid root, content-addressed
-cache, preview-downscale, measured pitch-env, seam-A contract) plus a measured **vertex-splat**
-visualization — debug-grade, pure-numpy, *not* a photoreal renderer. The avatars are untextured and
-not LBS-posed, no real renderer is wired, and the seam-A "video" is a fake re-shoot. M2-0 routing
-*generative* to M3 does **not** make the measured path photoreal — that still needs **M2-7…M2-10**
-(real Cycles renderer + posed textured avatars + env materials + edit↔render/observe through it).
-**M2 stays 🟡 because the photoreal output does not exist — not because the generative backends are
-gated.** Measured ceiling: textured mannequins on grass; broadcast-convincing fidelity is M3. Next
-within M2: **M2-7**.
+**Honest status (re-assessed 2026-06-25): the M2 GOAL — a photoreal render of textured, LBS-posed
+avatars on grass — is NOT met.** M2-0…M2-6 delivered the render-pass *architecture* (seam, edit↔render
+sync on the rigid root, content-addressed cache, preview-downscale, measured pitch-env, seam-A
+contract) plus a measured **vertex-splat** visualization — debug-grade, pure-numpy, *not* a photoreal
+renderer. **M2-7 now wires a real Blender/Cycles renderer** (below), but it places avatars by the
+**rigid root only** on a **neutral ground**: the meshes are still untextured (vertex colour only) and
+not LBS-posed, and the seam-A "video" is still a fake re-shoot. So the photoreal output does **not**
+yet exist — that needs **M2-8…M2-10** (per-frame limb LBS + textured avatars + grass/line env
+materials + edit↔render/observe through Cycles). **M2 stays 🟡 because the photoreal output does not
+exist — not because the generative backends are gated.** Measured ceiling: textured mannequins on
+grass; broadcast-convincing fidelity is M3. Next within M2: **M2-8**.
+
+**Progress — M2-7 `CyclesRenderPass` wired E2E (2026-06-25):** the first *real* renderer — a
+Blender/Cycles `RenderPass` over the **resolved** scene, the photoreal path alongside the no-dep
+splat debug viz (ADR-0003: Blender hosts editing, photoreal rendering runs external behind the port).
+The error-prone maths is a new **dependency-free** `adapters/blender/cycles_plan.py` (mirroring
+`proxy.py`): the OpenCV→Blender camera conversion (world→cam optical `R,t` → Blender `matrix_world`
+camera→world, optical flip `diag(1,-1,-1)`, centre `-Rᵀt`), the BlenderProc-style `K`→lens mapping
+(`fx`/`fy` → `pixel_aspect`, principal point → lens shift, HORIZONTAL fit, `lens = fx·sensor/width`),
+and rigid-root placement identical to the splat formula (`axis-angle → R` **⊕** root translation) —
+all unit-tested with strong invariants (`flip @ X_c == Rᵇᵀ(P−C)`, placement vs the verbatim splat
+formula), no Blender. The heavy half (`_cycles_script.py`) runs **out of process** like the proxy
+builder (`blender --background --factory-startup --python … -- --plan … --mesh-dir … --render-dir …`,
+sentinel `PITCH3D_BLENDER_OK`): it loads each avatar NPZ (verts/faces/**baked R-6-tinted** vertex
+colours), builds a Cycles mesh with a `ShaderNodeVertexColor → Principled` material, adds a sun + sky
+world + a neutral ground plane, and renders `frame_{i:05d}.png` per camera frame. `CyclesRenderPass`
+(`adapters/render/cycles.py`, `--render cycles`) is the orchestrator: it resolves the scene's avatar
+PLYs, bakes the R-6 tint into per-vertex `rgb01`, writes the NPZ meshes + JSON plan into a tempdir and
+drives the subprocess, consuming `RenderQuality.scale` (M2-6) so a PREVIEW renders at ¼ the pixels.
+**E2E proof (R-6 honest):** the Blender-gated integration test takes a real measured PLY triangle all
+the way to a **non-empty lit Cycles PNG** (FINAL 160×120); the full `--render cycles` dry-run drives
+`reconstruct → … → render → Blender/Cycles → 2 real 640×360 frames` (decoded pixel stats confirm lit
+sky+ground content, not black). The manifest honestly reports `avatars=0` on the *fake* pipeline —
+the fake avatar builder emits no real mesh, exactly as the splat pass does; real avatars need
+`--avatar textured` (SMPL-X, the M2-8 path). **Honest scope (R-6):** rigid-**root** placement only —
+per-frame limb **LBS is M2-8**, untextured beyond vertex colour and the **grass/line materials are
+M2-9**, edit↔render/observe through Cycles is M2-10. So this wires the *renderer*, not yet the
+photoreal *avatar on grass* — M2 stays 🟡. **Next: M2-8** (LBS-posed textured avatars through Cycles).
 
 ---
 

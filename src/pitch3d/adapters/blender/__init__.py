@@ -11,6 +11,7 @@ without it.
 
 from __future__ import annotations
 
+from .cycles_plan import CyclesPlan, build_cycles_plan, write_cycles_plan
 from .live import apply_drag, launch_live_session, resolved_root_at, serve_edits
 from .proxy import (
     ProxyObject,
@@ -20,21 +21,31 @@ from .proxy import (
     parse_subject_name,
     subject_object_name,
 )
-from .runner import BlenderProxyBuilder, BlenderSceneObserver, locate_blender, run_blender
+from .runner import (
+    BlenderProxyBuilder,
+    BlenderSceneObserver,
+    locate_blender,
+    run_blender,
+    run_cycles_render,
+)
 
 __all__ = [
     "BlenderProxyBuilder",
     "BlenderSceneObserver",
+    "CyclesPlan",
     "ProxyObject",
     "ProxyPlan",
     "ProxyView",
     "apply_drag",
+    "build_cycles_plan",
     "build_proxy_plan",
     "launch_live_session",
     "locate_blender",
     "parse_subject_name",
     "resolved_root_at",
     "run_blender",
+    "run_cycles_render",
     "serve_edits",
     "subject_object_name",
+    "write_cycles_plan",
 ]
