@@ -21,6 +21,7 @@ from pitch3d.adapters.render.avatar_splat import (
 )
 from pitch3d.adapters.render.overlay import _BACKGROUND
 from pitch3d.core.correction.engine import make_offset
+from pitch3d.core.ports.render import RenderQuality
 from pitch3d.core.scene.assets import RenderAssetKind, RenderAssetRef
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
 from pitch3d.core.scene.layers import CorrectionTarget, TargetKind
@@ -224,3 +225,38 @@ def test_render_reports_env_mesh_in_manifest(tmp_path, make_scene):
     manifest = (Path(res.uri) / "manifest.txt").read_text()
     assert "env_meshes=1" in manifest and "env_vertices=1" in manifest
     assert "env mesh(es)" in res.note
+
+
+# --- M2-6 fast low-q preview: PREVIEW renders at half-res, FINAL at full-res (UX-9) ------------
+def test_preview_renders_at_half_resolution(tmp_path, make_motion, make_scene):
+    # The source camera is 64x48; a PREVIEW downscales it to 32x24 (~¼ the pixels), frames intact.
+    ref = _avatar_ref(tmp_path, 7, [[200, 100, 50]], [True])
+    subj = Subject(track_id=7, proposal=make_motion([0, 1], transl_z=5.0))
+    scene = _scene_with(make_scene, (subj, ref))
+    res = SplatAvatarRenderPass(out_dir=tmp_path / "render").render(
+        scene, _camera(2), RenderQuality.PREVIEW
+    )
+    assert (res.camera.intrinsics.width, res.camera.intrinsics.height) == (32, 24)
+    assert res.n_frames == 2
+    assert "size=32x24 quality=preview" in (Path(res.uri) / "manifest.txt").read_text()
+
+
+def test_final_full_res_keeps_camera_identity(tmp_path, make_motion, make_scene):
+    ref = _avatar_ref(tmp_path, 7, [[200, 100, 50]], [True])
+    subj = Subject(track_id=7, proposal=make_motion([0, 1], transl_z=5.0))
+    scene = _scene_with(make_scene, (subj, ref))
+    cam = _camera(2)
+    res = SplatAvatarRenderPass(out_dir=tmp_path / "render").render(scene, cam, RenderQuality.FINAL)
+    assert (res.camera.intrinsics.width, res.camera.intrinsics.height) == (64, 48)
+    assert res.camera is cam  # FINAL is a no-op rescale → the caller's camera object is reused
+    assert "size=64x48 quality=final" in (Path(res.uri) / "manifest.txt").read_text()
+
+
+def test_preview_rasterises_fewer_pixels_than_final(tmp_path, make_motion, make_scene):
+    ref = _avatar_ref(tmp_path, 7, [[200, 100, 50]], [True])
+    subj = Subject(track_id=7, proposal=make_motion([0], transl_z=5.0))
+    scene = _scene_with(make_scene, (subj, ref))
+    rp = SplatAvatarRenderPass(out_dir=tmp_path / "render")
+    prev = rp.render(scene, _camera(1), RenderQuality.PREVIEW).camera.intrinsics
+    final = rp.render(scene, _camera(1), RenderQuality.FINAL).camera.intrinsics
+    assert prev.width * prev.height < final.width * final.height  # the "fast low-q" guarantee

@@ -94,7 +94,7 @@ show up in 3D and export.
 
 ---
 
-## M2 — Photoreal layer ⬜  (+ ViewSynthesizer **seam A**)
+## M2 — Photoreal layer 🟡  (+ ViewSynthesizer **seam A**)
 
 **Goal (TZ M2):** photoreal render of the edited scene; edit↔render stays in sync.
 
@@ -222,8 +222,27 @@ the dry-run runs seam A as stage 10b (`… → render → **seam-A** → export`
 `A_render overlap=0.85 editable=False — video, not editable`, `cached + deduped: 1 synth_view after
 2 render_orbit call(s)`; `--render orbit` makes the main render `is_video=True`. Honest deferred
 (R-8, ADR-0007): the real generative backends (ReCamMaster/GEN3C/TrajectoryCrafter-class) stay gated
-in `GenerativeViewSynthesizer`; only the dependency-free fake re-shoots here. **M2 remaining: M2-6**
-render preview (fast low-q) for both paths.
+in `GenerativeViewSynthesizer`; only the dependency-free fake re-shoots here. **Next: M2-6**.
+
+**Progress — M2-6 fast low-q preview wired E2E (2026-06-25):** "preview before the expensive
+final" (UX-9) is implemented as one honest lever — **resolution**. New `RenderQuality.scale`
+(preview = 0.5 → ¼ the pixels, final = 1.0) drives new pure camera math `CameraIntrinsics.scaled`
+/ `CameraTrack.scaled`, which downscale **only the intrinsics**: per-frame pose, frame indices and
+frame *count* are preserved, so the same content rasterises at fewer pixels (no geometry faked,
+just cheaper). `scale(1.0)` returns `self`, so a FINAL render keeps the caller's exact camera
+(identity intact). Both TZ paths consume it: `SplatAvatarRenderPass.render` renders into the
+downscaled framebuffer (manifest/note report the actual size), and the seam-A pair
+(`ViewSynthOrbitRenderPass.render` + `Application.render_orbit`) downscales the bounded orbit for a
+cheaper generative re-shoot and threads `quality` into both the **scene hint** (a real synthesizer
+can also drop steps) and the **cache key** — so the preview and the final are *distinct* ADR-0004
+entries and neither expensive pass recomputes for the same inputs. The debug `ReprojectionOverlay`
+pass is deliberately left full-res (it is the reprojection inspector, not a TZ render path). E2E:
+`--render splat` writes the preview manifest `size=640x360 quality=preview` (the 1280×720 broadcast
+camera at ¼ the pixels); `--render orbit` re-shoots the orbit at 640×360 with the 6-frame count
+preserved and `is_video=True`. Honest scope (R-6): the lever changes *resolution only* — final-grade
+fidelity (texture, AA, real generative steps) still rides the heavy backends, which stay gated.
+**M2 ticket list (M2-0…M2-6) is complete on the pure/no-GPU halves; the generative heavy backends
+(generative avatars #2, real ViewSynthesizer) remain gated (R-8) → M2 stays 🟡, not ✅.** Next: M3.
 
 ---
 

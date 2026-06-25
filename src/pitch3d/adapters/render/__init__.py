@@ -27,10 +27,16 @@ from .overlay import ReprojectionOverlayRenderPass
 def orbit_render_result(ref: SynthViewRef, quality: RenderQuality) -> RenderResult:
     """Wrap a seam-A :class:`SynthViewRef` as a :class:`RenderResult` (video, not editable).
 
-    Carries the synthesizer's ``frustum_overlap`` and the non-editable flag into the render note
-    so a consumer can never mistake an orbit re-shoot for an editable reconstruction (R-15).
+    Carries the synthesizer's ``frustum_overlap``, the re-shot resolution, and the non-editable
+    flag into the render note so a consumer can never mistake an orbit re-shoot for an editable
+    reconstruction (R-15) and can see the preview/final size it was shot at (UX-9).
     """
     n = int(ref.camera.frames.shape[0]) if ref.camera is not None else 0
+    size = (
+        f"{int(ref.camera.intrinsics.width)}x{int(ref.camera.intrinsics.height)}"
+        if ref.camera is not None
+        else "0x0"
+    )
     detail = ref.note or "video, not editable"
     return RenderResult(
         uri=ref.uri,
@@ -38,7 +44,8 @@ def orbit_render_result(ref: SynthViewRef, quality: RenderQuality) -> RenderResu
         quality=quality,
         is_video=True,
         camera=ref.camera,
-        note=f"seam A (render_orbit) frustum_overlap={ref.frustum_overlap:.2f} — {detail}",
+        note=f"seam A (render_orbit) {size} {quality.value} "
+        f"frustum_overlap={ref.frustum_overlap:.2f} — {detail}",
     )
 
 
@@ -62,15 +69,19 @@ class ViewSynthOrbitRenderPass(RenderPass):
         camera_path: CameraTrack,
         quality: RenderQuality = RenderQuality.PREVIEW,
     ) -> RenderResult:
+        # Preview lever for the generative seam (M2-6, UX-9): downscale the orbit so the re-shoot
+        # is cheaper, and pass the quality hint so a real synthesizer can also go low-q. FINAL =
+        # full-res (scaled(1.0) is the same camera), so the re-shot frame count is always preserved.
+        camera = camera_path.scaled(quality.scale)
         clip = ClipRef(
             source_id=scene.source_id,
             uri="",
-            frames=camera_path.frames,
-            width=int(camera_path.intrinsics.width),
-            height=int(camera_path.intrinsics.height),
+            frames=camera.frames,
+            width=int(camera.intrinsics.width),
+            height=int(camera.intrinsics.height),
             fps=0.0,
         )
-        ref = self.synthesizer.render_orbit(clip, camera_path, None)
+        ref = self.synthesizer.render_orbit(clip, camera, {"quality": quality.value})
         return orbit_render_result(ref, quality)
 
 

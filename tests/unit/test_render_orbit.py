@@ -86,3 +86,35 @@ def test_render_selector_orbit_yields_a_video(tmp_path, clip):
     assert result.is_video is True
     assert result.n_frames == clip.n_frames
     assert "not editable" in result.note
+
+
+# --- M2-6 fast low-q preview on the generative seam (UX-9) ---------------------------------------
+def test_render_orbit_preview_downscales_the_reshot_camera(reconstructed):
+    app, scene_id = reconstructed
+    ref = app.render_orbit(scene_id)  # default quality="preview"
+    # the bounded orbit is composed at 1280x720; a preview re-shoots it at half-res 640x360
+    assert (ref.camera.intrinsics.width, ref.camera.intrinsics.height) == (640, 360)
+    assert ref.camera.frames.shape[0] == 8  # frame count preserved through the pixel rescale
+
+
+def test_render_orbit_final_is_full_resolution(reconstructed):
+    app, scene_id = reconstructed
+    ref = app.render_orbit(scene_id, quality="final")
+    assert (ref.camera.intrinsics.width, ref.camera.intrinsics.height) == (1280, 720)
+
+
+def test_preview_and_final_are_distinct_cache_entries(app, clip):
+    app.ports.viewsynth = _CountingSynth(out_dir=app.out_dir / "synth")
+    episode = app.register_clip(clip, name="t")
+    scene_id = app.run_reconstruction(episode.id)
+    app.render_orbit(scene_id, quality="preview")
+    app.render_orbit(scene_id, quality="final")  # different quality ⇒ recompute, not a cache hit
+    assert app.ports.viewsynth.calls == 2
+
+
+def test_orbit_render_result_note_shows_size_and_quality(reconstructed):
+    app, scene_id = reconstructed
+    ref = app.render_orbit(scene_id)  # preview → 640x360
+    result = orbit_render_result(ref, RenderQuality.PREVIEW)
+    assert "640x360 preview" in result.note
+    assert "not editable" in result.note

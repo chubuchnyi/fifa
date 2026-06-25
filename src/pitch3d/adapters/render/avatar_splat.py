@@ -84,7 +84,10 @@ class SplatAvatarRenderPass(RenderPass):
         camera_path: CameraTrack,
         quality: RenderQuality = RenderQuality.PREVIEW,
     ) -> RenderResult:
-        k = camera_path.intrinsics
+        # Fast low-q preview (M2-6, UX-9): PREVIEW downscales the camera so every frame rasterises
+        # ~¼ the pixels; FINAL is full-res (scaled(1.0) returns the same camera, identity intact).
+        camera = camera_path.scaled(quality.scale)
+        k = camera.intrinsics
         width, height = int(k.width), int(k.height)
         target = self.out_dir / f"{scene.id}_{quality.value}"
         target.mkdir(parents=True, exist_ok=True)
@@ -95,25 +98,25 @@ class SplatAvatarRenderPass(RenderPass):
         n_unmeasured = sum(int((~a.measured).sum()) for a in avatars)
         n_verts = sum(int(a.canonical.shape[0]) for a in avatars)
         n_env_verts = sum(int(m.canonical.shape[0]) for m in env_meshes)
-        for i, frame in enumerate(camera_path.frames.tolist()):
+        for i, frame in enumerate(camera.frames.tolist()):
             fb = _compose_frame(
-                avatars, env_meshes, roots, camera_path, int(frame), self.splat_radius
+                avatars, env_meshes, roots, camera, int(frame), self.splat_radius
             )
             (target / f"frame_{i:05d}.png").write_bytes(_encode_png(fb))
 
         (target / "manifest.txt").write_text(
             f"scene={scene.id} avatars={len(avatars)} vertices={n_verts} "
             f"unmeasured={n_unmeasured} env_meshes={len(env_meshes)} env_vertices={n_env_verts} "
-            f"frames={camera_path.n_frames} size={width}x{height} quality={quality.value}\n",
+            f"frames={camera.n_frames} size={width}x{height} quality={quality.value}\n",
             encoding="utf-8",
         )
         return RenderResult(
             uri=str(target),
-            n_frames=camera_path.n_frames,
+            n_frames=camera.n_frames,
             quality=quality,
             is_video=False,
-            camera=camera_path,
-            note=f"avatar splat {width}x{height}: {len(avatars)} avatar(s), "
+            camera=camera,
+            note=f"avatar splat {width}x{height} ({quality.value}): {len(avatars)} avatar(s), "
             f"{len(env_meshes)} env mesh(es) ({n_env_verts} verts), "
             f"{n_unmeasured}/{n_verts} verts unmeasured (R-6 tinted)",
         )

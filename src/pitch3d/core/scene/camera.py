@@ -10,7 +10,7 @@ Extrinsics convention: world→camera. A world point ``X_w`` maps to camera spac
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -39,6 +39,26 @@ class CameraIntrinsics:
         return np.array(
             [[self.fx, 0.0, self.cx], [0.0, self.fy, self.cy], [0.0, 0.0, 1.0]],
             dtype=float,
+        )
+
+    def scaled(self, factor: float) -> CameraIntrinsics:
+        """Uniformly rescale to a lower pixel resolution (the M2-6 fast-preview lever, UX-9).
+
+        Multiplies the focal lengths and principal point by ``factor`` and rounds the image size,
+        so a downstream raster touches ~``factor**2`` of the pixels. ``factor == 1.0`` is a no-op
+        (returns ``self``); ``distortion`` is in normalised coords and rides through unchanged. The
+        image stays at least 1 px on each side.
+        """
+        if factor == 1.0:
+            return self
+        return replace(
+            self,
+            fx=self.fx * factor,
+            fy=self.fy * factor,
+            cx=self.cx * factor,
+            cy=self.cy * factor,
+            width=max(1, int(round(self.width * factor))),
+            height=max(1, int(round(self.height * factor))),
         )
 
 
@@ -81,3 +101,14 @@ class CameraTrack:
             rotation_quat=quat,
             translation=np.zeros((n_frames, 3)),
         )
+
+    def scaled(self, factor: float) -> CameraTrack:
+        """A copy at ``factor`` of this camera's pixel resolution; extrinsics unchanged (UX-9).
+
+        Only the intrinsics shrink (the M2-6 fast-preview lever) — the per-frame pose and frame
+        indices are identical, so ``n_frames`` and the projected *content* are preserved, just at
+        fewer pixels. ``factor == 1.0`` returns ``self`` so a FINAL render keeps camera identity.
+        """
+        if factor == 1.0:
+            return self
+        return replace(self, intrinsics=self.intrinsics.scaled(factor))

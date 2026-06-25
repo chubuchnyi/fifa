@@ -23,6 +23,17 @@ class RenderQuality(str, Enum):
     PREVIEW = "preview"
     FINAL = "final"
 
+    @property
+    def scale(self) -> float:
+        """Linear resolution factor — preview renders at half-res (¼ the pixels) for speed.
+
+        The single, honest cost lever behind "fast low-q preview" (UX-9): a render pass
+        downscales the camera intrinsics by this factor so it rasterises fewer pixels, then
+        re-renders at FINAL (1.0, full resolution) once the edit is right. FINAL is a no-op,
+        so it preserves camera identity.
+        """
+        return 0.5 if self is RenderQuality.PREVIEW else 1.0
+
 
 @dataclass
 class RenderResult:
