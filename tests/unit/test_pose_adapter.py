@@ -128,7 +128,37 @@ def test_estimate_grounds_root_and_preserves_articulation():
     np.testing.assert_array_equal(out[1].shape.betas, np.full(10, 1.0))  # per-subject shape
     # Root is grounded: foot point (bbox x-mid, bottom y) → world via identity homography.
     np.testing.assert_allclose(out[0].pose.transl[:, :2], [[20, 60], [22, 62], [24, 64]])
-    np.testing.assert_allclose(out[0].pose.transl[:, 2], 0.92)  # pelvis-height Z anchor (R-4)
+    np.testing.assert_allclose(out[0].pose.transl[:, 2], 0.92)  # nominal Z anchor — no FK (R-4)
+
+
+def test_estimate_uses_per_frame_pelvis_height_when_backend_supplies_it():
+    """T2 foot-plane anchor: backend ``pelvis_above_foot`` drives the root Z per frame.
+
+    The varying-Z subject (id 0) is anchored on the foot plane (z=0) + its FK pelvis height;
+    a subject whose backend leaves the field ``None`` (id 1) still falls back to the nominal.
+    """
+    heights = np.array([0.80, 0.95, 1.10])  # e.g. crouch → stand → stride
+    raw0 = RawBodyMotion(
+        track_id=0, frames=(0, 1, 2), global_orient=np.zeros((3, 3)),
+        body_pose=np.zeros((3, _J, 3)), betas=np.zeros(10), pelvis_above_foot=heights,
+    )
+    pse = GVHMRPoseEstimator(backend=_StubHMRBackend({0: raw0, 1: _raw(1)}))
+    out = pse.estimate(_clip(), _tracks(), _calibration())
+    np.testing.assert_allclose(out[0].pose.transl[:, 2], heights)  # per-frame, not 0.92
+    np.testing.assert_allclose(out[0].pose.transl[:, :2], [[20, 60], [22, 62], [24, 64]])
+    np.testing.assert_allclose(out[1].pose.transl[:, 2], 0.92)     # absent → nominal fallback
+
+
+def test_pelvis_height_indexed_by_same_rows_as_articulation():
+    """The height array is selected by the tracklet→backend row map, not blindly passed through."""
+    raw0 = RawBodyMotion(
+        track_id=0, frames=(0, 1, 2, 3), global_orient=np.zeros((4, 3)),
+        body_pose=np.zeros((4, _J, 3)), betas=np.zeros(10),
+        pelvis_above_foot=np.array([0.81, 0.95, 1.07, 9.9]),  # frame-3 sentinel must be dropped
+    )
+    pse = GVHMRPoseEstimator(backend=_StubHMRBackend({0: raw0, 1: _raw(1)}))
+    out = pse.estimate(_clip(), _tracks(), _calibration())  # tracklet wants frames 0,1,2
+    np.testing.assert_allclose(out[0].pose.transl[:, 2], [0.81, 0.95, 1.07])
 
 
 def test_refit_applies_constraints_on_selected_frames_only():
@@ -178,6 +208,15 @@ def test_raw_body_motion_rejects_ragged():
         RawBodyMotion(
             track_id=0, frames=[0, 1, 2], global_orient=np.zeros((2, 3)),
             body_pose=np.zeros((3, _J, 3)), betas=np.zeros(10),
+        )
+
+
+def test_raw_body_motion_rejects_mismatched_pelvis_height():
+    with pytest.raises(ValueError, match="pelvis_above_foot"):
+        RawBodyMotion(
+            track_id=0, frames=[0, 1, 2], global_orient=np.zeros((3, 3)),
+            body_pose=np.zeros((3, _J, 3)), betas=np.zeros(10),
+            pelvis_above_foot=np.zeros(2),  # 2 rows for 3 frames
         )
 
 

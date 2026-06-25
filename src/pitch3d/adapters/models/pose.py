@@ -52,6 +52,11 @@ class RawBodyMotion:
         global_orient: ``(T, 3)`` root orientation, axis-angle.
         body_pose: ``(T, J, 3)`` body-joint rotations, axis-angle.
         betas: ``(n_betas,)`` per-subject shape coefficients (frame-invariant).
+        pelvis_above_foot: ``(T,)`` per-frame vertical foot→pelvis offset (metres) from the
+            backend's SMPL-X forward kinematics, or ``None``. When present it drives the world
+            root Z in :meth:`GVHMRPoseEstimator._ground_root` (the T2 foot-plane anchor — pelvis
+            height that varies with crouch/run/stride); when absent the estimator falls back to a
+            fixed nominal pelvis height. Backends that do not compute FK leave it ``None``.
     """
 
     track_id: int
@@ -59,6 +64,7 @@ class RawBodyMotion:
     global_orient: np.ndarray
     body_pose: np.ndarray
     betas: np.ndarray
+    pelvis_above_foot: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int).reshape(-1)
@@ -72,6 +78,13 @@ class RawBodyMotion:
                 f"ragged raw body motion {self.track_id}: {t} frames, "
                 f"{self.global_orient.shape[0]} orient, {self.body_pose.shape[0]} body rows"
             )
+        if self.pelvis_above_foot is not None:
+            self.pelvis_above_foot = np.asarray(self.pelvis_above_foot, dtype=float).reshape(-1)
+            if self.pelvis_above_foot.shape[0] != t:
+                raise ValueError(
+                    f"pelvis_above_foot for {self.track_id} has "
+                    f"{self.pelvis_above_foot.shape[0]} rows, expected {t}"
+                )
 
 
 @runtime_checkable
@@ -139,7 +152,10 @@ class GVHMRPoseEstimator(PoseEstimator):
             if raw is None:
                 continue
             rows = _align_rows(raw.frames, tl.frames)
-            transl = _smooth_path(self._ground_root(tl, calibration), self.smooth_window)
+            height = raw.pelvis_above_foot[rows] if raw.pelvis_above_foot is not None else None
+            transl = _smooth_path(
+                self._ground_root(tl, calibration, height), self.smooth_window
+            )
             pose = PoseSequence(
                 frames=tl.frames,
                 global_orient=raw.global_orient[rows],
@@ -176,15 +192,30 @@ class GVHMRPoseEstimator(PoseEstimator):
             refined.pose.transl[rows, 2] = np.maximum(refined.pose.transl[rows, 2], float(floor))
         return refined
 
-    def _ground_root(self, tl: Tracklet, calibration: FieldCalibration) -> np.ndarray:
-        """Place the root on the pitch: bbox foot point → world metres via the homography."""
+    def _ground_root(
+        self,
+        tl: Tracklet,
+        calibration: FieldCalibration,
+        pelvis_above_foot: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Place the root on the pitch: bbox foot point → world metres via the homography.
+
+        The root Z is the pelvis height above the foot plane (z=0): the per-frame
+        ``pelvis_above_foot`` the backend computed from SMPL-X FK (the T2 foot-plane anchor,
+        varying with crouch/run/stride) when present, else the fixed nominal
+        :attr:`pelvis_height_m`. Foot XY comes from the bbox bottom-centre through the homography.
+        """
         foot_uv = np.column_stack(
             [(tl.bboxes_xyxy[:, 0] + tl.bboxes_xyxy[:, 2]) / 2.0, tl.bboxes_xyxy[:, 3]]
         )
         world_xy = np.stack(
             [calibration.image_to_world(int(f), foot_uv[i])[0] for i, f in enumerate(tl.frames)]
         )
-        return np.column_stack([world_xy, np.full(tl.frames.shape[0], self.pelvis_height_m)])
+        if pelvis_above_foot is None:
+            z = np.full(tl.frames.shape[0], self.pelvis_height_m)
+        else:
+            z = np.asarray(pelvis_above_foot, dtype=float).reshape(-1)
+        return np.column_stack([world_xy, z])
 
     def _backend(self) -> HMRBackend:
         return self.backend or GVHMRBackend(device=self.device)
