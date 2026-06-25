@@ -67,7 +67,7 @@ def _print_observation(obs: Observation, *, label: str) -> None:
 def run_dry_run(
     *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str,
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
-    calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
+    calibrator: str = "fake", pose: str = "fake", ball: str = "fake", env: str = "fake",
     avatar: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
@@ -87,8 +87,8 @@ def run_dry_run(
     out_dir = Path(out_dir)
     ports = default_ports(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
-        calibrator=calibrator, pose=pose, ball=ball, avatar=avatar, render=render, export=export,
-        observer=observer, device=device, detector_weights=detector_weights,
+        calibrator=calibrator, pose=pose, ball=ball, env=env, avatar=avatar, render=render,
+        export=export, observer=observer, device=device, detector_weights=detector_weights,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend,
@@ -187,6 +187,17 @@ def run_dry_run(
             f"({type(exc).__name__}); inject --avatar-backend or use --avatar fake"
         )
 
+    # 9b) ENV: reconstruct the measured environment and attach it. With `--env pitch` the splat
+    #     render grounds the avatars on the calibration-anchored pitch markings (M2-1, the M2-0
+    #     validator anchor); the fake stays honest about being a placeholder, not a measured mesh.
+    env_ref = app.build_env(scene_id)
+    x = env_ref.extra
+    detail = (
+        f"coverage={x['coverage']:.2f} {x['n_vertices']} verts (all measured)"
+        if "coverage" in x else "placeholder marker"
+    )
+    print(f"\n== env[{env}]: {env_ref.kind.value} — {detail} → {out_dir / 'assets'}")
+
     # 10) Render the RESOLVED scene (proposal ⊕ corrections), single source of truth.
     render_result = app.render(scene_id, quality="preview")
     print(
@@ -202,7 +213,8 @@ def run_dry_run(
 
     lineup = {
         "detect": detector, "track": tracker, "calibrate": calibrator, "pose": pose,
-        "ball": ball, "avatar": avatar, "render": render, "export": export, "observe": observer,
+        "ball": ball, "env": env, "avatar": avatar, "render": render, "export": export,
+        "observe": observer,
     }
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
@@ -238,6 +250,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ball", default="fake", choices=["fake", "tracknet"],
                         help="ball tracker; 'tracknet' live backend is an unwired stub "
                              "(the pure threshold/gap-fill half is real; use 'fake')")
+    parser.add_argument("--env", default="fake", choices=["fake", "pitch"],
+                        help="environment reconstructor; 'pitch' = measured calibration-anchored "
+                             "pitch markings as a vertex-coloured PLY (M2-1, rendered by --render "
+                             "splat). 3DGS/NeRF/generative stadium stay gated (R-8)")
     parser.add_argument("--avatar", default="fake", choices=["fake", "textured"],
                         help="avatar builder; 'textured' = measured pixel-projection onto the "
                              "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
@@ -292,6 +308,7 @@ def main(argv: list[str] | None = None) -> int:
         calibrator=args.calibrator,
         pose=args.pose,
         ball=args.ball,
+        env=args.env,
         avatar=args.avatar,
         render=args.render,
         export=args.export,

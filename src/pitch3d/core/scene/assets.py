@@ -17,6 +17,7 @@ from .provenance import ModelInfo
 class RenderAssetKind(str, Enum):
     """Kinds of derived render asset (FR-11..FR-13)."""
 
+    ENV_PITCH_MESH = "env_pitch_mesh"          # measured pitch line markings (calibration-anchored)
     ENV_SPLAT = "env_splat"                    # 3D Gaussian Splatting environment
     ENV_NERF = "env_nerf"                      # NeRF environment
     ENV_GENERATIVE = "env_generative"          # generative stadium fallback

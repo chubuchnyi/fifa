@@ -78,8 +78,8 @@ def _resolve_backend(spec: str, protocol: Any) -> Any:
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
-    ball: str = "fake", avatar: str = "fake", render: str = "fake", export: str = "fake",
-    observer: str = "fake",
+    ball: str = "fake", env: str = "fake", avatar: str = "fake", render: str = "fake",
+    export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
@@ -95,7 +95,10 @@ def default_ports(
     (TrackNet 2D, ``ball`` extra). ``avatar``: ``"fake"`` or ``"textured"`` (measured
     pixel-projection onto the tracked SMPL-X — the M2-0 *primary* realism path: the projection /
     visibility / per-vertex-colour-averaging half runs with no GPU, the SMPL-X meshing heavy half
-    is gated behind the ``avatar`` extra). ``render``: ``"fake"``, ``"overlay"`` (reproject the
+    is gated behind the ``avatar`` extra). ``env``: ``"fake"`` (placeholder marker) or ``"pitch"``
+    (M2-1: the measured calibration-anchored pitch line markings as a vertex-coloured PLY — every
+    vertex ``measured=1``, rendered by the splat pass; 3DGS/NeRF/generative env stay gated, R-8).
+    ``render``: ``"fake"``, ``"overlay"`` (reproject the
     resolved 3D back onto per-frame PNGs — dependency-free, no extra) or ``"splat"`` (M2-3: splat
     the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts). ``export``:
     ``"fake"``
@@ -252,6 +255,15 @@ def default_ports(
     else:
         raise ValueError(f"unknown observer {observer!r}; expected 'fake' or 'blender'")
 
+    if env == "fake":
+        env_rec: EnvReconstructor = FakeEnvReconstructor(out_dir=out / "assets")
+    elif env == "pitch":
+        from ..adapters.models import MeasuredPitchEnvReconstructor
+
+        env_rec = MeasuredPitchEnvReconstructor(out_dir=out / "assets")
+    else:
+        raise ValueError(f"unknown env {env!r}; expected 'fake' or 'pitch'")
+
     if avatar == "fake":
         if avatar_backend:
             raise ValueError("avatar_backend requires --avatar textured")
@@ -275,7 +287,7 @@ def default_ports(
         calibrator=cal,
         pose=pse,
         ball=blt,
-        env=FakeEnvReconstructor(out_dir=out / "assets"),
+        env=env_rec,
         avatar=avt,
         viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),
         observer=obs,

@@ -184,6 +184,26 @@ previously dropped). Honest deferred limit: `POSE_BODY_JOINT` and `SHAPE_BETA` e
 heavy SMPL-X LBS model and are *not* faked — the dependency-free pass honours the rigid root only.
 **Next: M2-1** env reconstruction.
 
+**Progress — M2-1 measured-pitch env wired E2E (2026-06-25):** the environment we genuinely
+*measure* is the **pitch plane**, so M2-1 ships exactly that and gates the hallucinated rest. New
+pure-numpy core geometry `core/scene/pitch.py` (`pitch_line_world_points`) generates the standard
+Laws-of-the-Game markings — outer rectangle, halfway line, centre circle/spot, both penalty &
+goal areas, penalty spots and the "D" arcs — in world meters on `Z = plane_z`. A new
+`MeasuredPitchEnvReconstructor` (`--env pitch`) emits them as a vertex-coloured PLY with **every
+vertex `measured=1`** (`coverage=1.0`): it is a measured template, anchored by the M1 calibration,
+and is the M2-0 *validator anchor* ("a leg can't pass through the pitch"). It is labelled with a new
+honest `ENV_PITCH_MESH` asset kind — **not** the `env_splat` it is not. The same `SplatAvatarRenderPass`
+now splats world-space **env meshes** by identity (no per-subject root) under the *shared* z-buffer,
+so the pitch grounds the avatars (a near player occludes a far line); `measured=0` env verts would
+ride the same R-6 tint, though the pitch is fully measured. New controller stage
+`Application.build_env` attaches one `RenderAssetRef` to the scene; the dry-run runs it as stage 9b
+(`… → avatar → **env** → render → export`). E2E: `--env pitch --render splat` renders the markings —
+a decoded frame shows ~24k white pitch pixels over the background (manifest `env_vertices=1444`),
+while `--env fake` returns a placeholder marker the splat pass honestly skips (`env_meshes=0`).
+Honest deferred (R-8): a photoreal 3DGS/NeRF stadium from camera motion, or a *generative* stadium
+when motion is insufficient, stay gated in `SplatEnvReconstructor` until their milestone — those
+hallucinate unmeasured stands. **M2 remaining: M2-5** (ViewSynthesizer seam A) / **M2-6** preview.
+
 ---
 
 ## M3 — Quality & polish ⬜  (+ ViewSynthesizer **seam B**)

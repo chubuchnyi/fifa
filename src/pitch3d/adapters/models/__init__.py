@@ -21,6 +21,7 @@ from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .avatar import AvatarMeshBackend, SmplxTextureBackend, TexturedSmplxAvatarBuilder
 from .ball import TrackNetBackend, TrackNetBallTracker
+from .env import MeasuredPitchEnvReconstructor
 from .calibration import (
     CameraModuleFieldCalibrator,
     KeypointFieldCalibrator,
@@ -74,6 +75,7 @@ __all__ = [
     "GVHMRBackend",
     "GVHMRPoseEstimator",
     "KeypointFieldCalibrator",
+    "MeasuredPitchEnvReconstructor",
     "PitchKeypointBackend",
     "RFDETRBackend",
     "RFDETRDetector",

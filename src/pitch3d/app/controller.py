@@ -279,6 +279,24 @@ class Application:
         stored.render_assets = [a for a in stored.render_assets if a.id not in new_ids] + refs
         return refs
 
+    # --- measured environment (pitch) -----------------------------------------
+    def build_env(self, scene_id: str) -> RenderAssetRef:
+        """Reconstruct the scene's environment asset and attach it to ``render_assets``.
+
+        The configured :class:`EnvReconstructor` emits one environment :class:`RenderAssetRef`: the
+        measured, calibration-anchored pitch markings for ``--env pitch`` (every vertex
+        ``measured=1`` — the M2-0 validator anchor, "a leg can't pass through the pitch"), or a
+        placeholder marker for ``--env fake``. The ref is attached to the *stored* scene (replacing
+        any same-id ref) so render/observe/export can consume it, mirroring :meth:`build_avatars`.
+        """
+        resolved = self.resolved(scene_id)
+        clip = self._scene_clip[scene_id]
+        camera = resolved.camera or self._static_camera(resolved)
+        ref = self.ports.env.reconstruct(clip, camera)
+        stored = self._scenes[scene_id]
+        stored.render_assets = [a for a in stored.render_assets if a.id != ref.id] + [ref]
+        return ref
+
     # --- internals ------------------------------------------------------------
     def _corr_id(self) -> str:
         return f"corr-{self._next('correction')}"

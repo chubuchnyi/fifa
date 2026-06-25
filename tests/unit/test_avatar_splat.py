@@ -167,3 +167,60 @@ def test_root_translation_edit_reprojects(tmp_path, make_motion, make_scene):
     after = render_frame_buffer(scene, _camera(1), 0)
     np.testing.assert_array_equal(after[24, 62], [200, 100, 50])     # slid to the new pixel
     np.testing.assert_array_equal(after[24, 42], list(_BACKGROUND))  # vacated the old pixel
+
+
+# --- M2-1 world-space environment meshes: identity placement, shared z-buffer -----------------
+def _env_ref(out_dir, rgb, measured, *, verts) -> RenderAssetRef:
+    uri = write_vertex_colored_ply(
+        Path(out_dir) / "env.ply",
+        verts, np.zeros((0, 3)), np.asarray(rgb, dtype=np.uint8), np.asarray(measured),
+    )
+    return RenderAssetRef(
+        id="env-pitch",
+        kind=RenderAssetKind.ENV_PITCH_MESH,
+        uri=uri,
+        model=ModelInfo(name="t", backend=Backend.FAKE),
+        subject_track_id=None,  # environment asset — no owning subject, placed by identity
+    )
+
+
+def test_env_mesh_renders_by_identity_without_subject(tmp_path, make_scene):
+    # An ENV_PITCH_MESH is already in world coords: it places by identity, needing no subject/root.
+    # Its vertex at world (0,0,5) projects to the principal point (32,24) and paints its colour.
+    ref = _env_ref(tmp_path, [[235, 235, 235]], [True], verts=np.array([[0.0, 0.0, 5.0]]))
+    scene = make_scene(subjects=[])
+    scene.render_assets = [ref]
+    fb = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(fb[24, 32], [235, 235, 235])
+    np.testing.assert_array_equal(fb[0, 0], list(_BACKGROUND))  # nothing painted elsewhere
+
+
+def test_env_mesh_unmeasured_vertex_renders_r6_tint(tmp_path, make_scene):
+    # R-6 honesty rides the same path for env meshes: a measured=0 vertex shows the unmeasured tint.
+    ref = _env_ref(tmp_path, [list(_UNMEASURED_RGB)], [False], verts=np.array([[0.0, 0.0, 5.0]]))
+    scene = make_scene(subjects=[])
+    scene.render_assets = [ref]
+    fb = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(fb[24, 32], list(_UNMEASURED_TINT))
+
+
+def test_env_mesh_shares_zbuffer_with_avatar(tmp_path, make_motion, make_scene):
+    # Env and avatars splat under one z-buffer: a near avatar (z=3) occludes a far pitch vertex
+    # (z=9) at the shared pixel — the player stands in front of the pitch line, not behind it.
+    env = _env_ref(tmp_path, [[235, 235, 235]], [True], verts=np.array([[0.0, 0.0, 9.0]]))
+    avatar = _avatar_ref(tmp_path, 1, [[255, 0, 0]], [True])  # vertex (0,0,0) + transl (0,0,3)
+    subj = Subject(track_id=1, proposal=make_motion([0], transl_z=3.0))
+    scene = make_scene(subjects=[subj])
+    scene.render_assets = [env, avatar]
+    fb = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(fb[24, 32], [255, 0, 0])  # nearer avatar wins over the pitch
+
+
+def test_render_reports_env_mesh_in_manifest(tmp_path, make_scene):
+    ref = _env_ref(tmp_path, [[235, 235, 235]], [True], verts=np.array([[0.0, 0.0, 5.0]]))
+    scene = make_scene(subjects=[])
+    scene.render_assets = [ref]
+    res = SplatAvatarRenderPass(out_dir=tmp_path / "render").render(scene, _camera(1))
+    manifest = (Path(res.uri) / "manifest.txt").read_text()
+    assert "env_meshes=1" in manifest and "env_vertices=1" in manifest
+    assert "env mesh(es)" in res.note
