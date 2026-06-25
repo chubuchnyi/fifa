@@ -143,3 +143,59 @@ def standard_viewpoints(
         )
         out.append(ViewpointCamera(Viewpoint.ORBIT, camera_at(eye, target, frame=frame, intrinsics=intr)))
     return out
+
+
+# Seam A is a *moderate* re-aim, never a free-viewpoint orbit (R-15): cap the sweep hard.
+_ORBIT_MAX_DEVIATION_DEG = 45.0
+
+
+def bounded_orbit_camera(
+    scene: Scene,
+    frames: np.ndarray,
+    *,
+    max_deviation_deg: float = 20.0,
+    width: int = 1280,
+    height: int = 720,
+    vfov_deg: float = 50.0,
+) -> CameraTrack:
+    """A prescribed limited-orbit camera for ViewSynthesizer seam A (R-14, ADR-0007).
+
+    Pans the BROADCAST framing by a *bounded* azimuth arc around the action centroid, one pose
+    per source ``frames`` entry. Azimuth runs linearly from ``−dev`` to ``+dev`` (passing the
+    source framing at the midpoint), keeping the broadcast camera's ground radius and height so
+    the action stays framed — an orbit, not a dolly. The sweep is hard-capped at
+    ``±45°`` (seam A is a moderate re-aim, never free-viewpoint) and the track is
+    ``estimated=False`` (a *prescribed* trajectory, not a measurement). The synthesizer that
+    consumes this returns a non-editable video whose ``frustum_overlap`` falls as ``dev`` grows,
+    so callers can still gate application (R-15).
+    """
+    frames = np.asarray(frames).reshape(-1).astype(int)
+    t = frames.shape[0]
+    intr = default_intrinsics(width, height, vfov_deg)
+    if t == 0:
+        return CameraTrack(
+            intrinsics=intr, frames=frames,
+            rotation_quat=np.zeros((0, 4)), translation=np.zeros((0, 3)),
+            estimated=False,
+        )
+    target = action_centroid(scene, int(frames[0]))
+    dims = scene.field.dimensions if scene.field else None
+    radius = 0.6 * max(dims.length, dims.width) if dims else 30.0
+    # Anchor on the BROADCAST placement (see standard_viewpoints): behind (−Y) and above.
+    offset = np.array([0.0, -0.9 * radius, 0.55 * radius])
+    ground_r = float(np.hypot(offset[0], offset[1]))
+    base_ang = float(np.arctan2(offset[1], offset[0]))
+    z = float(offset[2])
+    dev = np.radians(min(abs(float(max_deviation_deg)), _ORBIT_MAX_DEVIATION_DEG))
+    sweep = np.linspace(-dev, dev, t) if t > 1 else np.array([0.0])
+
+    quats = np.empty((t, 4))
+    transl = np.empty((t, 3))
+    for k in range(t):
+        ang = base_ang + float(sweep[k])
+        eye = target + np.array([ground_r * np.cos(ang), ground_r * np.sin(ang), z])
+        quats[k], transl[k] = look_at(eye, target)
+    return CameraTrack(
+        intrinsics=intr, frames=frames,
+        rotation_quat=quats, translation=transl, estimated=False,
+    )

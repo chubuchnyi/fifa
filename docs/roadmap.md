@@ -202,7 +202,28 @@ a decoded frame shows ~24k white pitch pixels over the background (manifest `env
 while `--env fake` returns a placeholder marker the splat pass honestly skips (`env_meshes=0`).
 Honest deferred (R-8): a photoreal 3DGS/NeRF stadium from camera motion, or a *generative* stadium
 when motion is insufficient, stay gated in `SplatEnvReconstructor` until their milestone — those
-hallucinate unmeasured stands. **M2 remaining: M2-5** (ViewSynthesizer seam A) / **M2-6** preview.
+hallucinate unmeasured stands. **Next: M2-5** (ViewSynthesizer seam A).
+
+**Progress — M2-5 ViewSynthesizer seam A wired E2E (2026-06-25):** seam A feeds the *eye*, never
+the reconstruction — it re-shoots the source clip along a bounded orbit and returns a photoreal
+**video, not editable**. New pure camera math `core/agent/viewpoints.py:bounded_orbit_camera`
+pans the BROADCAST framing by a *bounded* azimuth arc around the action centroid (one prescribed
+`estimated=False` pose per source frame, ground radius + height preserved so it is an orbit not a
+dolly), **hard-capped at ±45°** (R-15: a moderate re-aim, never free-viewpoint). The `adapters/render`
+stub is now real: `ViewSynthOrbitRenderPass` delegates to `ViewSynthesizer.render_orbit` and wraps
+the `SynthViewRef` as a `RenderResult(is_video=True)` via the pure `orbit_render_result` (which
+carries `frustum_overlap` + the non-editable flag into the note, so an orbit re-shoot can never
+masquerade as an editable result). New controller use-case `Application.render_orbit` is the
+authoritative path: it builds the orbit over the **registered clip** (uri/fps the resolved-scene
+contract can't carry), calls the synthesizer, **content-addresses + caches** the ref (ADR-0004 — a
+second call is a cache hit, no recompute), and attaches it to `scene.synth_views` (deduped on id).
+Wiring adds the `--render orbit` selector (sharing one synthesizer instance with the use-case) and
+the dry-run runs seam A as stage 10b (`… → render → **seam-A** → export`). E2E: stage 10b reports
+`A_render overlap=0.85 editable=False — video, not editable`, `cached + deduped: 1 synth_view after
+2 render_orbit call(s)`; `--render orbit` makes the main render `is_video=True`. Honest deferred
+(R-8, ADR-0007): the real generative backends (ReCamMaster/GEN3C/TrajectoryCrafter-class) stay gated
+in `GenerativeViewSynthesizer`; only the dependency-free fake re-shoots here. **M2 remaining: M2-6**
+render preview (fast low-q) for both paths.
 
 ---
 

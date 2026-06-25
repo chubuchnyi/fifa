@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..core.agent import scene_summary, standard_viewpoints
+from ..core.agent import bounded_orbit_camera, scene_summary, standard_viewpoints
 from ..core.correction.coherence import (
     CoherenceConfig,
     CoherenceReport,
@@ -44,7 +44,7 @@ from ..core.ports.export import ExportFormat, ExportResult
 from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
-from ..core.scene.assets import RenderAssetRef
+from ..core.scene.assets import RenderAssetRef, SynthViewRef
 from ..core.scene.camera import CameraTrack
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.review import AttentionItem, attention_list
@@ -295,6 +295,40 @@ class Application:
         ref = self.ports.env.reconstruct(clip, camera)
         stored = self._scenes[scene_id]
         stored.render_assets = [a for a in stored.render_assets if a.id != ref.id] + [ref]
+        return ref
+
+    # --- ViewSynthesizer seam A (limited orbit, video — NOT editable) ----------
+    def render_orbit(
+        self, scene_id: str, *, max_deviation_deg: float = 20.0, scene_hints: dict | None = None
+    ) -> SynthViewRef:
+        """Re-shoot the source clip along a bounded orbit (ADR-0007 seam A), cached.
+
+        Builds a *prescribed* limited-orbit camera (a moderate azimuth re-aim around the action
+        centroid, hard-capped at 45° — R-14/R-15) over the registered clip's frames, then asks the
+        :class:`ViewSynthesizer` to render it. The result is a photoreal **video, not editable**
+        (``SynthViewRef.editable=False``): seam A feeds the eye, never the reconstruction. The ref
+        is content-addressed and cached (ADR-0004) so this expensive generative pass is never
+        recomputed for the same clip/orbit, and attached to the *stored* scene's ``synth_views``
+        (replacing any same-id ref). ``frustum_overlap`` on the returned ref falls as the orbit
+        strays, so a caller can still gate how far it trusts the re-shoot.
+        """
+        resolved = self.resolved(scene_id)
+        clip = self._scene_clip[scene_id]
+        frames = clip.frames
+        orbit_cam = bounded_orbit_camera(resolved, frames, max_deviation_deg=max_deviation_deg)
+        span = f"{int(frames[0])}-{int(frames[-1])}" if frames.shape[0] else "empty"
+        key = self.ports.cache.key_for(
+            "viewsynth_orbit",
+            f"{clip.source_id}:{span}",
+            {"max_deviation_deg": float(max_deviation_deg)},
+            self.ports.viewsynth.info().name,
+        )
+        ref = self.ports.cache.get(key)
+        if ref is None:
+            ref = self.ports.viewsynth.render_orbit(clip, orbit_cam, scene_hints)
+            self.ports.cache.put(key, ref)
+        stored = self._scenes[scene_id]
+        stored.synth_views = [v for v in stored.synth_views if v.id != ref.id] + [ref]
         return ref
 
     # --- internals ------------------------------------------------------------

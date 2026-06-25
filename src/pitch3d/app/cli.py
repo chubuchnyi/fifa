@@ -205,6 +205,19 @@ def run_dry_run(
         f"is_video={render_result.is_video} → {render_result.uri}"
     )
 
+    # 10b) SEAM A (ADR-0007): re-shoot the clip along a bounded orbit → a photoreal *video, not
+    #      editable*. Content-addressed + cached (the 2nd call hits the cache, no recompute) and
+    #      deduped on the scene's synth_views, so the eye-candy path can never masquerade as an
+    #      editable reconstruction (R-15).
+    synth = app.render_orbit(scene_id, max_deviation_deg=20.0)
+    app.render_orbit(scene_id, max_deviation_deg=20.0)  # idempotent: cache hit, no new synth_view
+    n_views = len(app.get_scene(scene_id).synth_views)
+    print(
+        f"\n== seam A[orbit]: {synth.seam.value} overlap={synth.frustum_overlap:.2f} "
+        f"editable={synth.editable} — {synth.note} → {synth.uri}"
+    )
+    print(f"    cached + deduped: {n_views} synth_view(s) after 2 render_orbit call(s)")
+
     # 11) Export (canonical JSON is a real round-trip; other formats are honest fakes).
     export_path = out_dir / "export" / f"scene.{export_format}"
     export_path.parent.mkdir(parents=True, exist_ok=True)
@@ -219,7 +232,7 @@ def run_dry_run(
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
     print("\nOK — reconstruct → observe → attention → preview → edit → resolve → "
-          "observe → avatar → render → export completed.")
+          "observe → avatar → render → seam-A → export completed.")
     print(f"  device: {device}")
     print(f"  real adapters: {', '.join(real) if real else '(none — fully on fakes)'}")
     print(f"  fake adapters: {', '.join(fake) if fake else '(none — fully real)'}")
@@ -258,9 +271,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="avatar builder; 'textured' = measured pixel-projection onto the "
                              "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
                              "the SMPL-X-meshing heavy half is an unwired stub (use 'fake')")
-    parser.add_argument("--render", default="fake", choices=["fake", "overlay", "splat"],
+    parser.add_argument("--render", default="fake", choices=["fake", "overlay", "splat", "orbit"],
                         help="render pass; 'overlay' reprojects PNGs, 'splat' rasterises the "
-                             "measured avatar meshes (both real + dependency-free)")
+                             "measured avatar meshes (both real + dependency-free), 'orbit' is the "
+                             "ViewSynthesizer seam-A limited-orbit re-shoot (video, not editable)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
                         help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
     parser.add_argument("--observer", default="fake", choices=["fake", "blender"],

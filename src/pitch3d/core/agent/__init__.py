@@ -9,6 +9,7 @@ from __future__ import annotations
 from .summary import scene_summary
 from .viewpoints import (
     action_centroid,
+    bounded_orbit_camera,
     camera_at,
     default_intrinsics,
     look_at,
@@ -17,6 +18,7 @@ from .viewpoints import (
 
 __all__ = [
     "action_centroid",
+    "bounded_orbit_camera",
     "camera_at",
     "default_intrinsics",
     "look_at",

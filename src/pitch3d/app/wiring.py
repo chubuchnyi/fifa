@@ -99,8 +99,10 @@ def default_ports(
     (M2-1: the measured calibration-anchored pitch line markings as a vertex-coloured PLY — every
     vertex ``measured=1``, rendered by the splat pass; 3DGS/NeRF/generative env stay gated, R-8).
     ``render``: ``"fake"``, ``"overlay"`` (reproject the
-    resolved 3D back onto per-frame PNGs — dependency-free, no extra) or ``"splat"`` (M2-3: splat
-    the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts). ``export``:
+    resolved 3D back onto per-frame PNGs — dependency-free, no extra), ``"splat"`` (M2-3: splat
+    the measured M2-2 avatar meshes with a z-buffer, R-6-tinting unmeasured verts) or ``"orbit"``
+    (M2-5: ViewSynthesizer seam-A limited-orbit re-shoot of the source clip — a photoreal *video,
+    not editable*; the authoritative cached path is ``Application.render_orbit``). ``export``:
     ``"fake"``
     or ``"gltf"`` (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the
     ``export`` extra).
@@ -224,6 +226,9 @@ def default_ports(
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 
     out = Path(out_dir)
+    # One synthesizer instance backs both the seam-A render selector and the render_orbit
+    # use-case (so they share a backend); real generative synths stay gated (R-8, ADR-0007).
+    vs: ViewSynthesizer = FakeViewSynthesizer(out_dir=out / "synth")
     if render == "fake":
         rnd: RenderPass = FakeRenderPass(out_dir=out / "render")
     elif render == "overlay":
@@ -234,8 +239,14 @@ def default_ports(
         from ..adapters.render import SplatAvatarRenderPass
 
         rnd = SplatAvatarRenderPass(out_dir=out / "render")
+    elif render == "orbit":
+        from ..adapters.render import ViewSynthOrbitRenderPass
+
+        rnd = ViewSynthOrbitRenderPass(synthesizer=vs)
     else:
-        raise ValueError(f"unknown render {render!r}; expected 'fake', 'overlay' or 'splat'")
+        raise ValueError(
+            f"unknown render {render!r}; expected 'fake', 'overlay', 'splat' or 'orbit'"
+        )
 
     if export == "fake":
         exp: Exporter = FakeExporter()
@@ -289,7 +300,7 @@ def default_ports(
         ball=blt,
         env=env_rec,
         avatar=avt,
-        viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),
+        viewsynth=vs,
         observer=obs,
         render=rnd,
         exporter=exp,
