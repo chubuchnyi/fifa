@@ -98,19 +98,34 @@ show up in 3D and export.
 
 **Goal (TZ M2):** photoreal render of the edited scene; edit↔render stays in sync.
 
+**Scope decision (2026-06-25, option A — measured photoreal):** M2's photoreal target is a *real
+renderer* (Blender/Cycles) of the **measured** scene — textured, LBS-posed SMPL-X avatars on a grass
+pitch under scene lighting, with unmeasured regions honestly marked. **Broadcast-convincing** fidelity
+(clothing geometry, full-body texture inpaint, stadium) needs *generative* fill and is **M3** (R-8,
+per M2-0). The numpy vertex-splat pass (M2-3) is debug-grade scaffolding, not the photoreal deliverable.
+
 | Ticket | Package |
 |---|---|
 | **M2-0 Realism approach spike** — decide the realism strategy before building avatars: textured SMPL-X via *measured pixel-projection* (primary) vs generative avatars (#2); explicitly assess & rule on image upscaler + image-to-3D (see note below); honesty gate = measured over hallucinated. Feeds M2-2. | `adapters/models`, doc |
 | M2-1 Env reconstruction (3DGS/NeRF by camera motion; generative stadium fallback) | `adapters/models` (`EnvReconstructor`) |
 | M2-2 Avatars strategy #1 (textured SMPL-X) + #2 (generative, Rodin-class API) | `adapters/models` (`AvatarBuilder`) |
-| M2-3 `SplatAvatarRenderPass` — assemble photoreal frame from `resolved` | `adapters/render` |
+| M2-3 `SplatAvatarRenderPass` — assemble a measured **vertex-splat** debug frame from `resolved` (scaffolding, not photoreal — see M2-7) | `adapters/render` |
 | M2-4 Edit↔render sync wiring (resolved drives every render rep) | `app`, `adapters/render` |
 | **M2-5 ViewSynthesizer seam A** — `render_orbit` as a `RenderPass` for limited orbits | `adapters/viewsynth`, `adapters/render` |
 | M2-6 Render preview (fast low-q) for both paths | `adapters/render` |
+| **M2-7 Real photoreal renderer** — Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import); replaces the numpy splat pass as the photoreal path (splat stays the no-dep debug viz) | `adapters/render`, `adapters/blender` |
+| **M2-8 Posed, textured avatar** — `SmplxTextureBackend.observe()` per-frame SMPL-X LBS (geometry follows the edited pose, incl. limbs) + surface texture/material from the measured pixel-projection (extend M2-2 #1 per-vertex → texture; R-6 marks unmeasured) | `adapters/models` (`hmr`/`avatar` extra, GPU) |
+| **M2-9 Measured env materials + lighting** — grass PBR for the measured pitch + scene lighting/HDRI; stadium stays gated/marked (R-8 → M3) | `adapters/models`, `adapters/blender` |
+| **M2-10 Edit↔render sync + photoreal `observe`** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no manual redo (AC-4 proper); `observe` returns photoreal multi-view (A-8); seam-A orbit becomes a re-render of the 3D scene at orbit cameras, no generative (A-9) | `app`, `adapters/render`, `adapters/viewsynth` |
 
-**Exit criteria (TZ AC-4, AC-5a):** render pass yields a photoreal frame; editing an SMPL pose
-re-projects into photoreal with no manual redo. ViewSynthesizer seam A yields a photoreal
-limited-orbit video from the source clip, **cached**, and clearly flagged "video, not editable".
+**Exit criteria (TZ AC-4, AC-5a — measured-photoreal reading, option A):** a *real renderer*
+(Blender/Cycles) yields a photoreal frame of the resolved scene — textured, LBS-posed avatars on a
+grass pitch under scene lighting, unmeasured regions honestly marked (**not** the numpy vertex-splat
+viz); editing an SMPL pose (root *and* limbs) re-projects into that photoreal frame with no manual
+redo; `observe` returns photoreal multi-view; seam A yields a photoreal limited-orbit by re-rendering
+the 3D scene at orbit cameras, **cached**, clearly flagged "video, not editable". **Honest ceiling:**
+measured-only ≈ textured mannequins (single broadcast cam ⇒ half the body unmeasured; naked SMPL-X ⇒
+no clothing geometry; no stadium) — broadcast-convincing fidelity is M3.
 
 **Boundary reminder (R-14/R-15):** seam A only for moderate moves; arbitrary free camera stays on
 the splat/avatar path.
@@ -241,8 +256,16 @@ pass is deliberately left full-res (it is the reprojection inspector, not a TZ r
 camera at ¼ the pixels); `--render orbit` re-shoots the orbit at 640×360 with the 6-frame count
 preserved and `is_video=True`. Honest scope (R-6): the lever changes *resolution only* — final-grade
 fidelity (texture, AA, real generative steps) still rides the heavy backends, which stay gated.
-**M2 ticket list (M2-0…M2-6) is complete on the pure/no-GPU halves; the generative heavy backends
-(generative avatars #2, real ViewSynthesizer) remain gated (R-8) → M2 stays 🟡, not ✅.** Next: M3.
+**Honest status (re-assessed 2026-06-25): the M2 GOAL — a photoreal render — is NOT met.** M2-0…M2-6
+delivered the render-pass *architecture* (seam, edit↔render sync on the rigid root, content-addressed
+cache, preview-downscale, measured pitch-env, seam-A contract) plus a measured **vertex-splat**
+visualization — debug-grade, pure-numpy, *not* a photoreal renderer. The avatars are untextured and
+not LBS-posed, no real renderer is wired, and the seam-A "video" is a fake re-shoot. M2-0 routing
+*generative* to M3 does **not** make the measured path photoreal — that still needs **M2-7…M2-10**
+(real Cycles renderer + posed textured avatars + env materials + edit↔render/observe through it).
+**M2 stays 🟡 because the photoreal output does not exist — not because the generative backends are
+gated.** Measured ceiling: textured mannequins on grass; broadcast-convincing fidelity is M3. Next
+within M2: **M2-7**.
 
 ---
 
