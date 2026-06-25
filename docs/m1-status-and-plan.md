@@ -11,8 +11,10 @@ fully wired built-ins, and the **calibrator** is live via the injected PnLCalib 
 in-repo module (`pitch3d.adapters.models.pnlcalib_backend:make`) and **measured on SoccerNet
 `calibration-2023` test** (200→400 frames: completeness 0.745, median reprojection 1.79 px / 0.236 m,
 line_acc@5px 0.618; RANSAC + confidence-weighted DLT; a 2026-06-24 kp-threshold sweep showed the
-heatmap gate trades completeness for accuracy at ~par — net line-acc stays ~0.61, so the real lever
-is better landmarks). The two remaining live backends — **pose (GVHMR)** and **ball (TrackNet)** —
+heatmap gate trades completeness for accuracy at ~par — net line-acc stays ~0.61; a 2026-06-25
+landmark-supply diagnostic then ruled out line-only fusion (#122: 0/51 dropped frames have ≥2 lines),
+so the real lever is **better landmarks / detector recall**, not the solver or fusion). The two
+remaining live backends — **pose (GVHMR)** and **ball (TrackNet)** —
 have real, unit-tested *pure* halves and now in-core, torch-free heavy adapters behind the
 ADR-0006 dotted-path seam (SMPLest-X for pose, WASB for ball). Both are now **pod-verified on
 CUDA** (2026-06-23): the ball adapter (`wasb_backend.py`, staged via `scripts/stage_wasb_weight.sh`)
@@ -54,7 +56,7 @@ of the public repo.
 
 | ID | Type | Item | Autonomous? | Notes |
 |---|---|---|---|---|
-| **B1** | Data-unblocked 2026-06-23; harness built (CPU) | Evaluate `FieldCalibrator` (PnLCalib) on *independent* real broadcast frames with GT pitch calibration | 🟢 MEASURED 2026-06-23 (200) + swept 2026-06-24 (400) | **Correction:** B1 was never truly asset-blocked. SoccerNet `calibration-2023` (real broadcast frames + per-image pitch-line GT) is **openly downloadable, NO NDA password** — only the broadcast *video* is NDA-gated. Built + unit-tested the full CPU half: re-derived pitch template, GT parser, reprojection metrics, CLI (`scripts/run_calib_eval.py`), open downloader (`scripts/get_soccernet_calibration.py`). Synthetic oracle reproj_rms ≈ 1.9e-14 m, perturb grows monotonically (6/6 tests, ruff+mypy clean). **Measured 2026-06-23 (GPU):** glue committed + pulled (730f23a), CLI run on SoccerNet `test` (first 200/3143 frames): **completeness 0.745**, **median reproj 1.79 px / 0.236 m**, **line_acc@5px 0.618 / @10px 0.691** — RMS/p95 (131.8 m / 83.9 m) are outlier-inflated by the ~25 % uncalibrated frames, so median is the real stat. PnLCalib is sub-2 px where it locks on; **completeness, not planar accuracy, is the limiter.** Honesty (R-6): this is a homography-plane proxy named `line_acc@Npx`, **not** the official SoccerNet Completeness×JaC@5; SoccerNet-trained weights → in-distribution upper bound. **Sweep 2026-06-24 (400 frames):** dialling the kp gate 0.3434→0.10 raises completeness 0.745→0.918 but degrades accuracy-where-locked-on in lock-step (on_completed line_acc@5px 0.748→0.640); net all-frames line_acc@5px stays flat ~0.61 → the gate is a **precision/recall dial, not a free win**, and the real lever is **better landmarks** (PnLCalib's own camera module / line-only fusion). Baseline 0.3434 reproduced 0.745 on 2× the frames. (WorldPose video still gated, but no longer the B1 path.) |
+| **B1** | Data-unblocked 2026-06-23; harness built (CPU) | Evaluate `FieldCalibrator` (PnLCalib) on *independent* real broadcast frames with GT pitch calibration | 🟢 MEASURED 2026-06-23 (200) + swept 2026-06-24 (400) | **Correction:** B1 was never truly asset-blocked. SoccerNet `calibration-2023` (real broadcast frames + per-image pitch-line GT) is **openly downloadable, NO NDA password** — only the broadcast *video* is NDA-gated. Built + unit-tested the full CPU half: re-derived pitch template, GT parser, reprojection metrics, CLI (`scripts/run_calib_eval.py`), open downloader (`scripts/get_soccernet_calibration.py`). Synthetic oracle reproj_rms ≈ 1.9e-14 m, perturb grows monotonically (6/6 tests, ruff+mypy clean). **Measured 2026-06-23 (GPU):** glue committed + pulled (730f23a), CLI run on SoccerNet `test` (first 200/3143 frames): **completeness 0.745**, **median reproj 1.79 px / 0.236 m**, **line_acc@5px 0.618 / @10px 0.691** — RMS/p95 (131.8 m / 83.9 m) are outlier-inflated by the ~25 % uncalibrated frames, so median is the real stat. PnLCalib is sub-2 px where it locks on; **completeness, not planar accuracy, is the limiter.** Honesty (R-6): this is a homography-plane proxy named `line_acc@Npx`, **not** the official SoccerNet Completeness×JaC@5; SoccerNet-trained weights → in-distribution upper bound. **Sweep 2026-06-24 (400 frames):** dialling the kp gate 0.3434→0.10 raises completeness 0.745→0.918 but degrades accuracy-where-locked-on in lock-step (on_completed line_acc@5px 0.748→0.640); net all-frames line_acc@5px stays flat ~0.61 → the gate is a **precision/recall dial, not a free win**, and the real lever is **better landmarks** (PnLCalib's own camera module / line-only fusion). Baseline 0.3434 reproduced 0.745 on 2× the frames. **#122 line-only fusion DIAGNOSED → won't-fix 2026-06-25:** of the 51/200 frames the DLT can't lock, **0** have ≥2 detected lines (histogram {0:48, 1:3}) — the line head is empty on exactly the frames the kp head drops, so fusion rescues nothing; the ~26 % drop is a detector/data ceiling (`scripts/diag_calib_landmarks.py`). (WorldPose video still gated, but no longer the B1 path.) |
 | **B2** | Decision **made** | Pose-model pick = **SMPLest-X + SMART recipe** (SAM 3D Body = alt fallback behind same seam) — **user-signed-off 2026-06-22** | ✅ decided | remaining: empirical bake-off (confirm vs fallback + quantify calibration cost) → [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md). Bake-off still needs per-crop **frames**; WorldPose video stalled → verified alternatives (EMDB best for global MPJPE, 3DPW for local; runbook §0a). **Synthetic bake-off harness now built & unit-tested (`pitch3d.eval`, pure/no-box): FK seam + conditions A/B, real SMPL-X FK on CPU, a runnable driver (`scripts/run_bakeoff.py`), and camera-sweep + occlusion masking — oracle scores ~0 from every viewpoint, ready for real frames.** B3 wiring may proceed on this backbone now. **SMART now published (arXiv 2605.31551): Global 0.324 m / Local 0.054 m on WorldPose = baseline-to-beat; the FIFA Skeletal-Light 2026 leaderboard is live with our exact metric (refresh 2026-06-22).** **Box check 2026-06-24:** the SMPLest-X seam itself is *not* the blocker — re-verified E2E on CUDA (smoke + real-frame seam + full golden-path → `subject_*.npz`, Blackwell via `scripts/pod.sh`). **First MPJPE MEASURED 2026-06-24** (3DPW staged on the volume via `scripts/get_3dpw.sh`; needed a `file://` decode fix in `_iter_frames`): off-the-shelf **SMPLest-X-H** on 3DPW `test`, condition **A** (GT camera, no PnLCalib), **no Procrustes/PA**, all 16 canonical joints scored — mean over **3 single-subject** seqs (downstairs/stairs/weeklyMarket, 98 frames, stride 30): **Local MPJPE ≈ 0.51 m** (per-seq 0.500 / 0.520 / 0.513; `global == local` since condition A seats the prediction at the GT root; geometry clean: depth>0 = 1.0, in-frame ≥ 0.82). **Deepened 2026-06-25:** re-ran over **all 11 single-subject** `test` seqs at **stride 15** (767 frames) → **mean Local MPJPE 0.512 m** (frame-weighted 0.515 m; per-seq range 0.442 `flat_guitar_01` … 0.569 `outdoors_fencing_01`), confirming and tightening the 3-seq number — the off-the-shelf backbone is a stable ~0.51 m on 3DPW, well above SMART's 0.054 m (recipe, not backbone). 3DPW is **condition-A-only** (moving cam, no pitch plane). Honesty (R-6): this is the harness's own root-relative metric on our `SMPLX_TO_CANONICAL` 16-joint set, **not** the official starter-kit evaluator, and 3DPW is out-of-domain (no soccer, close-range handheld). The 0.51 m sits between the ~0.6 m zero/T-pose floor and SMART's published **0.054 m** → **confirms the prior that the SMART *recipe*, not the backbone, buys the jump**; it does *not* overturn the SMPLest-X pick. Next: EMDB (Global-MPJPE) / WorldPose (in-domain) when access clears, + the SMART recipe (depth-FT + foot-anchor + 2-pass smoothing). Repro: `scripts/run_pose_eval.py --dataset 3dpw --pkl …/test/<seq>.pkl --images …/<seq> --joint-model smplx --backend …smplestx_backend:make --stride 30` (pose-bakeoff-runbook §0b). 3DPW © von Marcard et al., **ECCV'18** — cite per its licence. |
 | **B3** | **Resolved** (pod-verified 2026-06-23; **T2 anchor 2026-06-25**) | Pose + ball live adapters **run on CUDA** (SMPLest-X, WASB) + per-frame foot-plane anchor | ✅ done | both import torch-free behind the seam; staged box-local (`scripts/stage_wasb_weight.sh`). **T2 (2026-06-25):** the pose backend now also emits `pelvis_above_foot` (SMPL-X FK at go=0) so the grounded root Z varies per frame — pod E2E confirms posture-tracking Z (subject 1.03→0.76 m crouch). WASB pod-verified standalone (`scripts/smoke_wasb_gpu.py`) **and** in the full pipeline (`scripts/pod_real_e2e.sh` — all real backends → export). Needed two compat fixes, now in-tree: `torch.no_grad()` around inference (WASB's postprocessor calls `.numpy()` without `detach`); `_load` forces WASB's `src` ahead of SMPLest-X on `sys.path` to dodge a `utils` collision. NumPy-2 `np.Inf` patch folded into the staging script. |
 | **B4** | Blocker (env) | Blender observer can't render real SCENE_3D headless without a display/GPU profile | ❌ needs env | M2 concern |
@@ -139,8 +141,10 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   exhausted as a quality lever (the table above). Two candidates: (a) PnLCalib's *own* full
   camera-calibration module (lines + circles + L/R disambiguation) vs our bare planar DLT — **done**,
   A/B'd below (camera tightens lines + tail but leaves the median a wash); (b) a line-only fusion that
-  adds correct lines without the keypoint noise — still open. With the solver now A/B'd, the remaining
-  lever is **completeness** (recovering the ~¼ of frames the detector drops), not the solve.
+  adds correct lines without the keypoint noise — **diagnosed → won't-fix** (#122, below: the line
+  head is empty on exactly the frames the kp head drops, so there is nothing to fuse). With the solver
+  A/B'd and the fusion lever ruled out by data, the remaining lever is **completeness** (recovering the
+  ~¼ of frames the detector drops) — now shown to be **detector/data-bound**, not a fusion gap.
   **Camera-module lever WIRED 2026-06-24, A/B measured 2026-06-25.** The same PnLCalib
   backend now implements a second path: `_PnLCalibBackend.calibrate_frames()` runs the full
   `FramebyFrameCalib` (points **and** lines, mode + RANSAC voting, optional PnL line refinement) and
@@ -170,6 +174,30 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   all-frames pixel RMS ~5e14→~1e3 px). So the camera path buys *reliability + better lines*, not a
   lower central error; **completeness, not the solver, stays the limiter.** `PNLCALIB_PNL_REFINE`
   toggles the PnL line refinement (default on).
+- **Line-only fusion lever — DIAGNOSED → won't-fix 2026-06-25 (#122).** The camera A/B measured the
+  *outcome* (completeness flat at ~0.74); a focused diagnostic (`scripts/diag_calib_landmarks.py`,
+  torch-free factory, runs both HRNet heads on the box) measured the *cause*. For each of the same
+  first 200 SoccerNet `test` frames it records `n_kp` (keypoints **after** `complete_keypoints`, i.e.
+  line-intersections already folded in — the DLT input, needs ≥4) and `n_lines` (detected straight
+  lines), then asks: among frames the DLT cannot lock (`n_kp < 4`), how many lines did the line head
+  find? Result (box run 2026-06-25, kp/line gate 0.3434/0.7867):
+
+  | bucket | frames | of which line-rich (`n_lines≥2`) | line-poor (`n_lines<2`) |
+  |---|---|---|---|
+  | locked (`n_kp≥4`) | 149 (0.745) | — | — |
+  | **failed (`n_kp<4`)** | **51 (0.255)** | **0 (0.000)** | **51 (1.000)** |
+
+  Failed-frame `n_lines` histogram: **{0 lines: 48, 1 line: 3}** — **not a single** dropped frame
+  has ≥2 detected lines. The lock-rate 149/200 = **0.745 reproduces the B1 completeness exactly**, so
+  the diagnostic samples the benchmark faithfully. **Verdict (R-6):** when the keypoint head fails,
+  the line head fails on the *same* frames (extreme zoom / motion blur / occlusion — GT-annotated but
+  visually marking-sparse in the actual pixels). A line-only fusion fallback would rescue **0** of the
+  51, which is exactly *why* the camera module (which already uses lines) left completeness flat. The
+  ~26 % drop is a **detector/data ceiling**, not a fusion gap — so #122 is closed **won't-fix**. The
+  real completeness levers lie elsewhere: a stronger / fine-tuned landmark detector (better recall on
+  hard broadcast views), or — for the *video* path, not these independent calibration stills —
+  temporal propagation of a lock across neighbouring frames. Unsolved frames are already surfaced as
+  zero-confidence drift (R-6), never crashes.
 
 ### Phase C — Pose decision → heavy wiring (research → box)
 - **B2** finalize the pose model against WorldPose — bake-off procedure in
