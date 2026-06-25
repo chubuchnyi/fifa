@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import pytest
 
+from pitch3d.adapters.fakes import FakeAvatarBuilder
 from pitch3d.adapters.models import (
     ByteTrackTracker,
     GVHMRPoseEstimator,
     KeypointFieldCalibrator,
     RFDETRDetector,
+    TexturedSmplxAvatarBuilder,
     TrackNetBallTracker,
 )
 from pitch3d.adapters.models.detection import COCO_BASE_CLASSES, ROBOFLOW_SPORTS_CLASSES
@@ -76,3 +78,21 @@ def test_detector_classes_sports_is_forwarded():
 def test_unknown_detector_classes_rejected():
     with pytest.raises(ValueError, match="unknown detector_classes"):
         default_ports(detector="rfdetr", detector_classes="nfl")
+
+
+def test_avatar_default_is_the_fake_builder(tmp_path):
+    assert isinstance(default_ports(out_dir=tmp_path / "o").avatar, FakeAvatarBuilder)
+
+
+def test_avatar_textured_selects_measured_builder_with_device_threaded(tmp_path):
+    # The measured pixel-projection builder (M2-0 primary); no backend injected, so the heavy
+    # SMPL-X-meshing half stays lazy (None) until build() — construction needs no torch/GPU.
+    avt = default_ports(out_dir=tmp_path / "o", avatar="textured", device="cuda").avatar
+    assert isinstance(avt, TexturedSmplxAvatarBuilder)
+    assert avt.device == "cuda"
+    assert avt.backend is None
+
+
+def test_unknown_avatar_rejected(tmp_path):
+    with pytest.raises(ValueError, match="unknown avatar"):
+        default_ports(out_dir=tmp_path / "o", avatar="rodin")

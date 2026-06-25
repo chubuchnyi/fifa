@@ -68,10 +68,11 @@ def run_dry_run(
     *, out_dir: Path, n_frames: int, n_subjects: int, export_format: str,
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake",
-    render: str = "fake", export: str = "fake", observer: str = "fake",
+    avatar: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
+    avatar_backend: str | None = None,
     stitch: bool = False, coherence: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -86,10 +87,11 @@ def run_dry_run(
     out_dir = Path(out_dir)
     ports = default_ports(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
-        calibrator=calibrator, pose=pose, ball=ball, render=render, export=export,
+        calibrator=calibrator, pose=pose, ball=ball, avatar=avatar, render=render, export=export,
         observer=observer, device=device, detector_weights=detector_weights,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
+        avatar_backend=avatar_backend,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -181,7 +183,7 @@ def run_dry_run(
 
     lineup = {
         "detect": detector, "track": tracker, "calibrate": calibrator, "pose": pose,
-        "ball": ball, "render": render, "export": export, "observe": observer,
+        "ball": ball, "avatar": avatar, "render": render, "export": export, "observe": observer,
     }
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
@@ -217,6 +219,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ball", default="fake", choices=["fake", "tracknet"],
                         help="ball tracker; 'tracknet' live backend is an unwired stub "
                              "(the pure threshold/gap-fill half is real; use 'fake')")
+    parser.add_argument("--avatar", default="fake", choices=["fake", "textured"],
+                        help="avatar builder; 'textured' = measured pixel-projection onto the "
+                             "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
+                             "the SMPL-X-meshing heavy half is an unwired stub (use 'fake')")
     parser.add_argument("--render", default="fake", choices=["fake", "overlay"],
                         help="render pass; 'overlay' is real + dependency-free (reprojection PNGs)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
@@ -244,6 +250,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tracker-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own TrackingBackend; "
                              "requires --tracker bytetrack")
+    parser.add_argument("--avatar-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own AvatarMeshBackend (SMPL-X meshing + frame "
+                             "sampling); requires --avatar textured")
     parser.add_argument("--stitch", action="store_true",
                         help="re-link fragmented tracklets between TRACK and POSE so "
                              "occluded players don't 'appear from nowhere' (off by default)")
@@ -263,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         calibrator=args.calibrator,
         pose=args.pose,
         ball=args.ball,
+        avatar=args.avatar,
         render=args.render,
         export=args.export,
         observer=args.observer,
@@ -273,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         ball_backend=args.ball_backend,
         calibrator_backend=args.calibrator_backend,
         tracker_backend=args.tracker_backend,
+        avatar_backend=args.avatar_backend,
         stitch=args.stitch,
         coherence=args.coherence,
     )

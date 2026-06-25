@@ -19,6 +19,7 @@ from ...core.scene.assets import RenderAssetRef, SynthViewRef
 from ...core.scene.camera import CameraTrack
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from .avatar import AvatarMeshBackend, SmplxTextureBackend, TexturedSmplxAvatarBuilder
 from .ball import TrackNetBackend, TrackNetBallTracker
 from .calibration import (
     CameraModuleFieldCalibrator,
@@ -66,6 +67,7 @@ class ApiAvatarBuilder(AvatarBuilder):
 __all__ = [
     "DETECTOR_CLASS_MAPS",
     "ApiAvatarBuilder",
+    "AvatarMeshBackend",
     "ByteTrackBackend",
     "ByteTrackTracker",
     "CameraModuleFieldCalibrator",
@@ -75,7 +77,9 @@ __all__ = [
     "PitchKeypointBackend",
     "RFDETRBackend",
     "RFDETRDetector",
+    "SmplxTextureBackend",
     "SplatEnvReconstructor",
+    "TexturedSmplxAvatarBuilder",
     "TrackNetBackend",
     "TrackNetBallTracker",
 ]

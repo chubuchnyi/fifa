@@ -78,10 +78,12 @@ def _resolve_backend(spec: str, protocol: Any) -> Any:
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
-    ball: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
+    ball: str = "fake", avatar: str = "fake", render: str = "fake", export: str = "fake",
+    observer: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
+    avatar_backend: str | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -90,9 +92,13 @@ def default_ports(
     ``"rfdetr"``. ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering).
     ``calibrator``: ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``:
     ``"fake"`` or ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). ``ball``: ``"fake"`` or ``"tracknet"``
-    (TrackNet 2D, ``ball`` extra). ``render``: ``"fake"`` or ``"overlay"`` (reproject the resolved
-    3D back onto per-frame PNGs — dependency-free, no extra). ``export``: ``"fake"`` or ``"gltf"``
-    (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the ``export`` extra).
+    (TrackNet 2D, ``ball`` extra). ``avatar``: ``"fake"`` or ``"textured"`` (measured
+    pixel-projection onto the tracked SMPL-X — the M2-0 *primary* realism path: the projection /
+    visibility / per-vertex-colour-averaging half runs with no GPU, the SMPL-X meshing heavy half
+    is gated behind the ``avatar`` extra). ``render``: ``"fake"`` or ``"overlay"`` (reproject the
+    resolved 3D back onto per-frame PNGs — dependency-free, no extra). ``export``: ``"fake"``
+    or ``"gltf"`` (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the
+    ``export`` extra).
     ``observer``: ``"fake"`` (stdlib PNGs) or ``"blender"`` (real proxy ``SCENE_3D`` via a
     ``blender --background`` subprocess; needs the binary on ``$PITCH3D_BLENDER``/``PATH``). The
     real model adapters need their extra (+ weights/GPU) at *call* time; importing them stays light.
@@ -108,12 +114,13 @@ def default_ports(
     players/goalkeepers/referees). Same adapter-vs-root split as ``device``: the adapter dataclass
     defaults to the sports map (production intent), the root to ``"coco"`` (what runs for free).
 
-    ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` / ``tracker_backend`` inject a
-    bring-your-own heavy backend by dotted path (``"package.module:Factory"``) into the matching
-    real adapter — the on-box seam for wiring a vendored GVHMR/TrackNet/keypoint/tracking network
-    without forking this wiring (ADR-0006, see :func:`_resolve_backend`). Each requires its real
-    adapter to be selected (e.g. ``pose_backend`` needs ``pose="gvhmr"``); pairing one with
-    ``"fake"`` raises.
+    ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` / ``tracker_backend`` /
+    ``avatar_backend`` inject a bring-your-own heavy backend by dotted path
+    (``"package.module:Factory"``) into the matching real adapter — the on-box seam for wiring a
+    vendored GVHMR/TrackNet/keypoint/tracking/SMPL-X-meshing network without forking this wiring
+    (ADR-0006, see :func:`_resolve_backend`). Each requires its real adapter to be selected (e.g.
+    ``pose_backend`` needs ``pose="gvhmr"``, ``avatar_backend`` needs ``avatar="textured"``);
+    pairing one with ``"fake"`` raises.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -239,6 +246,23 @@ def default_ports(
     else:
         raise ValueError(f"unknown observer {observer!r}; expected 'fake' or 'blender'")
 
+    if avatar == "fake":
+        if avatar_backend:
+            raise ValueError("avatar_backend requires --avatar textured")
+        avt: AvatarBuilder = FakeAvatarBuilder(out_dir=out / "assets")
+    elif avatar == "textured":
+        from ..adapters.models import TexturedSmplxAvatarBuilder
+        from ..adapters.models.avatar import AvatarMeshBackend
+
+        avt = TexturedSmplxAvatarBuilder(
+            out_dir=out / "assets",
+            device=device,
+            backend=_resolve_backend(avatar_backend, AvatarMeshBackend)
+            if avatar_backend else None,
+        )
+    else:
+        raise ValueError(f"unknown avatar {avatar!r}; expected 'fake' or 'textured'")
+
     return AppPorts(
         detector=det,
         tracker=trk,
@@ -246,7 +270,7 @@ def default_ports(
         pose=pse,
         ball=blt,
         env=FakeEnvReconstructor(out_dir=out / "assets"),
-        avatar=FakeAvatarBuilder(out_dir=out / "assets"),
+        avatar=avt,
         viewsynth=FakeViewSynthesizer(out_dir=out / "synth"),
         observer=obs,
         render=rnd,

@@ -24,8 +24,13 @@ import numpy as np
 from ...core.correction.engine import resolve_ball, resolve_subject_motion
 from ...core.ports.render import RenderPass, RenderQuality, RenderResult
 from ...core.scene.camera import CameraTrack
+from ...core.scene.projection import project_world_points, quat_to_rotation_matrix
 from ...core.scene.scene import Scene
 from ...core.scene.subject import Role, Subject, Team
+
+# Re-exported for callers/tests that import the projection math from this module; the single
+# implementation now lives in core (shared with the M2 measured-texture avatar builder).
+__all__ = ["ReprojectionOverlayRenderPass", "project_world_points", "quat_to_rotation_matrix"]
 
 _BALL_COLOR = (255, 215, 0)       # gold
 _REFEREE_COLOR = (255, 80, 200)   # pink — referees carry no team colour
@@ -91,50 +96,6 @@ def appearance_alpha(
         if f[b] < clip_last:                         # genuine exit (before clip end or a gap)
             alpha[idx] = np.minimum(alpha[idx], (b - idx + 1) / (fade + 1))
     return np.clip(alpha, 0.0, 1.0)
-
-
-def quat_to_rotation_matrix(quat: np.ndarray) -> np.ndarray:
-    """World→camera rotation ``(3, 3)`` from a (w, x, y, z) quaternion (normalised first)."""
-    q = np.asarray(quat, dtype=float).reshape(4)
-    n = float(np.linalg.norm(q))
-    if n < 1e-12:
-        return np.eye(3)
-    w, x, y, z = q / n
-    return np.array(
-        [[1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
-         [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
-         [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)]],
-        dtype=float,
-    )
-
-
-def _frame_row(frames: np.ndarray, frame_index: int) -> int:
-    """Nearest camera row for a frame index (exact match when present)."""
-    i = int(np.searchsorted(frames, frame_index))
-    return min(max(i, 0), frames.shape[0] - 1)
-
-
-def project_world_points(
-    camera: CameraTrack, frame_index: int, world_xyz: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Project world points to image pixels at a frame; flag which are actually visible.
-
-    Applies the per-frame world→camera pose (``X_c = R @ X_w + t``) then the pinhole intrinsics.
-    A point is visible only if it is in front of the camera (``Z_c > 0``) *and* lands inside the
-    image rectangle. Returns ``(uv (N, 2), visible (N,) bool)``.
-    """
-    pts = np.asarray(world_xyz, dtype=float).reshape(-1, 3)
-    row = _frame_row(camera.frames, frame_index)
-    rot = quat_to_rotation_matrix(camera.rotation_quat[row])
-    cam = pts @ rot.T + camera.translation[row]
-    z = cam[:, 2]
-    in_front = z > 1e-6
-    safe_z = np.where(in_front, z, 1.0)
-    k = camera.intrinsics
-    u = k.fx * cam[:, 0] / safe_z + k.cx
-    v = k.fy * cam[:, 1] / safe_z + k.cy
-    on_image = (u >= 0) & (u < k.width) & (v >= 0) & (v < k.height)
-    return np.column_stack([u, v]), in_front & on_image
 
 
 def _encode_png(fb: np.ndarray) -> bytes:

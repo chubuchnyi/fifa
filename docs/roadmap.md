@@ -130,6 +130,20 @@ fabricate stance — prefer pixel-projection (measured) over generative synthesi
 avatars (#2) are used, flag them as synthesized. Realism is a *presentation* layer, sequenced after
 M1's measurement accuracy (calibration/pose), which is the core product value.
 
+**Cross-input — SAM-Body4D / photoreal-rendering brief** (`upscail/sam-body4d-and-photoreal-
+rendering-brief.md`, reviewed 2026-06-25): three takeaways adopted, one subordinated. **Adopt:**
+**(a)** homography as a *validator-anchor*, not just calibration — the PnLCalib ground plane (M1)
+bounds every heavier appearance/HMR layer (a measured texture or an inferred body part that violates
+pitch geometry is rejected — "a leg can't pass through the pitch"), operationalising the measured-
+over-hallucinated gate; **(b)** a failure-mode eval harness *first* — quantify error by mode
+(occlusion / athletic pose / small scale / blur) on real clips before building avatars, then
+fine-tune only the dominant-error component; **(c)** the brief's ports table matches ours — keep each
+backend a swappable adapter. **Subordinate (R-6):** the brief defaults to *generative* avatars
+(feed-forward Gaussian LRMs PF-LHM/IDOL/LHM, multi-view diffusion, kit-number hallucination); M2-0
+keeps measured pixel-projection **primary** and routes those candidates to M3 (#3 / seam-B), flagged
+synthesized. (The brief's stated "current stack" assumes GVHMR/WHAM + ByteTrack; the actually-wired
+calibration is PnLCalib — it is a *target* design, not the repo state.)
+
 ---
 
 ## M3 — Quality & polish ⬜  (+ ViewSynthesizer **seam B**)
@@ -138,10 +152,10 @@ M1's measurement accuracy (calibration/pose), which is the core product value.
 
 | Ticket | Package |
 |---|---|
-| M3-1 Per-subject Gaussian avatars (#3) selectively | `adapters/models` (`AvatarBuilder`) |
-| M3-2 Constraint-guided re-fit hardened (PromptHMR-class) | `adapters/models` (`PoseEstimator.refit`) |
+| M3-1 Per-subject Gaussian avatars (#3) selectively — candidates: feed-forward Gaussian LRMs (**IDOL** <1 s, **LHM**, **PF-LHM** pose-free/multi-image) for the bulk; per-subject **GaussianAvatar/GART** for hero shots. All flagged *synthesized* (R-6). | `adapters/models` (`AvatarBuilder`) |
+| M3-2 Constraint-guided re-fit hardened (PromptHMR-class); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments, validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
 | **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
-| **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides | `adapters/viewsynth`, `adapters/models` |
+| **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
 | M3-5 Confidence map + "needs attention" prioritization UI | `adapters/blender`, `core/scene` |
 | M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
 | M3-7 Web export (three.js / R3F) | `adapters/export` |
@@ -207,8 +221,10 @@ core rewrite. Note: seam-B amplification already exercises the same multi-view i
 ## Open dependencies / decisions to revisit per milestone
 
 - **M2:** which generative avatar API is primary (realism vs cost vs rig control)? Resolve via the
-  **M2-0 realism spike** (measured pixel-projection over generative hallucination, R-6 honesty gate).
-  Splat render inside Blender vs external renderer (ADR-0003 default: external + import).
+  **M2-0 realism spike** (measured pixel-projection over generative hallucination, R-6 honesty gate);
+  the generative path itself (deferred to M3) ranks per the SAM-Body4D brief — PF-LHM (pose-free,
+  multi-image) default, IDOL/LHM alternates. Splat render inside Blender vs external renderer
+  (ADR-0003 default: external + import).
 - **M3:** which ViewSynthesizer backend per seam (seam B favors 3D-consistency, e.g.
   GEN3C/TrajectoryCrafter; seam A favors orbit fidelity, e.g. ReCamMaster) — see ADR-0007.
 - **Cross-cutting:** SMPL-X (hands/face) vs SMPL/SMPL-H (body only) — affects pose dimensions;
