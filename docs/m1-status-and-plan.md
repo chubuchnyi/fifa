@@ -1,6 +1,6 @@
 # M1 — Status & Forward Plan
 
-*Snapshot: 2026-06-24. Companion to `roadmap.md` (which is the step-by-step M1 build log);
+*Snapshot: 2026-06-25. Companion to `roadmap.md` (which is the step-by-step M1 build log);
 this doc is the higher-level "where are we / what's blocking / what's next" view.*
 
 ## TL;DR
@@ -135,10 +135,12 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
   0.165 m → 0.210 m). Net `all_line_acc@5px` stays **flat at ~0.60–0.61** across the whole sweep —
   the extra calibrated frames are too noisy to add correct lines on balance. Baseline 0.3434
   **reproduces the prior B1 number (0.745)** on 2× the frames, confirming the measurement is stable.
-- Next (box): the real lever for *better* calibration is **better landmarks, not the gate** —
-  evaluate PnLCalib's *own* full camera-calibration module (lines + circles + L/R disambiguation)
-  vs our bare planar DLT, and/or a line-only fusion that adds correct lines without the keypoint
-  noise. Threshold-tuning is exhausted as a quality lever (the table above).
+- The real lever for *better* calibration is **better landmarks, not the gate** — threshold-tuning is
+  exhausted as a quality lever (the table above). Two candidates: (a) PnLCalib's *own* full
+  camera-calibration module (lines + circles + L/R disambiguation) vs our bare planar DLT — **done**,
+  A/B'd below (camera tightens lines + tail but leaves the median a wash); (b) a line-only fusion that
+  adds correct lines without the keypoint noise — still open. With the solver now A/B'd, the remaining
+  lever is **completeness** (recovering the ~¼ of frames the detector drops), not the solve.
   **Camera-module lever WIRED 2026-06-24, A/B measured 2026-06-25.** The same PnLCalib
   backend now implements a second path: `_PnLCalibBackend.calibrate_frames()` runs the full
   `FramebyFrameCalib` (points **and** lines, mode + RANSAC voting, optional PnL line refinement) and

@@ -4,6 +4,22 @@ Offline desktop tool that reconstructs an **editable, photorealistic 3D football
 episode** from a **single broadcast camera**, with the emphasis on pose estimation
 and easy manual correction that **propagates across frames**.
 
+<table>
+<tr>
+<td width="50%"><img src="docs/img/input_broadcast.jpg" alt="Input — a single broadcast frame"></td>
+<td width="50%"><img src="docs/img/output_smplx.png" alt="Output — reconstructed editable SMPL-X bodies"></td>
+</tr>
+<tr>
+<td align="center"><b>Input</b> — one frame of a single broadcast clip</td>
+<td align="center"><b>Output</b> — editable 3D SMPL-X bodies, Blender Cycles render</td>
+</tr>
+</table>
+
+<sub>Both panels are from the **same** real broadcast clip (Colombia 1–0 Congo DR). The right panel is
+a real pipeline export (decode → detect → track → calibrate → pose → SMPL-X) rendered offline in
+Blender; it is illustrative of the end-to-end transform, not a per-pixel reprojection of the left
+frame. Pose realism is still being finalized (B2).</sub>
+
 > **Status: architecture scaffold + M1 adapters wired.** The *architecture* — typed scene
 > model, port contracts, the correction engine, fakes, and an end-to-end dry-run — is complete,
 > and the M1 perception/render/export ports now carry real adapters. Each real adapter is split
@@ -19,7 +35,10 @@ and easy manual correction that **propagates across frames**.
 > loop) is unit-tested headlessly; only the GUI session needs a Blender binary + a display. The
 > **calibrator** is the first backend benchmarked on *independent* real data — on SoccerNet
 > `calibration-2023` the injected PnLCalib backend registers the pitch to a **0.236 m median** on the
-> ¾ of broadcast frames where it locks on (completeness, not planar accuracy, is the limiter; B1). See
+> ¾ of broadcast frames where it locks on (completeness, not planar accuracy, is the limiter; B1).
+> A/B-ing its bare planar DLT against PnLCalib's full camera module (points **and** lines) leaves the
+> median a wash but tightens line registration (+5–6 pp) and all but removes the worst-case blow-ups
+> (p95 6.4 → 1.2 m) — so the next lever is completeness, not the solver. See
 > [`docs/roadmap.md`](docs/roadmap.md) for per-step state and [`docs/architecture.md`](docs/architecture.md).
 
 Source of truth for requirements: [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) (v0.3).
