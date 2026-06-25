@@ -415,6 +415,36 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     (R-6):** 0.61 is the calibrator's own
     inlier×inlier-fraction score (in-sample), **not** independent GT accuracy, and real calibration
     only fires on landscape-broadcast clips with visible markings.
+  - **Full real-model E2E (post-M2-6) ✅ pod-validated 2026-06-25** (commit `004f305`). First run of
+    the *whole* golden path with **every perception backend real and wired together** —
+    `scripts/pod_real_e2e.sh` with `PNLCALIB_REPO=…/PnLCalib STITCH=1 COHERENCE=1 FRAMES=8` on the
+    Blackwell pod (RTX PRO 4500, cu128 / torch 2.8). Log confirms `device: cuda` and **real adapters:
+    detect=rfdetr, track=bytetrack, calibrate=keypoints (PnLCalib), pose=gvhmr (SMPLest-X),
+    ball=tracknet (WASB), render=overlay, export=gltf**; only `env, avatar, observe` are fakes (the M2
+    photoreal layer, honestly gated). **Pose is genuinely real:** SMPLest-X ViT-H checkpoint
+    `smplest_x_h.pth.tar` loaded (`Total #parameters: 687223152 (0.69B)`) → `reconstructed scene-1:
+    6 subject(s), ball=yes`, each 8f × 21 joints. `.npz` verification (`subject_1.npz`): `body_pose`
+    (8,21,3) **per-frame std 0.053** (real articulation *moving* across frames, not a static fallback),
+    non-zero `betas` (10,), varying `global_orient`, `body_model=SMPL-X`. **T2 foot-plane anchor fires
+    end-to-end:** exported `transl` z-column varies **0.81–1.03 m** (pelvis height tracking
+    crouch/stride), not the fixed nominal — the `pelvis_above_foot` path (commit `25ad2d3`) is live
+    through real SMPLest-X FK. **Calib = identity/0.00 on `clip.mp4` is the known framing limit, not a
+    regression:** same as #103 — tight grass framing → 0 landmarks → identity H, `field calibration
+    confidence mean=0.00`, so world XY is pixel-passthrough (`transl` XY up to ~1440, off-pitch);
+    articulation + pelvis-Z are unaffected (independent of H). For metric XY use a landscape-broadcast
+    clip (Colombia → 0.61). **Ball:** WASB ran, `height_confidence mean=0.33`, **4 honest
+    `low_ball_height` attention items** (frames 1,2,6,7 @ 0.00 — monocular depth, R-6 *marked* not
+    hidden). **Continuity/coherence active:** `--stitch` 6→6 (no fragmentation on 8 clean frames),
+    `--coherence` bridged 0 gaps + 6 auto-smoothing; edit→resolve committed `corr-1` (constant_offset,
+    max_abs_change 0.1 m) → 7 corrections. **Seam A (M2-5) live:** orbit re-shoot `overlap=0.85
+    editable=False`, cached+deduped (1 synth_view after 2 calls). **Export:** 6× `subject_N.npz`
+    (6096 B) under `out/run/export/scene.smplx_npz/`; note `--export gltf` + `--format smplx_npz`
+    writes **npz bodies, no standalone `.gltf` mesh** (FORMAT governs serialization — set FORMAT=gltf/
+    json for a mesh/ball). **Timing:** **431 s** wall for 8 frames cold, dominated by model loads
+    (RF-DETR + SMPLest-X 0.69B + WASB + PnLCalib). Pod **stopped on completion** (`zueopp6nzozxb7
+    EXITED`, spend → $0.012/hr volume-only). **Honesty (R-6):** this validates the real single-cam →
+    world-SMPL-X *articulation* path end-to-end on the real nets; metric world placement still needs a
+    lined clip, and the photoreal avatar/env stay honest fakes (M2 gated).
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 
