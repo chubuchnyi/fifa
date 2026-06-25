@@ -92,6 +92,17 @@ The pure-core, unit-testable work that needs no GPU and no external asset:
 - **B1 data unblocked 2026-06-23.** SoccerNet `calibration-2023` (real landscape-16:9 broadcast
   frames + per-image pitch-line GT) is **openly downloadable, no NDA** — fetch with
   `scripts/get_soccernet_calibration.py` (only the broadcast *video* needs the NDA password).
+- **SoccerNet original-video NDA APPROVED 2026-06-25.** The broadcast *video* bank (NDA-gated,
+  distinct from the open `calibration-2023` frames above) is now accessible: download via the
+  official `SoccerNet` pip package (`pip install SoccerNet --upgrade`) with
+  `SoccerNetDownloader(...).password` — the password lives in `.env` as `SOCCERNET_PASSWORD`
+  (gitignored; never committed to the repo or quoted in docs). Unlocks a large in-domain
+  broadcast bank for: more/varied eval clips (esp. wide framings with visible pitch lines — the
+  calib-confidence limiter is framing, not the backend), a failure-mode eval set (M2-0
+  SAM-Body4D brief), and per-crop pose frames for the B2 bake-off (in-domain alternative to the
+  stalled WorldPose video). Security (R-6): the approval email wrapped its links through a
+  third-party tracker (`yatrack3.com`) — use the official soccer-net.org /
+  github.com/SoccerNet channel + the pip package, not those links.
 - **CPU harness built & unit-tested** (`pitch3d.eval.datasets_soccernet` + `calib_metrics`, CLI
   `scripts/run_calib_eval.py`): re-derived pitch template, normalized-GT parser, point-to-segment
   reprojection metrics, plus a synthetic self-test (oracle ≈ 0, perturb grows). Pure/no-box.
