@@ -20,8 +20,10 @@ from pitch3d.adapters.render.avatar_splat import (
     render_frame_buffer,
 )
 from pitch3d.adapters.render.overlay import _BACKGROUND
+from pitch3d.core.correction.engine import make_offset
 from pitch3d.core.scene.assets import RenderAssetKind, RenderAssetRef
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
+from pitch3d.core.scene.layers import CorrectionTarget, TargetKind
 from pitch3d.core.scene.provenance import Backend, ModelInfo
 from pitch3d.core.scene.subject import Subject
 
@@ -110,3 +112,58 @@ def test_no_avatar_assets_renders_empty_background(tmp_path, make_motion, make_s
     scene = make_scene(subjects=[Subject(track_id=7, proposal=make_motion([0], transl_z=5.0))])
     fb = render_frame_buffer(scene, _camera(1), 0)
     assert (fb == np.array(_BACKGROUND, dtype=np.uint8)).all()
+
+
+# --- M2-4 edit↔render sync: a correction re-projects with no avatar rebuild (AC-5a) -----------
+_SIDE_VERT = np.array([[1.0, 0.0, 0.0]])  # 1 m off the root so a root *rotation* is observable
+
+
+def test_root_orientation_edit_reprojects_without_avatar_rebuild(tmp_path, make_motion, make_scene):
+    # AC-5a crux: editing the SMPL root orientation re-projects into the rendered frame with NO
+    # avatar rebuild. The off-root vertex starts at world (1,0,5) → pixel (col=42,row=24); a 90°
+    # ROOT_ORIENTATION correction about Z swings it to world (0,1,5) → pixel (col=32,row=34). Same
+    # PLY on disk — only the resolved pose the splat pass reads changed.
+    ref = _avatar_ref(tmp_path, 7, [[200, 100, 50]], [True], verts=_SIDE_VERT)
+    subj = Subject(track_id=7, proposal=make_motion([0], transl_z=5.0))
+    scene = _scene_with(make_scene, (subj, ref))
+
+    before = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(before[24, 42], [200, 100, 50])  # placed at identity orient
+    ply_mtime = Path(ref.uri).stat().st_mtime_ns
+
+    scene.corrections = [
+        make_offset(
+            "rot90",
+            CorrectionTarget(kind=TargetKind.ROOT_ORIENTATION, subject_track_id=7),
+            (0, 0),
+            delta=np.array([0.0, 0.0, np.pi / 2]),
+        )
+    ]
+    after = render_frame_buffer(scene, _camera(1), 0)
+
+    np.testing.assert_array_equal(after[34, 32], [200, 100, 50])     # swung to the new pixel
+    np.testing.assert_array_equal(after[24, 42], list(_BACKGROUND))  # vacated the old pixel
+    assert Path(ref.uri).stat().st_mtime_ns == ply_mtime            # asset never rebuilt
+
+
+def test_root_translation_edit_reprojects(tmp_path, make_motion, make_scene):
+    # The translation DOF of the resolved root rigid transform also syncs: a +2 m world-X offset
+    # slides the same vertex from pixel col=42 to col=62 — through the resolved-pose path only.
+    ref = _avatar_ref(tmp_path, 7, [[200, 100, 50]], [True], verts=_SIDE_VERT)
+    subj = Subject(track_id=7, proposal=make_motion([0], transl_z=5.0))
+    scene = _scene_with(make_scene, (subj, ref))
+
+    before = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(before[24, 42], [200, 100, 50])
+
+    scene.corrections = [
+        make_offset(
+            "slideX",
+            CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=7),
+            (0, 0),
+            delta=np.array([2.0, 0.0, 0.0]),
+        )
+    ]
+    after = render_frame_buffer(scene, _camera(1), 0)
+    np.testing.assert_array_equal(after[24, 62], [200, 100, 50])     # slid to the new pixel
+    np.testing.assert_array_equal(after[24, 42], list(_BACKGROUND))  # vacated the old pixel

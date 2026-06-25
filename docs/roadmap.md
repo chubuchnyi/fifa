@@ -167,7 +167,22 @@ fabricated placeholder, so unobserved body regions are *visibly* marked. Wired a
 measured meshes E2E (decoded frame: measured colour + black + the R-6 tint, never a faked colour).
 Honest limits, deferred to heavier upgrades: vertex splats (no triangle fill) and root-translation
 placement only (no per-frame limb re-posing — needs the SMPL-X model). **Next: M2-4** (edit↔render
-sync — resolved already drives every render rep) / **M2-1** env reconstruction.
+sync) / **M2-1** env reconstruction.
+
+**Progress — M2-4 edit↔render sync wired E2E (2026-06-25):** the splat pass now places the
+canonical mesh by the subject's **full resolved root rigid transform** — `global_orient` (axis-angle
+→ rotation matrix via the existing `axis_angle_to_matrix`) **⊕** root translation — instead of
+translation only. Because the placement reads the *resolved* pose, a `ROOT_ORIENTATION` **or**
+`ROOT_TRANSLATION` correction re-projects straight into the rendered frame with **no avatar rebuild**
+(TZ AC-5a "editing an SMPL pose re-projects into photoreal with no manual redo"). Proven at the
+framebuffer level: a 90° root-orientation edit swings an off-root vertex to its new pixel and vacates
+the old one while the PLY's mtime is unchanged (asset never rebuilt); a translation edit slides the
+same vertex — both through the `resolved → render` path only. Audit confirms *resolved drives every
+render rep*: splat via `_resolved_roots`→`resolve_subject_motion`, the overlay reprojects resolved
+roots/ball, and observe snapshots the resolved scene — M2-4 closed the one gap (root orientation was
+previously dropped). Honest deferred limit: `POSE_BODY_JOINT` and `SHAPE_BETA` edits still need the
+heavy SMPL-X LBS model and are *not* faked — the dependency-free pass honours the rigid root only.
+**Next: M2-1** env reconstruction.
 
 ---
 

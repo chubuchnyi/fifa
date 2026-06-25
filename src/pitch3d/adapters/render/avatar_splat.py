@@ -1,19 +1,21 @@
-"""Splat-avatar render pass (M2-3, FR-14) — rasterise the MEASURED avatar meshes as colour splats.
+"""Splat-avatar render pass (M2-3/M2-4, FR-14) — rasterise the MEASURED avatar meshes as splats.
 
 The first :class:`RenderPass` that consumes the M2-2 photoreal assets. For each avatar
 :class:`RenderAssetRef` on the resolved scene it reads the vertex-coloured PLY, places that
-canonical mesh at the owning subject's *resolved* per-frame root, projects every vertex through the
-camera, and paints **z-buffered colour splats** — at a shared pixel the nearer splat wins. R-6
-honesty travels into the picture: a vertex with ``measured=0`` is drawn in a distinct *unmeasured*
-tint, not its fabricated placeholder colour, so the operator/LLM can *see* which body regions were
-never observed instead of trusting an invented look.
+canonical mesh by the owning subject's *resolved* per-frame root **rigid transform** (orientation
+⊕ translation), projects every vertex through the camera, and paints **z-buffered colour splats**
+— at a shared pixel the nearer splat wins. Because the placement reads the *resolved* pose, an
+edit (ROOT_ORIENTATION or ROOT_TRANSLATION correction) re-projects into the rendered frame with no
+avatar rebuild — the M2-4 edit↔render sync (AC-5a). R-6 honesty travels into the picture: a vertex
+with ``measured=0`` is drawn in a distinct *unmeasured* tint, not its fabricated placeholder
+colour, so the operator/LLM can *see* which body regions were never observed.
 
 Pure numpy + the stdlib PNG encoder (shared with :mod:`~pitch3d.adapters.render.overlay`); no
 Blender, no GPU. The pass reads only resolved state and never mutates the scene (RenderPass
-contract). Two honest limitations, deferred to heavier upgrades: it splats *vertices* (no triangle
-fill) and places each mesh by its resolved root *translation* only (no per-frame limb re-posing —
-that needs the SMPL-X model). Even so it wires resolved-scene → avatar-asset → rendered-frame
-end-to-end, which is the M2-3 slice.
+contract). Honest limitations, deferred to heavier upgrades: it splats *vertices* (no triangle
+fill) and places each mesh by its root *rigid* transform only — per-joint limb articulation
+(POSE_BODY_JOINT) and shape (SHAPE_BETA) still need the SMPL-X LBS model and are not faked here.
+Even so it wires resolved-scene → avatar-asset → rendered-frame end-to-end with edit↔render sync.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from pathlib import Path
 import numpy as np
 
 from ...core.correction.engine import resolve_subject_motion
+from ...core.correction.rotations import axis_angle_to_matrix
 from ...core.ports.render import RenderPass, RenderQuality, RenderResult
 from ...core.scene.assets import RenderAssetKind, RenderAssetRef
 from ...core.scene.camera import CameraTrack
@@ -136,9 +139,22 @@ def _compose_frame(
         hit = np.nonzero(pose.frames == frame)[0]
         if not hit.size:
             continue  # subject absent this frame — nothing to place (no fabrication)
-        world = avatar.canonical + pose.transl[int(hit[0])]
+        world = _place_mesh(avatar.canonical, pose, int(hit[0]))
         _splat_avatar(fb, zbuf, camera, frame, world, avatar, radius)
     return fb
+
+
+def _place_mesh(canonical: np.ndarray, pose: PoseSequence, row: int) -> np.ndarray:
+    """Place the canonical mesh by the resolved root *rigid* transform for frame-row ``row``.
+
+    Applies the resolved root orientation (``global_orient`` axis-angle → matrix) and then the
+    root translation. Because both are read from the *resolved* pose, a ROOT_ORIENTATION **or**
+    ROOT_TRANSLATION edit re-projects into the rendered frame with no avatar rebuild (M2-4,
+    AC-5a). Per-joint body articulation (POSE_BODY_JOINT) and shape (SHAPE_BETA) still need the
+    heavy SMPL-X LBS model — an honest deferred limit, not silently faked here.
+    """
+    rot = axis_angle_to_matrix(pose.global_orient[row])  # (3, 3)
+    return canonical @ rot.T + pose.transl[row]
 
 
 def _resolved_roots(scene: Scene) -> dict[int, PoseSequence]:
