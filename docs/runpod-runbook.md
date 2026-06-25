@@ -12,8 +12,10 @@ handling, and installing every model repo + weight + dataset onto the persistent
 [`runpod-agent-setup.md`](runpod-agent-setup.md) — a self-contained runbook meant to be executed by an
 agent running *on* the box. This file (provisioning) is its prerequisite.
 
-For **live streaming off a pod** (RTSP-over-TCP works, WebRTC does not), see
-[`rtsp-mvp.md`](rtsp-mvp.md) + [`../scripts/rtsp_mvp_setup.sh`](../scripts/rtsp_mvp_setup.sh).
+For **live streaming off a pod** (RTSP-over-TCP and WebRTC-over-ICE-TCP both work; RunPod has no
+public UDP), see [`rtsp-mvp.md`](rtsp-mvp.md) +
+[`../scripts/rtsp_mvp_setup.sh`](../scripts/rtsp_mvp_setup.sh) /
+[`../scripts/webrtc_mvp_setup.sh`](../scripts/webrtc_mvp_setup.sh).
 
 ## 0. One-time local setup
 

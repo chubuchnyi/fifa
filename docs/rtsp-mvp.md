@@ -1,12 +1,14 @@
-# RTSP streaming off a RunPod pod — feasibility + MVP
+# Streaming off a RunPod pod — feasibility + MVP (RTSP + WebRTC)
 
 **Question (2026-06-25):** can we bring up a live stream on a RunPod pod and connect to it
-locally (VLC)? **Answer: yes over RTSP-over-TCP. No for WebRTC within a minimal MVP.**
+from outside? **Answer: yes. RTSP-over-TCP works directly; WebRTC works too — but only over
+ICE-TCP (RunPod exposes no public UDP), bound to a RunPod *symmetric* port. Both validated.**
 
 | transport | works on RunPod? | why |
 |-----------|------------------|-----|
 | **RTSP-over-TCP** | **yes** | media is interleaved on the single RTSP TCP socket, which rides RunPod's Direct-TCP port remap transparently — no separate media ports needed |
-| WebRTC | no (here) | media is UDP/ICE; RunPod does not cleanly expose UDP. Would need TURN-over-TCP — beyond a minimal MVP |
+| **WebRTC (ICE-TCP)** | **yes** | force WebRTC media onto one TCP ICE port (`webrtcLocalTCPAddress`), disable UDP, and bind it to a RunPod **symmetric** port so the advertised candidate's port is correct outside the pod. No TURN needed |
+| WebRTC (native UDP) | no | media is UDP/ICE; RunPod exposes no public UDP, and the naive setup wants a UDP port *range* |
 | RTSP-over-UDP | no | needs separate UDP media ports RunPod won't map |
 
 ## Validated result
@@ -43,12 +45,64 @@ The external probe is exactly the path VLC takes, so a VLC client on the laptop 
    vlc --rtsp-tcp rtsp://<publicIp>:<extPort>/test
    ```
 
+## WebRTC over ICE-TCP (validated 2026-06-25)
+
+WebRTC media normally rides UDP/ICE, which RunPod does not expose. The trick: force **ICE-TCP**
+(all WebRTC media over one TCP port) and bind that port to a RunPod **symmetric** port — request a
+port number `>70000` and RunPod returns a mapping where **external == internal**. MediaMTX advertises
+its ICE candidate as `webrtcAdditionalHosts` + the **local** TCP listen port, so only a symmetric
+port makes the advertised port correct from outside.
+
+`scripts/webrtc_mvp_setup.sh` installs MediaMTX + ffmpeg and writes this config (`$ICE_TCP_PORT` =
+the symmetric port, `$PUBLIC_IP` = the pod IP):
+
+```yaml
+webrtc: yes
+webrtcAddress: :8889            # WHEP signaling (HTTP)
+webrtcEncryption: no
+webrtcLocalUDPAddress: ''       # disable UDP ICE
+webrtcLocalTCPAddress: :10867   # single TCP ICE port == a RunPod symmetric port
+webrtcIPsFromInterfaces: no     # don't leak the container's private IPs
+webrtcAdditionalHosts: ["103.196.86.192"]   # advertise the pod's public IP
+webrtcICEServers2: []           # no STUN/TURN needed
+```
+
+Run it, then open in a **browser**: `http://<publicIp>:<signaling-ext-port>/<path>`
+(this session: SSH 22→10864, signaling 8889→10866, **ICE-TCP 10867→10867 symmetric** →
+`http://103.196.86.192:10866/test`):
+
+```bash
+ssh -i ~/.ssh/id_ed25519_runpod -p <sshExtPort> root@<publicIp> \
+  'PUBLIC_IP=<publicIp> ICE_TCP_PORT=<symmetric port> bash -s' < scripts/webrtc_mvp_setup.sh
+```
+
+**What was empirically verified**
+- MediaMTX log: `[WebRTC] started with listeners on :8889 (TCP/HTTP), :10867 (TCP/ICE)` — no UDP ICE listener.
+- Both ports reachable from a home laptop; `OPTIONS /test/whep → 204`.
+- A real WHEP `POST → 201`, and the SDP answer advertised exactly
+  `a=candidate:… 1 tcp … 103.196.86.192 10867 typ host tcptype passive` — the correct public IP +
+  symmetric port. **This is the proof the mechanism works.**
+
+**Honest caveats (R-6)**
+- The final pixel-level "it plays" needs an **ICE-TCP-capable client = a browser**. CLI clients like
+  `aiortc`/`aioice` do **not** implement client-side ICE-TCP — our probe negotiated fine (`201` +
+  correct candidate) but `ice=failed` at connect. Chrome/Firefox do support ICE-TCP.
+- Forced-TCP drops WebRTC's low-latency edge (head-of-line blocking; MediaMTX warns of a
+  "progressive delay when network is congested"). Fine for a demo; a compromise for hard real-time.
+- Signaling here is plain HTTP (`webrtcEncryption: no`). For anything real, terminate TLS.
+
 ## Gotchas (each one bit us or would have)
 
 - **Force TCP end-to-end.** Server: `MTX_RTSPTRANSPORTS=tcp`. Client: `vlc --rtsp-tcp`. UDP media
   never traverses the pod boundary.
 - **Bind 0.0.0.0**, never 127.0.0.1 (MediaMTX defaults to 0.0.0.0 — fine).
-- **Public port is not stable** across stop/start — always re-read `runtime.ports`.
+- **Public port is not stable** across stop/start — always re-read `runtime.ports`. A **symmetric**
+  port (the `>70000` request) stays symmetric (external == internal) but its actual number still
+  re-rolls each restart, so re-read it and re-write the MediaMTX `webrtcLocalTCPAddress` every time.
+- **Adding ports to an existing pod:** `update-pod` accepts a new `ports` list, but it only takes
+  effect after a **stop → start** (same machine/volume/IP). The in-container `$RUNPOD_TCP_PORT_70000`
+  env var is **not** visible in an SSH shell (it's PID-1 scoped) — read the symmetric port from
+  `runtime.ports` instead.
 - **Teardown:** the pod is named `rtsp-mvp`, deliberately **not** matched by `scripts/pod.sh`'s
   `pitch3d` glob, so `scripts/pod.sh down` will NOT stop it. Stop it explicitly to end billing
   (~$0.69/hr): `mcp__runpod__stop-pod` / `runpodctl pod stop <podId>`.
