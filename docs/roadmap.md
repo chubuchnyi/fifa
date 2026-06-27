@@ -12,6 +12,50 @@ Legend: ✅ exists in this scaffold · 🟡 stub/contract only · ⬜ not starte
 
 ---
 
+## ⚑ Status reset — results over process (2026-06-27)
+
+> **Living tracker / source of truth: [`STATUS.md`](STATUS.md)** — updated & committed every step.
+> This roadmap is the historical build log; `STATUS.md` holds the durable, current state.
+
+**The bar changed.** Despite M0–M3 being marked 🟢, we had never produced and *looked at* a full
+reconstruction of a real clip as a deliverable. The green milestones measure **plumbing** — pure
+cores, contracts, injection seams, tests on **fake** adapters — not a good real-clip result. The
+heavy/generative halves (photoreal pose/ball, avatars, view-synth) are still **injection-seam stubs**.
+
+**The only deliverable that counts now:** from a source broadcast clip, a *realistic novel-view video
+of the same episode* — players like the originals (kit + numbers), the same stadium — **judged by
+eye**. Confirmed target clip: `samples/video/Colombia-1-0-Congo-DR1080p.mp4`.
+
+**Staged bar (do in order):**
+- **v0 — correct geometry (CURRENT FOCUS).** Stable ~22 players, correct world placement/scale,
+  correct poses, virtual cameras that frame the action, pitch lines. Output: a clean *geometric*
+  novel-view video. This is the first "good" result; everything builds on it.
+- **v1 — recognizability.** Team kit colors; numbers (OCR where readable, else roster); simple
+  stadium backdrop.
+- **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
+  `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
+
+Approximations are acceptable for exact numbers / exact stadium, backstopped by **manual Blender
+editing** and **generative prompt-editing** (ADR-0008 LLM-over-MCP).
+
+**The first 300-frame render of the real clip exposed concrete geometry defects** — see
+[`v0-geometry-defects.md`](v0-geometry-defects.md). Tracked as **#202–#205**, root causes now located
+in code:
+- **#202 too many bodies** — ByteTrack fragments; `min_track_frames` defaults to 1 and the
+  fragment-stitch pass (`core/orchestration/continuity.py`) is wired but **off by default**.
+- **#203 depth collapse / wrong scale** — the field homography `H` collapses to its
+  identity/degenerate fallback, so `image_to_world` piles every foot point into one spot / pixel-space.
+- **#204 cameras don't frame** — `action_centroid` averages the collapsed roots (downstream of #203);
+  the render also uses a single static broadcast camera frozen at frame 0.
+- **#205 bare pitch** — pitch-line code exists but the video used a render path that skips it; **goal
+  geometry is genuinely missing**.
+
+**Working rule:** no new milestone flips or breadth expansion until v0 looks right on the real clip.
+The M0–M4 sections below are the historical build log of the *platform* — accurate about plumbing,
+not about result quality.
+
+---
+
 ## M0 — Skeleton (this scaffold)
 
 **Goal:** the hexagonal skeleton compiles, the scene model round-trips, a dry-run runs end-to-end
