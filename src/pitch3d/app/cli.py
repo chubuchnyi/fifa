@@ -69,7 +69,7 @@ def run_dry_run(
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake", env: str = "fake",
     avatar: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
-    viewsynth: str = "fake",
+    viewsynth: str = "fake", amplify_views: int = 0, amplify_deviation: float = 0.3,
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
@@ -170,6 +170,25 @@ def run_dry_run(
     obs_after = app.observe(scene_id, frame=mid_frame, quality="preview")
     _print_observation(obs_after, label="observe:after")
 
+    # 8b) SEAM B (ADR-0007, FR-30): the data amplifier. Synthesize N pseudo-multi-views from the
+    #     single broadcast camera and attach them to the scene; the env/avatar reconstruction below
+    #     consumes them as extra calibrated input (AC-5b). Unlike seam A these are data, not video —
+    #     their frustum_overlap falls as the synthetic camera strays (R-14/R-16). 0 disables.
+    if amplify_views > 0:
+        try:
+            amp = app.amplify_views(scene_id, n_views=amplify_views, deviation=amplify_deviation)
+            print(
+                f"\n== seam B[amplify]: {len(amp)} pseudo-view(s) @ "
+                f"deviation={amplify_deviation} (overlap={amp[0].frustum_overlap:.2f}) "
+                f"→ fed to env/avatar reconstruction"
+            )
+        except (NotImplementedError, RuntimeError) as exc:
+            print(
+                f"\n== seam B[amplify]: skipped — generative backend not wired "
+                f"({type(exc).__name__}); reconstruction proceeds on the mono view (use "
+                f"--viewsynth fake)"
+            )
+
     # 9) AVATAR: build a per-subject render asset, attached to the scene (photoreal stage #1). The
     #    gated heavy path (`--avatar textured` with no backend) is reported, not fatal — honest
     #    about what it can't measure yet (R-6); the golden path still renders/exports.
@@ -182,6 +201,8 @@ def run_dry_run(
                 detail = f"coverage={x['coverage']:.2f} {x['n_measured']}/{x['n_vertices']} verts"
             else:
                 detail = f"ref_crops={x.get('ref_crops', 0)}"
+            if x.get("synth_views"):
+                detail += f", synth_views={x['synth_views']} (seam B)"
             print(f"    subject {r.subject_track_id}: {r.kind.value} — {detail}")
     except (NotImplementedError, RuntimeError) as exc:
         print(
@@ -198,6 +219,8 @@ def run_dry_run(
         f"coverage={x['coverage']:.2f} {x['n_vertices']} verts (all measured)"
         if "coverage" in x else "placeholder marker"
     )
+    if x.get("synth_views"):
+        detail += f", synth_views={x['synth_views']} (seam B)"
     print(f"\n== env[{env}]: {env_ref.kind.value} — {detail} → {out_dir / 'assets'}")
 
     # 10) Render the RESOLVED scene (proposal ⊕ corrections), single source of truth.
@@ -287,10 +310,17 @@ def main(argv: list[str] | None = None) -> int:
                         help="scene observer; 'blender' renders real proxy SCENE_3D, 'cycles' "
                              "renders photoreal SCENE_3D per viewpoint (M2-10/A-8); both need "
                              "$PITCH3D_BLENDER or 'blender' on PATH")
-    parser.add_argument("--viewsynth", default="fake", choices=["fake", "cycles"],
-                        help="seam-A view synthesizer; 'cycles' re-renders the reconstructed 3D "
-                             "scene at the orbit cameras (non-generative, M2-10/A-9, needs "
-                             "$PITCH3D_BLENDER); 'fake' is the gated generative stand-in (R-8)")
+    parser.add_argument("--viewsynth", default="fake", choices=["fake", "cycles", "generative"],
+                        help="view synthesizer (both ADR-0007 seams); 'cycles' re-renders the "
+                             "reconstructed 3D scene at the orbit cameras (non-generative, "
+                             "M2-10/A-9, needs $PITCH3D_BLENDER); 'fake' is the deterministic "
+                             "stand-in; 'generative' is the real diffusion backend, gated (R-8)")
+    parser.add_argument("--amplify-views", type=int, default=0, metavar="N",
+                        help="seam-B data amplifier: synthesize N pseudo-multi-views from the mono "
+                             "clip and feed them to env/avatar reconstruction (0 disables; AC-5b)")
+    parser.add_argument("--amplify-deviation", type=float, default=0.3, metavar="D",
+                        help="seam-B camera offset bound D in [0,1]; frustum overlap falls as it "
+                             "grows (R-14/R-16). Only used when --amplify-views > 0")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
                         help="inference device for real perception adapters "
                              "(default: cpu, the local concept-validation profile)")
@@ -339,6 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         export=args.export,
         observer=args.observer,
         viewsynth=args.viewsynth,
+        amplify_views=args.amplify_views,
+        amplify_deviation=args.amplify_deviation,
         device=args.device,
         detector_weights=args.detector_weights,
         detector_classes=args.detector_classes,

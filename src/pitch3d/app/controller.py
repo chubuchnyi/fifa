@@ -46,7 +46,7 @@ from ..core.ports.export import ExportFormat, ExportResult
 from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
-from ..core.scene.assets import RenderAssetRef, SynthViewRef
+from ..core.scene.assets import RenderAssetRef, SynthViewRef, SynthViewSeam
 from ..core.scene.camera import CameraTrack
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.review import AttentionItem, attention_list
@@ -305,13 +305,22 @@ class Application:
         crops = ref_crops or {}
         camera = resolved.camera or self._static_camera(resolved)
         clip = self._scene_clip.get(scene_id)
-        refs = [
-            self.ports.avatar.build(
-                subject, crops.get(subject.track_id, []), camera=camera, clip=clip
-            )
-            for subject in resolved.subjects
-        ]
         stored = self._scenes[scene_id]
+        # Seam-B (ADR-0007, FR-30/31): feed amplified pseudo-multi-views (shared across subjects) +
+        # this subject's inpainted unseen sides into the builder as extra viewpoints (AC-5b).
+        amplified = [v for v in stored.synth_views if v.seam is SynthViewSeam.B_AMPLIFY]
+        refs = []
+        for subject in resolved.subjects:
+            inpaint = [
+                v for v in stored.synth_views
+                if v.seam is SynthViewSeam.B_INPAINT and v.subject_track_id == subject.track_id
+            ]
+            refs.append(
+                self.ports.avatar.build(
+                    subject, crops.get(subject.track_id, []),
+                    synth_views=(amplified + inpaint) or None, camera=camera, clip=clip,
+                )
+            )
         new_ids = {ref.id for ref in refs}
         stored.render_assets = [a for a in stored.render_assets if a.id not in new_ids] + refs
         return refs
@@ -329,8 +338,11 @@ class Application:
         resolved = self.resolved(scene_id)
         clip = self._scene_clip[scene_id]
         camera = resolved.camera or self._static_camera(resolved)
-        ref = self.ports.env.reconstruct(clip, camera)
         stored = self._scenes[scene_id]
+        # Seam-B (ADR-0007, FR-30): feed amplified pseudo-multi-views into the reconstructor as
+        # extra calibrated viewpoints (AC-5b); inpaint views are subject-only, not environment.
+        amplified = [v for v in stored.synth_views if v.seam is SynthViewSeam.B_AMPLIFY]
+        ref = self.ports.env.reconstruct(clip, camera, synth_views=amplified or None)
         stored.render_assets = [a for a in stored.render_assets if a.id != ref.id] + [ref]
         return ref
 
@@ -394,6 +406,54 @@ class Application:
         stored.synth_views = [v for v in stored.synth_views if v.id != ref.id] + [ref]
         return ref
 
+    # --- ViewSynthesizer seam B (data amplifier — feeds reconstruction) --------
+    def amplify_views(
+        self, scene_id: str, *, n_views: int = 4, deviation: float = 0.3
+    ) -> list[SynthViewRef]:
+        """Synthesize ``n_views`` pseudo-multi-views from the mono clip (ADR-0007 seam B, FR-30).
+
+        Asks the :class:`ViewSynthesizer` for prescribed off-axis viewpoints around the source
+        camera (``deviation`` ∈ [0,1] bounds how far they stray; ``frustum_overlap`` falls with it,
+        R-14/R-16). Unlike seam A these are **data, not eye-candy**: they are attached to the stored
+        scene's ``synth_views`` so :meth:`build_env`/:meth:`build_avatars` feed them to the
+        reconstructor as extra calibrated input (AC-5b). Content-addressed + cached (ADR-0004) on
+        the clip and the orbit, so a re-call with the same bounds reuses the synthesized set.
+        """
+        self.get_scene(scene_id)  # validate existence
+        clip = self._scene_clip[scene_id]
+        key = self.ports.cache.key_for(
+            "viewsynth_amplify",
+            clip.source_id,
+            {"n_views": int(n_views), "deviation": float(deviation)},
+            self.ports.viewsynth.info().name,
+        )
+        refs = self.ports.cache.get(key)
+        if refs is None:
+            refs = self.ports.viewsynth.amplify(clip, n_views, deviation)
+            self.ports.cache.put(key, refs)
+        stored = self._scenes[scene_id]
+        new_ids = {r.id for r in refs}
+        stored.synth_views = [v for v in stored.synth_views if v.id not in new_ids] + list(refs)
+        return refs
+
+    def inpaint_subject(
+        self, scene_id: str, track_id: int, *, ref_crops: Sequence[CropRef] | None = None
+    ) -> SynthViewRef:
+        """Synthesize subject ``track_id``'s unseen sides from its crops (ADR-0007 seam B, FR-31).
+
+        Asks the :class:`ViewSynthesizer` to hallucinate the occluded/back side of one subject from
+        the broadcast crops it *was* seen in (a placeholder crop stands in until the pipeline
+        sources real ones). The result is tagged ``B_INPAINT`` for that ``track_id`` and attached
+        to the stored scene, so :meth:`build_avatars` feeds it to *that* subject's avatar build
+        only — plausible, not exact (R-16), never relied on for analysing critical positions.
+        """
+        self.get_scene(scene_id)  # validate existence
+        crops = list(ref_crops) if ref_crops is not None else [self._placeholder_crop(track_id)]
+        ref = self.ports.viewsynth.inpaint_occlusions(crops)
+        stored = self._scenes[scene_id]
+        stored.synth_views = [v for v in stored.synth_views if v.id != ref.id] + [ref]
+        return ref
+
     # --- internals ------------------------------------------------------------
     def _corr_id(self) -> str:
         return f"corr-{self._next('correction')}"
@@ -401,6 +461,10 @@ class Application:
     def _add(self, scene_id: str, corr: Correction) -> Correction:
         self._scenes[scene_id].corrections.append(corr)
         return corr
+
+    def _placeholder_crop(self, track_id: int) -> CropRef:
+        """A zero stand-in crop for a subject's pixels until the pipeline sources real ones."""
+        return CropRef(subject_track_id=track_id, uri="", frame=0, bbox_xyxy=np.zeros(4))
 
     def _scene_frames(self, scene: Scene) -> np.ndarray:
         if scene.subjects:

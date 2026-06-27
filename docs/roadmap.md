@@ -447,8 +447,8 @@ in sync, so M2 is 🟢. Next: M3.**
 |---|---|
 | M3-1 Per-subject Gaussian avatars (#3) selectively — candidates: feed-forward Gaussian LRMs (**IDOL** <1 s, **LHM**, **PF-LHM** pose-free/multi-image) for the bulk; per-subject **GaussianAvatar/GART** for hero shots. All flagged *synthesized* (R-6). | `adapters/models` (`AvatarBuilder`) |
 | M3-2 Constraint-guided re-fit hardened (PromptHMR-class); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments, validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
-| **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
-| **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
+| ✅ **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
+| ✅ **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
 | M3-5 Confidence map + "needs attention" prioritization UI | `adapters/blender`, `core/scene` |
 | M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
 | M3-7 Web export (three.js / R3F) | `adapters/export` |
@@ -482,6 +482,28 @@ samples each); the generated viewer JS passes `node --check`. **Tests:** 6 new (
 + the supports-matrix updated; suite **486 passed / 5 skipped**. **Honest scope (R-6):** markers, not
 SMPL-X meshes — the full textured-mesh web viewer rides the gated `.glb` path (`export` extra) in a
 later increment; the WebGL render itself isn't headlessly testable here (open `index.html` to view).
+
+**Progress — M3-3/M3-4 ViewSynthesizer seam B wired E2E (2026-06-27):** the **headline M3 exit
+(AC-5b)**. The seam-B contract was *defined* in M0 (`ViewSynthesizer.amplify` /
+`inpaint_occlusions`, `SynthViewRef`, and `synth_views=` params already on `EnvReconstructor` /
+`AvatarBuilder`); this increment makes it **flow** — two controller use-cases plus the orchestration
+that routes the synthesized views into reconstruction. `Application.amplify_views(scene_id, n_views,
+deviation)` turns the mono broadcast camera into N pseudo-multi-views (FR-30), content-addressed +
+cached (ADR-0004); `inpaint_subject(scene_id, track_id)` hallucinates one subject's unseen sides
+(FR-31). Both attach to the scene's `synth_views`. **The wiring that closes AC-5b:** `build_env`
+feeds the scene-shared `B_AMPLIFY` views to the reconstructor, and `build_avatars` feeds each subject
+the shared amplify views **plus that subject's own `B_INPAINT`** view — and "accepted by
+reconstruction" is now **observable**, the fakes record how many views they consumed
+(`extra["synth_views"]`). **Frustum overlap falls as the synthetic camera strays** (R-14/R-16), so a
+caller can still gate trust. **R-8 honesty:** the real diffusion backend (`GenerativeViewSynthesizer`,
+`--viewsynth generative`) is importable but every method raises an actionable `NotImplementedError`
+pointing at the `viewsynth` extra + the fake — it never silently runs; the dry-run skips it
+gracefully and reconstruction proceeds on the mono view. **E2E proof:** `--amplify-views 3
+--amplify-deviation 0.35` ran the golden path → both avatars **and** the env report `synth_views=3
+(seam B)`; `--viewsynth generative` skips honestly (exit 0). **Tests:** 15 new
+(`test_viewsynth_seamb.py`) — amplify cardinality/overlap, cache hit + param-distinct entries,
+inpaint per-subject routing, the AC-5b "consumed-by-reconstruction" assertions, and the R-8 gate;
+suite **503 passed / 12 skipped**, no GPU/diffusion (**AC-7**).
 
 ---
 

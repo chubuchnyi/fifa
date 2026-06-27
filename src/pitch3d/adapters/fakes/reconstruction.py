@@ -86,5 +86,8 @@ class FakeAvatarBuilder(AvatarBuilder):
             uri=uri,
             model=self.info(),
             subject_track_id=subject.track_id,
-            extra={"ref_crops": len(ref_crops)},
+            extra={
+                "ref_crops": len(ref_crops),
+                "synth_views": 0 if synth_views is None else len(synth_views),
+            },
         )

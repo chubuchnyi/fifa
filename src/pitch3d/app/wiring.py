@@ -112,11 +112,12 @@ def default_ports(
     ``observer``: ``"fake"`` (stdlib PNGs), ``"blender"`` (real proxy ``SCENE_3D`` via a
     ``blender --background`` subprocess) or ``"cycles"`` (M2-10/A-8: photoreal ``SCENE_3D`` — the
     resolved measured scene Cycles-rendered per viewpoint; needs ``$PITCH3D_BLENDER``).
-    ``viewsynth``: ``"fake"`` (the gated generative seam-A/B stand-in) or ``"cycles"`` (M2-10/A-9:
-    the non-generative seam-A backend that re-renders the reconstructed 3D scene at the orbit
-    cameras; ``Application.render_orbit`` then yields a photoreal *video, not editable*; needs
-    ``$PITCH3D_BLENDER``). The real model adapters need their extra (+ weights/GPU) at *call* time;
-    importing them stays light.
+    ``viewsynth`` (both ADR-0007 seams): ``"fake"`` (the deterministic seam-A/B stand-in),
+    ``"cycles"`` (M2-10/A-9: the non-generative seam-A backend that re-renders the reconstructed 3D
+    scene at the orbit cameras; ``Application.render_orbit`` then yields a photoreal *video, not
+    editable*; needs ``$PITCH3D_BLENDER``), or ``"generative"`` (the real diffusion backend —
+    importable but every method raises until the ``viewsynth`` extra is wired, R-8). The real model
+    adapters need their extra (+ weights/GPU) at *call* time; importing them stays light.
 
     ``device`` (default ``"cpu"``, the local concept-validation profile) is forwarded to every
     real perception adapter; pass ``"cuda"`` where a GPU exists. Each adapter's own dataclass
@@ -234,18 +235,25 @@ def default_ports(
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 
     out = Path(out_dir)
-    # One synthesizer instance backs both the seam-A render selector and the render_orbit use-case
-    # (so they share a backend). 'fake' is the gated generative stand-in; 'cycles' is the
+    # One synthesizer instance backs both seams (seam-A render selector + render_orbit, and seam-B
+    # amplify/inpaint). 'fake' is the deterministic stand-in (both seams, no deps); 'cycles' is the
     # non-generative seam-A backend that re-renders the reconstructed 3D scene at the orbit cameras
-    # (A-9). Real *generative* synths stay gated (R-8, ADR-0007).
+    # (A-9); 'generative' is the real diffusion backend — importable but every method raises until
+    # the `viewsynth` extra is wired (R-8, ADR-0007), so it never silently runs.
     if viewsynth == "fake":
         vs: ViewSynthesizer = FakeViewSynthesizer(out_dir=out / "synth")
     elif viewsynth == "cycles":
         from ..adapters.render import CyclesViewSynthesizer
 
         vs = CyclesViewSynthesizer(out_dir=out / "synth")
+    elif viewsynth == "generative":
+        from ..adapters.viewsynth import GenerativeViewSynthesizer
+
+        vs = GenerativeViewSynthesizer()
     else:
-        raise ValueError(f"unknown viewsynth {viewsynth!r}; expected 'fake' or 'cycles'")
+        raise ValueError(
+            f"unknown viewsynth {viewsynth!r}; expected 'fake', 'cycles' or 'generative'"
+        )
     if render == "fake":
         rnd: RenderPass = FakeRenderPass(out_dir=out / "render")
     elif render == "overlay":
