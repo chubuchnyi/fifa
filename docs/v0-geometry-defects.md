@@ -41,6 +41,9 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   (`scene.json` exists at `$OUT/export/scene.json`; read `len(scene.subjects)`). Only if it is still
   far above ~22 do we tune stitch gates (`max_gap`/`max_center_dist`) or add ByteTrack re-id — *after*
   seeing the number, never before.
+- **VALIDATED 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run → `out/val/export/scene.json`):**
+  `len(scene.subjects) = **20**` (track_ids 1–18, 20, 31). Target ~22; the "swarm of dozens that grows
+  over the clip" is **gone**. No further stitch/re-id tuning needed for v0. #202 CLOSED.
 
 ## D2 — Virtual cameras don't frame the action  (task #204)
 - **Symptom:** broadcast & goal cameras render ~95 % empty field + sky; players are a faint speck
@@ -55,6 +58,12 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   (`viewpoints.py:49-52`), and there is no distinct "goal" camera in the Cycles path.
 - **Fix:** mostly resolves once D3 is fixed (centroid becomes correct); then optionally a per-frame
   centroid-tracking camera instead of the frozen one.
+- **VALIDATED 2026-06-27 (pod `zueopp6nzozxb7`, `out/val/video/{broadcast,top}.mp4`):** with D3 fixed,
+  the **broadcast** camera frames the whole pitch at a realistic oblique angle — players fill the
+  action third (not a faint horizon speck), sky above, pitch lines visible; the **top** camera frames
+  the full 105×68 m. The video render's cameras come from `blender_animate.py`'s `ctr`/`span` (pitch
+  bounds folded in by #205), so no separate code change was needed. No per-frame tracking camera needed
+  for v0. #204 CLOSED.
 
 ## D3 — Depth collapse / wrong world scale  (task #203)
 - **Symptom:** sideline shows bodies on a thin horizon line; top shows a tight blob — not spread across
@@ -82,6 +91,12 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   it also drives D2/#204 (cameras frame whatever the placement says). **VALIDATION (pod):** re-run the
   reconstruction (real calib now default), log `image_to_world` of a known foot point, and confirm the
   subjects spread across ~105×68 m in `scene.json` — only then is #203 closed.
+- **VALIDATED 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run; run echoed `calibration: REAL PnLCalib`):**
+  subject-root world spread from `out/val/export/scene.json` (852 root samples across 20 subjects) =
+  **X (length) 34.1 m** (−50.1 → −16.0), **Y (width) 40.0 m** (−29.4 → +10.7), **Z (pelvis) 0.69–1.01 m**.
+  The fake-calib **22×7 m collapse is gone**: the y-axis (width) is now a real 40 m spread, not the ~7 m
+  "thin horizon line", and pelvis heights are physically correct standing heights. Players cluster in one
+  half (X all negative) — consistent with localized broadcast action, not a scale bug. #203 CLOSED.
 
 ## D4 — Bare environment  (task #205)
 - **Symptom:** green plane + grey sky; no pitch lines / markings / goals.
@@ -104,16 +119,22 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   (bare-plane fallback if `pitch.npz` absent). 3 new tests (12 total in `test_pitch_geometry.py`).
   **Validated locally** with the Blender binary: top view shows the full markings, goal close-up shows
   correct posts+crossbar. Will appear automatically in the batched pod render.
+- **VALIDATED 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run):** `anim_export` logged
+  `pitch: 2848 line-tris + 72 goal-tris (105x68 m) -> pitch.npz` (72 goal-tris = 6 boxes × 12, exactly
+  `goal_frame_geometry`); the pod render (`out/val/video/{broadcast,top}.mp4`) shows the full markings
+  (both penalty boxes, 6-yard boxes, centre circle + spot, penalty arcs, halfway line, touchlines) plus
+  goal frames on the goal lines. The "specks on bare grass" defect is gone. #205 CLOSED.
 
 ---
 
-## Status / next
-- Recorded as tasks **#202–#205**; root causes located in code (above).
-- **Cheapest first win:** #202 — a config flip (stitch on + `min_track_frames`↑); local, unit-testable,
-  no GPU.
-- **Deepest root:** #203 (homography) — fixing it also fixes #204; needs verifying `H` on the real clip
-  (likely a pod re-run with calib logging).
-- **#205** is partly a render-path choice (use the Cycles pass, which draws pitch lines) + new goal
-  geometry.
-- A single GPU re-run on the pod validates v0 end-to-end after the fixes, and must save `scene.json` so
-  D1's count becomes measurable.
+## Status / next — ALL FOUR CLOSED (v0 geometry ACHIEVED 2026-06-27)
+- **#202 / D1 — CLOSED:** body count = **20** (`out/val/export/scene.json`), no swarm.
+- **#203 / D3 — CLOSED:** root spread **34 m (length) × 40 m (width)**, pelvis 0.69–1.01 m; real PnLCalib
+  default; the fake-calib 22×7 m collapse is gone.
+- **#204 / D2 — CLOSED:** broadcast + top cameras frame the action (`out/val/video/*.mp4`).
+- **#205 / D4 — CLOSED:** full pitch markings + goal frames render (`pitch: 2848 line-tris + 72 goal-tris`).
+- **Validation run:** ONE batched pod pass (pod `zueopp6nzozxb7`, 48 frames, real RF-DETR · ByteTrack ·
+  PnLCalib · SMPLest-X · WASB), reused for the cheap top/broadcast re-render; pod STOPPED after. Local
+  copies: `/tmp/val_video/{broadcast,top}.mp4`, `/tmp/val_scene.json`.
+- **NEXT BAR → v1 (recognizability):** team kit colours (teams already split A/B), shirt numbers
+  (OCR/roster), simple stadium backdrop.

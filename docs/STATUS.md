@@ -19,8 +19,8 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v0 = correct GEOMETRY.** Working the v0 punch-list (#202→#205) in ID order.
-- **NEXT ACTION:** ALL FOUR v0 defects now have LANDED LOCAL fixes (no more blind local work): #202 stitch-on default + singleton drop; #203 real PnLCalib is the default calib (root was the `fake` 30 m orthographic toy, proven numerically); #204 follows from #203+#205 (the video cameras already frame the full pitch); #205 measured pitch lines + goal frames render (Blender-validated locally). 560 tests pass. The ONLY remaining step is **ONE batched pod run to VALIDATE end-to-end**: confirm the pod has `/workspace/repos/PnLCalib` + weights, sync the pod repo to pushed HEAD, re-render the real clip (real calib now default, stitch on, pitch/goals), **log `image_to_world` of a known foot point**, save `scene.json` (so #202 body count + #203 ~105×68 m spread + #204 framing + #205 markings are all eye-judgeable), pull the mp4s, judge by eye. **STOP the pod when done.**
+- **Current focus:** **v0 = correct GEOMETRY is DONE (validated 2026-06-27).** Next bar = **v1 (recognizability)**: kit colours, shirt numbers, simple stadium.
+- **NEXT ACTION:** **v0 = correct GEOMETRY is ACHIEVED & VALIDATED** (pod `zueopp6nzozxb7`, 48f real run, now STOPPED). All four defects closed: #202 body count = **20** (was a swarm); #203 root spread = **34×40 m** real-scale (fake-calib 22×7 m collapse gone, real PnLCalib default); #204 broadcast/top cameras frame the action; #205 pitch lines + goal frames render. Eye-judged from `out/val/video/{broadcast,top}.mp4` (local copies `/tmp/val_video/`, scene `/tmp/val_scene.json`). **NEXT BAR → v1 (recognizability):** team kit colours (teams already split A/B in the render), shirt numbers (OCR where readable, else roster), simple stadium backdrop. Pick the first v1 sub-task and scope it.
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -36,11 +36,11 @@ the stadium is realistic and the same as the source. **Judged by eye.**
 
 ## 2. Staged bar (do in order; gate each on eye-judgement)
 
-- [ ] **v0 — correct GEOMETRY (CURRENT FOCUS).** Stable ~22 players, correct world placement/scale,
-  correct poses, virtual cameras that frame the action, pitch with lines. Output: a clean *geometric*
-  novel-view video. First "good" result; everything builds on it.
-- [ ] **v1 — recognizability.** Team kit colors; numbers (OCR where readable, else roster); simple
-  stadium backdrop.
+- [x] **v0 — correct GEOMETRY (ACHIEVED 2026-06-27).** Stable ~22 players (measured **20**), correct
+  world placement/scale (root spread **34×40 m**), poses, virtual cameras that frame the action, pitch
+  with lines + goals. Validated end-to-end on the pod (`out/val/`); see §6. First "good" result.
+- [ ] **v1 — recognizability (CURRENT FOCUS).** Team kit colors (teams already split A/B in the render);
+  numbers (OCR where readable, else roster); simple stadium backdrop.
 - [ ] **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
   `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
 
@@ -54,14 +54,15 @@ cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body
 
 | ID | Defect | Status | GPU? | Root cause (file:line) | Next step |
 |----|--------|--------|------|------------------------|-----------|
-| #202 | Too many bodies (track-ID fragmentation); swarm grows over clip | **LOCAL FIX LANDED — validate on pod** | done(local) / pod(validate) | was: stitch OFF unless flag; tracker `min_track_frames=1` keeps 1-frame blips | DONE locally: stitch now ON by default everywhere (CLI `--no-stitch` opt-out; `pod_real_e2e.sh`/`pod_make_video.sh` default on; `wiring.py` real ByteTrack `min_track_frames=2` drops un-stitchable singletons). **KEY:** stitch is PIXEL-space → independent of #203; `demo_video.sh` ALREADY defaulted stitch on, so the swarm persisted DESPITE stitch → the body-count fix needs MEASUREMENT, not blind tuning. Validate: pod re-run logs `len(scene.subjects)` from `scene.json`; only THEN tune stitch gates / add ByteTrack re-id if still high. |
-| #203 | Depth collapse / wrong world scale (players not spread across pitch) | **ROOT FOUND + FIX LANDED (local) — validate on pod** | yes (validate) | NOT the identity fallback: the default render used `--calibrator fake` = `FakeFieldCalibrator` (`adapters/fakes/perception.py:125`), a 30 m **top-down orthographic toy** `H` with NO perspective. Numeric proof: whole frame → 30×17 m world box; realistic feet → 22.7×7.3 m; the ~7 m y-axis is the "thin horizon" blob. Real PnLCalib was wired (`adapters/models/pnlcalib_backend.py`) but opt-in & OFF. | DONE locally: real PnLCalib is now the **default** render calib (`pod_real_e2e.sh` defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`; `demo_video.sh` `REAL_CALIB=1`, opt out `--no-real-calib`); graceful proxy fallback if the staged repo is absent. **Deepest root — also fixes #204.** Validate on pod: log `image_to_world` of a foot pt + confirm `scene.json` subjects spread ~105×68 m. |
-| #204 | Virtual cameras don't frame the action (players tiny at horizon) | **likely RESOLVED by #203 + #205 — validate on pod** | yes (validate) | the VIDEO render (`blender_animate.py`) derives its OWN cameras from `ctr`/`span` of the loaded geometry — NOT `viewpoints.py`/`controller.py` (those drive the *in-pipeline* render, a different path). With #203's collapsed 22×7 m blob + a bare plane, the cams framed empty grass. | #205 already folds the FULL pitch bounds into `ctr`/`span` (cams now frame the whole 105×68 m field); #203 puts bodies correctly on that field. Should resolve once both land — confirm by eye on the pod render; only then consider a per-frame action-tracking camera. |
-| #205 | Bare pitch (no lines / no goals) | **CODE DONE + render-validated locally** | no (Blender CPU) | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE: added measured `goal_frame_geometry()` (2 posts + crossbar, Laws dims) to pure core `core/scene/pitch.py` next to existing `pitch_line_ribbons()`; `anim_export.py` now writes `pitch.npz` (line ribbons + goal frames in world m); `blender_animate.py` loads it, folds pitch bounds into camera framing, and builds `pitch_lines` + `goals` meshes (bare-plane fallback if absent). Validated LOCALLY with the Blender binary: top view shows full markings, goal close-up shows correct posts+crossbar. Appears automatically in the batched pod render. |
+| #202 | Too many bodies (track-ID fragmentation); swarm grows over clip | **VALIDATED on pod ✓ (20 subjects)** | done | was: stitch OFF unless flag; tracker `min_track_frames=1` keeps 1-frame blips | DONE + VALIDATED 2026-06-27: stitch ON by default everywhere + `wiring.py` real ByteTrack `min_track_frames=2`. **Pod 48f real run (`out/val/export/scene.json`) → `len(scene.subjects) = 20`** (vs the old swarm of dozens; target ~22). The "swarm grows over the clip" defect is gone. **KEY:** stitch is PIXEL-space → independent of #203. No further tuning needed for v0. |
+| #203 | Depth collapse / wrong world scale (players not spread across pitch) | **VALIDATED on pod ✓ (34×40 m spread)** | done | NOT the identity fallback: the default render used `--calibrator fake` = `FakeFieldCalibrator` (`adapters/fakes/perception.py:125`), a 30 m **top-down orthographic toy** `H` with NO perspective. Numeric proof: whole frame → 30×17 m world box; realistic feet → 22.7×7.3 m; the ~7 m y-axis is the "thin horizon" blob. Real PnLCalib was wired (`adapters/models/pnlcalib_backend.py`) but opt-in & OFF. | DONE + VALIDATED 2026-06-27: real PnLCalib is now the **default** render calib (`pod_real_e2e.sh` defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`; run echoed `calibration: REAL PnLCalib`). **Pod 48f scene.json root spread: X (length) 34.1 m, Y (width) 40.0 m, Z (pelvis) 0.69–1.01 m** — i.e. real-scale spread within the touchlines, NOT the fake-calib 22×7 m collapse; the ~7 m "thin horizon" is gone. Players cluster in one half (localized broadcast action), as expected. **Deepest root — also fixes #204.** |
+| #204 | Virtual cameras don't frame the action (players tiny at horizon) | **VALIDATED on pod ✓ (broadcast frames the pitch)** | done | the VIDEO render (`blender_animate.py`) derives its OWN cameras from `ctr`/`span` of the loaded geometry — NOT `viewpoints.py`/`controller.py` (those drive the *in-pipeline* render, a different path). With #203's collapsed 22×7 m blob + a bare plane, the cams framed empty grass. | DONE + VALIDATED 2026-06-27: #205 folds the FULL pitch bounds into `ctr`/`span` + #203 puts bodies on the field. **Pod render eye-check (`out/val/video/{broadcast,top}.mp4`): broadcast camera frames the whole pitch at a realistic oblique angle (players fill the action third, not a horizon speck); top camera frames the full 105×68 m.** No per-frame tracking camera needed for v0. |
+| #205 | Bare pitch (no lines / no goals) | **VALIDATED on pod ✓ (lines + goals render)** | done | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE + VALIDATED 2026-06-27: measured `goal_frame_geometry()` + `pitch_line_ribbons()` in pure core; `anim_export.py` writes `pitch.npz`, `blender_animate.py` builds `pitch_lines` + `goals`. **Pod 48f run: `anim_export` logged `pitch: 2848 line-tris + 72 goal-tris (105x68 m)`; render eye-check confirms full markings (boxes, circle, arcs, halfway) + goal frames on both views.** |
 
-**Validation:** after the local fixes (#202, #205-code), ONE GPU pod re-run renders v0 end-to-end; it
-**must save `scene.json`** (so #202's body count becomes a measured number) and we judge by eye. Batch
-GPU-needing work (#203 diagnosis, #204, #205 render) into that single pod session to save cost.
+**Validation — DONE 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run, `out/val/`):** all four v0 defects
+validated end-to-end. #202 body count = **20** (scene.json); #203 root spread = **34×40 m** real-scale;
+#204 broadcast/top cameras frame the action; #205 pitch lines + goals render. Numbers from `scene.json`,
+eye-judged from `out/val/video/{broadcast,top}.mp4`. Pod STOPPED. **v0 = correct GEOMETRY: ACHIEVED.**
 
 ---
 
@@ -129,6 +130,17 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-06-27** — **v0 = correct GEOMETRY: ACHIEVED & VALIDATED end-to-end on the pod.** ONE batched
+  48-frame real run (pod `zueopp6nzozxb7`: RF-DETR · ByteTrack · real PnLCalib · SMPLest-X · WASB →
+  `out/val/export/scene.json`, then a cheap top/broadcast re-render via `REUSE_SCENE=1`). Measured: **#202
+  body count = 20** (`len(scene.subjects)`; was a swarm of dozens) — CLOSED. **#203 root spread = 34 m
+  (length) × 40 m (width)**, pelvis 0.69–1.01 m, run echoed `calibration: REAL PnLCalib` (the fake-calib
+  22×7 m collapse is gone) — CLOSED. **#204** broadcast + top cameras frame the action (no horizon speck)
+  — CLOSED. **#205** `anim_export` logged `pitch: 2848 line-tris + 72 goal-tris (105x68 m)`; render shows
+  full markings + goal frames — CLOSED. Eye-judged from `out/val/video/{broadcast,top}.mp4` (local:
+  `/tmp/val_video/`, scene `/tmp/val_scene.json`). Pod STOPPED ($0.012/hr storage only). All four v0
+  tasks #202–#205 complete. **NEXT BAR → v1 (recognizability):** kit colours (teams already A/B), shirt
+  numbers, simple stadium.
 - **2026-06-27** — **#203 root found locally + fix landed (no pod needed for diagnosis).** Traced the
   depth collapse to the *calibrator*, not a degenerate homography: the default render path uses
   `--calibrator fake` (`cli.py` default) = `FakeFieldCalibrator`, a **top-down orthographic toy** with
