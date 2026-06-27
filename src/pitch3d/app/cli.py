@@ -292,10 +292,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="environment reconstructor; 'pitch' = measured calibration-anchored "
                              "pitch markings as a vertex-coloured PLY (M2-1, rendered by --render "
                              "splat). 3DGS/NeRF/generative stadium stay gated (R-8)")
-    parser.add_argument("--avatar", default="fake", choices=["fake", "textured"],
+    parser.add_argument("--avatar", default="fake", choices=["fake", "textured", "gaussian"],
                         help="avatar builder; 'textured' = measured pixel-projection onto the "
-                             "tracked SMPL-X (M2-0 primary). The projection/sampling half is real; "
-                             "the SMPL-X-meshing heavy half is an unwired stub (use 'fake')")
+                             "tracked SMPL-X (M2-0 primary), 'gaussian' = measured 3DGS splats "
+                             "anchored per vertex (M3-1 #3). Both measured halves are real + "
+                             "GPU-free; the SMPL-X meshing / generative refiner heavy halves are "
+                             "gated (inject --avatar-backend or use 'fake')")
     parser.add_argument("--render", default="fake",
                         choices=["fake", "overlay", "splat", "cycles", "orbit"],
                         help="render pass; 'overlay' reprojects PNGs, 'splat' rasterises the "
@@ -343,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                              "requires --tracker bytetrack")
     parser.add_argument("--avatar-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own AvatarMeshBackend (SMPL-X meshing + frame "
-                             "sampling); requires --avatar textured")
+                             "sampling); requires --avatar textured or gaussian")
     parser.add_argument("--stitch", action="store_true",
                         help="re-link fragmented tracklets between TRACK and POSE so "
                              "occluded players don't 'appear from nowhere' (off by default)")

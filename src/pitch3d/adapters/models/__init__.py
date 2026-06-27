@@ -21,6 +21,11 @@ from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .avatar import AvatarMeshBackend, SmplxTextureBackend, TexturedSmplxAvatarBuilder
 from .ball import TrackNetBackend, TrackNetBallTracker
+from .gaussian_avatar import (
+    FeedForwardGaussianRefiner,
+    GaussianAvatarBuilder,
+    GaussianRefiner,
+)
 from .env import MeasuredPitchEnvReconstructor
 from .calibration import (
     CameraModuleFieldCalibrator,
@@ -78,8 +83,11 @@ __all__ = [
     "ByteTrackBackend",
     "ByteTrackTracker",
     "CameraModuleFieldCalibrator",
+    "FeedForwardGaussianRefiner",
     "GVHMRBackend",
     "GVHMRPoseEstimator",
+    "GaussianAvatarBuilder",
+    "GaussianRefiner",
     "KeypointFieldCalibrator",
     "MeasuredPitchEnvReconstructor",
     "PitchKeypointBackend",

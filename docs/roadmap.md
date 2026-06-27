@@ -445,7 +445,7 @@ in sync, so M2 is 🟢. Next: M3.**
 
 | Ticket | Package |
 |---|---|
-| M3-1 Per-subject Gaussian avatars (#3) selectively — candidates: feed-forward Gaussian LRMs (**IDOL** <1 s, **LHM**, **PF-LHM** pose-free/multi-image) for the bulk; per-subject **GaussianAvatar/GART** for hero shots. All flagged *synthesized* (R-6). | `adapters/models` (`AvatarBuilder`) |
+| ✅ **M3-1 Per-subject Gaussian avatars (#3)** selectively — candidates: feed-forward Gaussian LRMs (**IDOL** <1 s, **LHM**, **PF-LHM** pose-free/multi-image) for the bulk; per-subject **GaussianAvatar/GART** for hero shots. All flagged *synthesized* (R-6). | `adapters/models` (`AvatarBuilder`) |
 | M3-2 Constraint-guided re-fit hardened (PromptHMR-class); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments, validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
 | ✅ **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
 | ✅ **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
@@ -523,6 +523,28 @@ ran the golden path → the `ui` observation present, "Needs attention (2, highe
 `scene-1_ui.png` artifact written. **Tests:** 8 new (`test_attention_ui.py`) — heatmap red-pull +
 honest-background + ball row, panel rank/colour + all-clear bar, valid-PNG composite, observer
 wiring (bytes match the renderer) + headless placeholder; suite **511 passed / 12 skipped** (**AC-7**).
+
+**Progress — M3-1 per-subject Gaussian (3DGS) avatar wired E2E (2026-06-27):** strategy #3, built
+the **measured-over-generative** way (M2-0) the textured builder (#1) is. New
+`adapters/models/gaussian_avatar.py` **anchors one 3D Gaussian on every measured SMPL-X vertex** —
+centre from the canonical mesh, colour from the player's real broadcast pixels (it **reuses the
+exact measured sampling** the textured builder uses, now extracted as `measured_vertex_texture`),
+scale from local surface spacing, identity rotation. A vertex the cameras never saw stays
+``measured=0`` with a *faint* (not invisible, not confident) opacity rather than a fabricated splat
+(**R-6**). `write_gaussian_splat_ply` emits the **standard INRIA-3DGS `.ply`** (SH band-0 colour,
+log scale, logit opacity) so off-the-shelf splat viewers load it, plus our per-Gaussian ``measured``
+uchar (the honesty channel carried in the asset). So the **pure half is a real, deterministic,
+GPU-free 3DGS init** — not a stub. **R-8 gating:** the generative densify/inpaint refiner
+(IDOL/LHM/PF-LHM/GART), `FeedForwardGaussianRefiner`, is importable (no torch) but every call raises
+an actionable `NotImplementedError` pointing at the `avatar` extra; it is **optional** — the builder
+runs without it, and only engages the gated path when a refiner is injected. Selected with
+`--avatar gaussian`; inject a real mesh backend by dotted path (`--avatar-backend`, ADR-0006) exactly
+like `textured`. **E2E proof:** `--avatar gaussian --avatar-backend …:SyntheticAvatarMeshBackend`
+ran the golden path → 3 real splat `.ply` assets at a genuine 2/3 coverage; the default SMPL-X
+backend (no real pixels) honestly yields a 10 475-Gaussian geometry-only avatar at coverage 0 (knows
+the shape, not the look). **Tests:** 10 new (`test_gaussian_avatar.py`) — SH/`.ply` round-trips,
+mesh→Gaussian anchoring + faint-unmeasured opacity, the synthetic measured build, geometry-only
+honesty, the R-8 refiner gate, and the wiring; suite **521 passed / 12 skipped**, no GPU (**AC-7**).
 
 ---
 

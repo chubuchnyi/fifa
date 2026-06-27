@@ -92,10 +92,13 @@ def default_ports(
     ``"rfdetr"``. ``tracker``: ``"fake"`` or ``"bytetrack"`` (ByteTrack + team clustering).
     ``calibrator``: ``"fake"`` or ``"keypoints"`` (pitch-keypoint DLT homography). ``pose``:
     ``"fake"`` or ``"gvhmr"`` (SMPL-X HMR, ``hmr`` extra). ``ball``: ``"fake"`` or ``"tracknet"``
-    (TrackNet 2D, ``ball`` extra). ``avatar``: ``"fake"`` or ``"textured"`` (measured
+    (TrackNet 2D, ``ball`` extra). ``avatar``: ``"fake"``, ``"textured"`` (measured
     pixel-projection onto the tracked SMPL-X — the M2-0 *primary* realism path: the projection /
     visibility / per-vertex-colour-averaging half runs with no GPU, the SMPL-X meshing heavy half
-    is gated behind the ``avatar`` extra). ``env``: ``"fake"`` (placeholder marker) or ``"pitch"``
+    is gated behind the ``avatar`` extra), or ``"gaussian"`` (M3-1 strategy #3: one measured 3DGS
+    splat anchored per SMPL-X vertex — same measured init runs GPU-free, the generative
+    densify/inpaint refiner (IDOL/LHM/GART) is gated, R-8).
+    ``env``: ``"fake"`` (placeholder marker) or ``"pitch"``
     (M2-1: the measured calibration-anchored pitch line markings as a vertex-coloured PLY — every
     vertex ``measured=1``, rendered by the splat pass; 3DGS/NeRF/generative env stay gated, R-8).
     ``render``: ``"fake"``, ``"overlay"`` (reproject the
@@ -310,7 +313,7 @@ def default_ports(
 
     if avatar == "fake":
         if avatar_backend:
-            raise ValueError("avatar_backend requires --avatar textured")
+            raise ValueError("avatar_backend requires --avatar textured or gaussian")
         avt: AvatarBuilder = FakeAvatarBuilder(out_dir=out / "assets")
     elif avatar == "textured":
         from ..adapters.models import TexturedSmplxAvatarBuilder
@@ -322,8 +325,18 @@ def default_ports(
             backend=_resolve_backend(avatar_backend, AvatarMeshBackend)
             if avatar_backend else None,
         )
+    elif avatar == "gaussian":
+        from ..adapters.models import GaussianAvatarBuilder
+        from ..adapters.models.avatar import AvatarMeshBackend
+
+        avt = GaussianAvatarBuilder(
+            out_dir=out / "assets",
+            device=device,
+            mesh_backend=_resolve_backend(avatar_backend, AvatarMeshBackend)
+            if avatar_backend else None,
+        )
     else:
-        raise ValueError(f"unknown avatar {avatar!r}; expected 'fake' or 'textured'")
+        raise ValueError(f"unknown avatar {avatar!r}; expected 'fake', 'textured' or 'gaussian'")
 
     return AppPorts(
         detector=det,

@@ -211,6 +211,27 @@ def aggregate_observations(
     return rgb, count
 
 
+def measured_vertex_texture(obs: AvatarMeshObservations) -> tuple[np.ndarray, np.ndarray]:
+    """Project + sample every reference frame into one measured ``(rgb (V,3), count (V,))``.
+
+    The measured-appearance core shared by the textured-mesh and Gaussian avatar builders:
+    per-frame front-facing/z-buffer visibility (:func:`sample_vertex_colors`) averaged across frames
+    (:func:`aggregate_observations`). A vertex seen in no frame keeps ``count=0`` — the honest R-6
+    'unmeasured' signal, never fabricated.
+    """
+    n = obs.canonical_vertices.shape[0]
+    colors_per_frame: list[np.ndarray] = []
+    observed_per_frame: list[np.ndarray] = []
+    for fo in obs.frames:
+        normals = vertex_normals(fo.vertices_world, obs.faces)
+        colors, observed = sample_vertex_colors(
+            fo.vertices_world, normals, fo.camera, fo.frame, fo.image
+        )
+        colors_per_frame.append(colors)
+        observed_per_frame.append(observed)
+    return aggregate_observations(colors_per_frame, observed_per_frame, n)
+
+
 def write_vertex_colored_ply(
     path: Path, vertices: np.ndarray, faces: np.ndarray, rgb: np.ndarray, measured: np.ndarray
 ) -> str:
@@ -311,16 +332,7 @@ class TexturedSmplxAvatarBuilder(AvatarBuilder):
     ) -> RenderAssetRef:
         obs = self._backend().observe(subject, ref_crops, camera=camera, clip=clip)
         n = obs.canonical_vertices.shape[0]
-        colors_per_frame: list[np.ndarray] = []
-        observed_per_frame: list[np.ndarray] = []
-        for fo in obs.frames:
-            normals = vertex_normals(fo.vertices_world, obs.faces)
-            colors, observed = sample_vertex_colors(
-                fo.vertices_world, normals, fo.camera, fo.frame, fo.image
-            )
-            colors_per_frame.append(colors)
-            observed_per_frame.append(observed)
-        rgb, count = aggregate_observations(colors_per_frame, observed_per_frame, n)
+        rgb, count = measured_vertex_texture(obs)
         measured = count > 0
         uri = write_vertex_colored_ply(
             self.out_dir / f"avatar_{subject.track_id}.ply",
