@@ -14,11 +14,13 @@ manifest, canonical-JSON export) and the process exits 0 when the path completes
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 
 from ..adapters.io import FFmpegIngestor
+from ..core.agent import EditBudget, auto_correct
 from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.coherence import CoherenceConfig
 from ..core.correction.engine import make_offset, make_smoothing
@@ -221,6 +223,30 @@ def run_dry_run(
             f"\n== M3-8 learned-smoothing[preview]: skipped — learned model not wired "
             f"({type(exc).__name__}); use --motion-prior fake (GPU-free gaussian)"
         )
+
+    # 8e) A-10: BOUNDED, ATTENTION-DRIVEN AUTONOMY. The agent doesn't just preview one edit — it
+    #     reads the attention list, targets the worst off-anchor subject, and applies bounded
+    #     anchor-pull corrections until attention clears (R-6 measured proof) — all on a LOCAL
+    #     scene copy, so nothing here pollutes the export. We seed a wrong pose (2 m off-anchor)
+    #     on the measured ground track and watch the loop fix it within its EditBudget leash.
+    base = app.resolved(scene_id)
+    anchors = {s.track_id: s.proposal.pose.transl[:, :2].copy() for s in base.subjects}
+    seeded = replace(
+        base,
+        corrections=[
+            make_offset(
+                "seed-wrong-pose", target, (int(frames[0]), int(frames[-1])),
+                np.array([2.0, 0.0, 0.0]), note="seeded 2 m off-anchor reconstruction error",
+            )
+        ],
+    )
+    _fixed, areport = auto_correct(seeded, anchors, budget=EditBudget(max_abs_change_m=1.0))
+    print(
+        f"\n== A-10 autonomy[eval]: seeded subject {tid} 2 m off-anchor → "
+        f"attention {areport.attention_before}→{areport.attention_after} in "
+        f"{areport.edits_applied} bounded edit(s) (≤1.0 m), cleared={areport.cleared} "
+        f"(local copy; export untouched)"
+    )
 
     # 8b) SEAM B (ADR-0007, FR-30): the data amplifier. Synthesize N pseudo-multi-views from the
     #     single broadcast camera and attach them to the scene; the env/avatar reconstruction below

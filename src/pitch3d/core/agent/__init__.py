@@ -6,6 +6,17 @@ adapter); this package holds only the core, port-free pieces the feedback loop n
 
 from __future__ import annotations
 
+from .autonomy import (
+    Anchors,
+    AutonomyReport,
+    AutonomyStep,
+    EditBudget,
+    attention_targets,
+    auto_correct,
+    propose_anchor_offset,
+    rescore_from_anchors,
+    residual_to_confidence,
+)
 from .summary import scene_summary
 from .viewpoints import (
     action_centroid,
@@ -17,11 +28,20 @@ from .viewpoints import (
 )
 
 __all__ = [
+    "Anchors",
+    "AutonomyReport",
+    "AutonomyStep",
+    "EditBudget",
     "action_centroid",
+    "attention_targets",
+    "auto_correct",
     "bounded_orbit_camera",
     "camera_at",
     "default_intrinsics",
     "look_at",
+    "propose_anchor_offset",
+    "rescore_from_anchors",
+    "residual_to_confidence",
     "scene_summary",
     "standard_viewpoints",
 ]

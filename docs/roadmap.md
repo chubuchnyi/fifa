@@ -597,6 +597,34 @@ preview threads the prior; the gated model raises; wiring defaults to the fake, 
 accepts a dotted-path BYO, and rejects a bad spec. Suite **548 passed / 12 skipped**, no GPU/torch
 (**AC-7**).
 
+**Progress — A-10 bounded, attention-driven autonomy + eval harness (2026-06-27):** the agent's
+*hands*, kept honest — and with it the **M3 agent exit criterion** ("an agent fixes a seeded-wrong
+pose end-to-end, verified by the attention list clearing") is met. New `core/agent/autonomy.py` is the
+closed loop as **pure core** (numpy + `resolve_scene`, no LLM/port/GPU), so it is deterministic and
+unit-tested. The hard problem was that `subject_frame_conf` is *static* — a loop can't re-check its own
+work against a frozen score; the fix is to make the attention signal **recomputable from a measured
+ground truth**: `residual_to_confidence` bridges the **anchor residual** (M3-2's
+`core/correction/anchor.py`) to confidence as `m/(m+r)` (1.0 on-anchor, exactly **0.5 at the
+`max_residual_m` tolerance** — lined up with the attention threshold), and `rescore_from_anchors`
+re-derives `subject_frame_conf` after every edit. So "fixed" means the **resolved** root is back on its
+measured anchor (R-6), not the agent's say-so. **Targeting** (`attention_targets`) keeps only the
+`low_confidence` items for subjects we hold an anchor for, worst-first — ball-height / reprojection
+signals are a different concern the loop deliberately does **not** touch (R-4), and the
+`AutonomyReport` measures only the attention it *owns*, so before/after/`cleared` stay coherent.
+**Bounded** two ways via `EditBudget`: `max_edits` (count) + `max_abs_change_m` (per-edit XY
+magnitude); each `propose_anchor_offset` is the mean ground displacement over the off-anchor frames,
+**clipped** (not rejected) to the cap, so a large error converges over several honest steps instead of
+one teleport — applied as a normal `CONSTANT_OFFSET` `Correction` layered on top (ADR-0002, proposal
+never mutated). **E2E proof:** the dry-run seeds subject 0 **2 m off** its measured anchor on a *local*
+scene copy → the loop clears attention **12→0 in 2 bounded edits (≤1.0 m), `cleared=True`**, export
+untouched, exit 0. **Tests:** 9 new (`test_autonomy.py`) — the confidence crossover at tolerance;
+rescore flags off-anchor / passes on-anchor; the proposal is clipped to budget (4 m → capped 1.0 m) and
+`None` when on-anchor; the **eval harness** (seed 2 m wrong → cleared in one edit, root back on anchor,
+input untouched, proposal intact); targeting fixes the worst (3 m) before the lesser (1 m); the budget
+*bites* (1 edit, 0.5 m cap → not cleared, clipped) then *converges* (2 m → ≤0.5 m in exactly 3 bounded
+pulls); an on-anchor scene needs no edits; deterministic. Suite **557 passed / 12 skipped**, no
+GPU/Blender/LLM (**AC-7**).
+
 ---
 
 ## Agent / MCP automation track (cross-cutting, ADR-0008) ⬜
@@ -617,7 +645,7 @@ fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
 | A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | ✅ reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` real via `BlenderSceneObserver` (out-of-process `blender --background`, Workbench/CPU, gated on a Blender binary) — `--observer blender` |
 | A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ✅ `CyclesSceneObserver` renders each viewpoint through Cycles (`--observer cycles`); 2D overlay/radar/UI delegate to the fake (M2-10) |
 | A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/render` | ✅ `CyclesViewSynthesizer` re-renders the resolved 3D scene at the orbit cameras (`--viewsynth cycles`, non-generative, cached, `editable=False`); generative seam B stays gated (M2-10) |
-| A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ⬜ |
+| A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ✅ pure-core `auto_correct` (`core/agent/autonomy.py`): re-scores confidence from the **measured anchor residual** (M3-2), targets the **worst off-anchor** subject first, applies **bounded** anchor-pull `Correction`s (per-edit XY cap — clipped, never teleported) until attention clears (R-6 measured proof; input never mutated, ADR-0002); eval harness seeds a 2 m wrong pose → cleared in bounded edits, no GPU/Blender/LLM, run in the dry-run E2E |
 
 **Invariants (hold at every milestone):** the agent edits *only* via `Correction` tools
 (`apply_offset|keyframes|smoothing|refit`), never raw geometry; `resolve()` is the sole path to
