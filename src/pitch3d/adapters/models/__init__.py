@@ -33,7 +33,12 @@ from .calibration import (
     PitchKeypointBackend,
 )
 from .detection import DETECTOR_CLASS_MAPS, RFDETRBackend, RFDETRDetector
-from .pose import GVHMRBackend, GVHMRPoseEstimator
+from .pose import (
+    DiffusionVasOcclusionBackend,
+    GVHMRBackend,
+    GVHMRPoseEstimator,
+    OcclusionBackend,
+)
 from .tracking import ByteTrackBackend, ByteTrackTracker
 
 
@@ -80,6 +85,7 @@ __all__ = [
     "DETECTOR_CLASS_MAPS",
     "ApiAvatarBuilder",
     "AvatarMeshBackend",
+    "DiffusionVasOcclusionBackend",
     "ByteTrackBackend",
     "ByteTrackTracker",
     "CameraModuleFieldCalibrator",
@@ -90,6 +96,7 @@ __all__ = [
     "GaussianRefiner",
     "KeypointFieldCalibrator",
     "MeasuredPitchEnvReconstructor",
+    "OcclusionBackend",
     "PitchKeypointBackend",
     "RFDETRBackend",
     "RFDETRDetector",

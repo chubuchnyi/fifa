@@ -83,7 +83,7 @@ def default_ports(
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
-    avatar_backend: str | None = None,
+    avatar_backend: str | None = None, occlusion_backend: str | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -139,7 +139,9 @@ def default_ports(
     vendored GVHMR/TrackNet/keypoint/tracking/SMPL-X-meshing network without forking this wiring
     (ADR-0006, see :func:`_resolve_backend`). Each requires its real adapter to be selected (e.g.
     ``pose_backend`` needs ``pose="gvhmr"``, ``avatar_backend`` needs ``avatar="textured"``);
-    pairing one with ``"fake"`` raises.
+    pairing one with ``"fake"`` raises. ``occlusion_backend`` injects a cluster-occlusion completer
+    (Diffusion-VAS + SAM-3, M3-2) into the GVHMR adapter (needs ``pose="gvhmr"``); the re-fit only
+    calls it when a correction sets ``complete_occlusions``.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -209,14 +211,20 @@ def default_ports(
     if pose == "fake":
         if pose_backend:
             raise ValueError("pose_backend requires --pose gvhmr")
+        if occlusion_backend:
+            raise ValueError("occlusion_backend requires --pose gvhmr")
         pse: PoseEstimator = FakePoseEstimator()
     elif pose == "gvhmr":
         from ..adapters.models import GVHMRPoseEstimator
-        from ..adapters.models.pose import HMRBackend
+        from ..adapters.models.pose import HMRBackend, OcclusionBackend
 
         pse = GVHMRPoseEstimator(
             device=device,
             backend=_resolve_backend(pose_backend, HMRBackend) if pose_backend else None,
+            occlusion_backend=(
+                _resolve_backend(occlusion_backend, OcclusionBackend)
+                if occlusion_backend else None
+            ),
         )
     else:
         raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")

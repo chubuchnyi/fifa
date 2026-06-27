@@ -5,6 +5,13 @@
 
 from __future__ import annotations
 
+from .anchor import (
+    DEFAULT_MAX_RESIDUAL_M,
+    AnchorReport,
+    anchor_residuals,
+    blend_to_anchor,
+    validate_against_anchor,
+)
 from .coherence import (
     CoherenceConfig,
     CoherenceReport,
@@ -43,12 +50,17 @@ from .rotations import (
 )
 
 __all__ = [
+    "DEFAULT_MAX_RESIDUAL_M",
+    "AnchorReport",
     "CoherenceConfig",
     "CoherenceReport",
     "add_temporal_coherence",
+    "anchor_residuals",
     "apply_offset_rotation",
     "apply_offset_vector",
     "average_quats",
+    "blend_to_anchor",
+    "validate_against_anchor",
     "coherence_corrections",
     "extend_pose_to_span",
     "fill_motion_gaps",

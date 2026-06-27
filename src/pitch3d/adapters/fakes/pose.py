@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from pitch3d.core.correction.anchor import blend_to_anchor
 from pitch3d.core.ports.io import ClipRef
 from pitch3d.core.ports.perception import Tracks
 from pitch3d.core.ports.pose import PoseEstimator
@@ -81,4 +82,10 @@ class FakePoseEstimator(PoseEstimator):
         nudge = float(constraints.get("root_z_nudge", 0.0))
         if nudge:
             refined.pose.transl[rows, 2] += nudge
+        # Honour the measured-homography anchor lock too (same contract as the real adapter, M3-2).
+        anchor = constraints.get("foot_anchor")
+        if anchor is not None:
+            refined.pose.transl[rows, :2] = blend_to_anchor(
+                refined.pose.transl[rows, :2], anchor, float(constraints.get("anchor_blend", 1.0))
+            )
         return refined

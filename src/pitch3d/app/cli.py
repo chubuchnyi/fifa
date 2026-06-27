@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from ..adapters.io import FFmpegIngestor
+from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.coherence import CoherenceConfig
 from ..core.correction.engine import make_offset
 from ..core.orchestration import StitchConfig
@@ -73,7 +74,7 @@ def run_dry_run(
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
-    avatar_backend: str | None = None,
+    avatar_backend: str | None = None, occlusion_backend: str | None = None,
     stitch: bool = False, coherence: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -93,7 +94,7 @@ def run_dry_run(
         detector_weights=detector_weights,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
-        avatar_backend=avatar_backend,
+        avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -169,6 +170,29 @@ def run_dry_run(
     # 8) OBSERVE (after): the loop is closed — the agent sees the consequence of its edit.
     obs_after = app.observe(scene_id, frame=mid_frame, quality="preview")
     _print_observation(obs_after, label="observe:after")
+
+    # 8c) M3-2: constraint-guided RE-FIT hardened on the measured homography anchor + validation.
+    #     Re-fit the first subject's first half locked to its MEASURED ground track (bbox-foot →
+    #     world via the homography), then validate the resolved root still sits on that anchor.
+    #     A generative cluster-occlusion completion (--occlusion-backend, gated R-8) would be the
+    #     thing under scrutiny here; a completion that drifts off-anchor is flagged, not
+    #     trusted (R-6).
+    subj0 = app.get_scene(scene_id).subject(tid)
+    anchor_xy = subj0.proposal.pose.transl[:, :2].copy()  # measured homography ground track
+    in_range = (frames >= frame_range[0]) & (frames <= frame_range[1])
+    refit_corr = app.apply_refit(
+        scene_id, target, frame_range, {"foot_anchor": anchor_xy[in_range]},
+        note="dry-run refit locked to the measured homography anchor",
+    )
+    resolved0 = app.resolved(scene_id).subject(tid)
+    report = validate_against_anchor(
+        resolved0.proposal.pose.frames, resolved0.proposal.pose.transl, anchor_xy,
+    )
+    print(
+        f"\n== M3-2 refit[{refit_corr.id}]: locked {int(in_range.sum())} frame(s) to the measured "
+        f"anchor → on-anchor {report.n_valid}/{report.n_frames} "
+        f"(max residual {report.worst_residual_m:.3f} m, {report.n_off_anchor} off-anchor, R-6)"
+    )
 
     # 8b) SEAM B (ADR-0007, FR-30): the data amplifier. Synthesize N pseudo-multi-views from the
     #     single broadcast camera and attach them to the scene; the env/avatar reconstruction below
@@ -346,6 +370,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--avatar-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own AvatarMeshBackend (SMPL-X meshing + frame "
                              "sampling); requires --avatar textured or gaussian")
+    parser.add_argument("--occlusion-backend", default=None, metavar="pkg.module:Factory",
+                        help="inject a bring-your-own OcclusionBackend (Diffusion-VAS amodal + "
+                             "SAM-3 masklets, M3-2) used by REFIT 'complete_occlusions'; "
+                             "requires --pose gvhmr")
     parser.add_argument("--stitch", action="store_true",
                         help="re-link fragmented tracklets between TRACK and POSE so "
                              "occluded players don't 'appear from nowhere' (off by default)")
@@ -381,6 +409,7 @@ def main(argv: list[str] | None = None) -> int:
         calibrator_backend=args.calibrator_backend,
         tracker_backend=args.tracker_backend,
         avatar_backend=args.avatar_backend,
+        occlusion_backend=args.occlusion_backend,
         stitch=args.stitch,
         coherence=args.coherence,
     )

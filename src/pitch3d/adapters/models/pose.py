@@ -9,8 +9,10 @@ behind the optional ``hmr`` extra. Split so the *model-independent* logic is tes
   subject means **anchoring the world root on the pitch** — exactly FR-8's "root from
   homography". This half projects each tracklet's foot point to world metres through the field
   calibration, stacks the metric root, assembles the canonical :class:`SubjectMotion`, and
-  applies geometric :meth:`refit` constraints (root nudges/locks/floor) deterministically.
-  Numpy only; unit-tested via an injected backend.
+  applies geometric :meth:`refit` constraints (root nudges/locks/floor, plus the M3-2
+  measured-homography-anchor lock) deterministically. Numpy only; unit-tested via an injected
+  backend. The cluster-occlusion completion option (:class:`OcclusionBackend`, Diffusion-VAS +
+  SAM-3, M3-2) is gated the same way as the network and validated against the homography anchor.
 * :class:`GVHMRBackend` — the **heavy** half: *not wired yet* (roadmap M1/P2.4) and GPU-bound.
   GVHMR is a research repo, not a pip package, so the ``hmr`` extra ships only its substrate
   (torch/smplx/chumpy) — not the network or its weights; :meth:`GVHMRBackend.estimate_bodies`
@@ -28,6 +30,7 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from ...core.correction.anchor import blend_to_anchor
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import Tracklet, Tracks
 from ...core.ports.pose import PoseEstimator
@@ -100,6 +103,25 @@ class HMRBackend(Protocol):
         ...
 
 
+@runtime_checkable
+class OcclusionBackend(Protocol):
+    """The cluster-occlusion heavy half (M3-2): amodally complete occluded segments.
+
+    Behind this protocol so the re-fit's pure constraint/anchor logic stays testable. A real
+    backend pairs amodal video completion (**Diffusion-VAS**) with pixel-level identity
+    (**SAM-3** masklets) over the occluded ``frames`` and returns a re-fit :class:`SubjectMotion`.
+    Whatever it produces must be validated against the homography anchor
+    (:mod:`pitch3d.core.correction.anchor`) — a completion that drifts off the player's measured
+    ground track is hallucinated, not measured (R-6). Injected, never on by default.
+    """
+
+    def complete_occlusions(
+        self, clip: ClipRef, motion: SubjectMotion, frames: np.ndarray
+    ) -> SubjectMotion:
+        """Return ``motion`` with the occluded ``frames`` amodally completed."""
+        ...
+
+
 def _smooth_path(values: np.ndarray, window: int) -> np.ndarray:
     """Box-average a ``(T, D)`` path over a centred frame window (anti-jitter, edge-clamped)."""
     t = values.shape[0]
@@ -119,6 +141,10 @@ class GVHMRPoseEstimator(PoseEstimator):
     Attributes:
         backend: The HMR network backend. If ``None``, a real :class:`GVHMRBackend` is built
             lazily on first use (needs the ``hmr`` extra + weights + GPU).
+        occlusion_backend: Optional cluster-occlusion completer (M3-2). When injected and a re-fit
+            requests ``complete_occlusions``, the selected frames are amodally completed by it
+            (Diffusion-VAS + SAM-3, gated — R-8); when ``None`` that request is an actionable error
+            pointing at the measured structural gap-fill instead. Never on by default.
         pelvis_height_m: World Z assigned to the grounded root (mono height anchor, R-4).
         smooth_window: Centred window (frames) for smoothing the grounded root path
             (anti-foot-sliding from box jitter); 1 disables it.
@@ -127,6 +153,7 @@ class GVHMRPoseEstimator(PoseEstimator):
     """
 
     backend: HMRBackend | None = None
+    occlusion_backend: OcclusionBackend | None = None
     pelvis_height_m: float = _DEFAULT_PELVIS_HEIGHT_M
     smooth_window: int = 1
     n_betas: int = 10
@@ -171,12 +198,20 @@ class GVHMRPoseEstimator(PoseEstimator):
         """Apply operator constraints on ``frames`` and return a NEW motion (non-destructive).
 
         Geometric constraints are honoured purely here (no network): ``root_z_nudge`` (float, m),
-        ``root_xy`` ((2,) world lock), ``foot_floor`` (clamp root Z ≥ floor), ``relax_to_rest``
-        (scale body pose toward rest in ``[0, 1]``). The correction engine wraps the result as a
-        REFIT correction, so this stays a pure function of its inputs.
+        ``root_xy`` ((2,) world lock), ``foot_anchor`` (the measured homography ground anchor —
+        ``(2,)`` or per-frame ``(M, 2)`` aligned to the selected frames — pulled in by
+        ``anchor_blend`` ∈ ``[0, 1]``, default a hard lock), ``foot_floor`` (clamp root Z ≥ floor),
+        ``relax_to_rest`` (scale body pose toward rest in ``[0, 1]``). ``complete_occlusions``
+        (truthy) first routes the selected frames through an injected :class:`OcclusionBackend`
+        (amodal cluster-occlusion completion, gated — R-8); validate its output against the
+        homography anchor (:mod:`pitch3d.core.correction.anchor`). The correction engine wraps the
+        result as a REFIT correction, so this stays a pure function of its inputs.
         """
+        sel = np.asarray(frames, dtype=int).reshape(-1)
         refined = motion.copy()
-        rows = np.isin(refined.pose.frames, np.asarray(frames, dtype=int).reshape(-1))
+        if constraints.get("complete_occlusions"):
+            refined = self._complete_occlusions(clip, refined, sel)
+        rows = np.isin(refined.pose.frames, sel)
 
         relax = constraints.get("relax_to_rest")
         if relax is not None:
@@ -187,10 +222,36 @@ class GVHMRPoseEstimator(PoseEstimator):
         xy = constraints.get("root_xy")
         if xy is not None:
             refined.pose.transl[rows, :2] = np.asarray(xy, dtype=float).reshape(2)
+        anchor = constraints.get("foot_anchor")
+        if anchor is not None:
+            refined.pose.transl[rows, :2] = blend_to_anchor(
+                refined.pose.transl[rows, :2], anchor,
+                float(constraints.get("anchor_blend", 1.0)),
+            )
         floor = constraints.get("foot_floor")
         if floor is not None:
             refined.pose.transl[rows, 2] = np.maximum(refined.pose.transl[rows, 2], float(floor))
         return refined
+
+    def _complete_occlusions(
+        self, clip: ClipRef, motion: SubjectMotion, frames: np.ndarray
+    ) -> SubjectMotion:
+        """Amodally complete occluded ``frames`` via the injected backend (gated — R-8).
+
+        Raises an actionable error when no :class:`OcclusionBackend` is wired, pointing at the
+        measured structural alternative (``core.correction.coherence`` gap-fill) which needs no
+        model. A real backend (Diffusion-VAS + SAM-3) returns a re-fit motion to validate against
+        the homography anchor.
+        """
+        if self.occlusion_backend is None:
+            raise NotImplementedError(
+                "occlusion completion (`complete_occlusions`) needs an OcclusionBackend "
+                "(Diffusion-VAS amodal masks + SAM-3 masklets) — install the `occlusion` extra or "
+                "inject one via --occlusion-backend. The measured structural gap-fill/extension in "
+                "pitch3d.core.correction.coherence (--coherence) bridges interior occlusions with "
+                "no model and ships today."
+            )
+        return self.occlusion_backend.complete_occlusions(clip, motion, frames)
 
     def _ground_root(
         self,
@@ -266,3 +327,33 @@ class GVHMRBackend:
                 ) from exc
             self._model = object()
         return self._model
+
+
+@dataclass
+class DiffusionVasOcclusionBackend:
+    """Real cluster-occlusion completion — gated (R-8), not wired yet (roadmap M3-2).
+
+    Amodal video completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) give a
+    plausible body over the occluded segments, driving a constraint-guided re-fit of the hidden
+    frames. Both are GPU-bound research repos (not pip packages), so the ``occlusion`` extra ships
+    no weights/network and :meth:`complete_occlusions` raises an actionable error. The measured
+    alternative — structural gap-fill/extension (``pitch3d.core.correction.coherence``) — needs no
+    model and ships today; this seam is for *generative* completion of long cluster occlusions.
+    """
+
+    weights: str | None = None
+    device: str = "cuda"
+    _model: object = None
+
+    def complete_occlusions(  # pragma: no cover - heavy path
+        self, clip: ClipRef, motion: SubjectMotion, frames: np.ndarray
+    ) -> SubjectMotion:
+        raise NotImplementedError(
+            "amodal occlusion completion is not wired yet (roadmap M3-2) and is GPU-bound: "
+            "Diffusion-VAS amodal masks + SAM-3 masklets are research repos (not pip packages), so "
+            "the `occlusion` extra ships no weights/network. Use the measured structural "
+            "gap-fill/extension (pitch3d.core.correction.coherence, --coherence), which needs no "
+            "model, or inject an OcclusionBackend via --occlusion-backend. Validate any completion "
+            "against the homography anchor (pitch3d.core.correction.anchor) — off-anchor "
+            "frames are hallucinated, not measured (R-6)."
+        )

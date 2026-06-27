@@ -446,7 +446,7 @@ in sync, so M2 is 🟢. Next: M3.**
 | Ticket | Package |
 |---|---|
 | ✅ **M3-1 Per-subject Gaussian avatars (#3)** selectively — candidates: feed-forward Gaussian LRMs (**IDOL** <1 s, **LHM**, **PF-LHM** pose-free/multi-image) for the bulk; per-subject **GaussianAvatar/GART** for hero shots. All flagged *synthesized* (R-6). | `adapters/models` (`AvatarBuilder`) |
-| M3-2 Constraint-guided re-fit hardened (PromptHMR-class); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments, validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
+| ✅ **M3-2 Constraint-guided re-fit hardened (PromptHMR-class)** — root XY locked to the **measured homography anchor** (`core.correction.anchor`, validated; off-anchor frames flagged R-6, never silently trusted); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments (R-8), validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
 | ✅ **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
 | ✅ **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
 | ✅ **M3-5 Confidence map + "needs attention" prioritization UI** | `adapters/render`, `core/scene` |
@@ -545,6 +545,30 @@ backend (no real pixels) honestly yields a 10 475-Gaussian geometry-only avatar 
 the shape, not the look). **Tests:** 10 new (`test_gaussian_avatar.py`) — SH/`.ply` round-trips,
 mesh→Gaussian anchoring + faint-unmeasured opacity, the synthetic measured build, geometry-only
 honesty, the R-8 refiner gate, and the wiring; suite **521 passed / 12 skipped**, no GPU (**AC-7**).
+
+**Progress — M3-2 hardened re-fit on the measured homography anchor + gated occlusion seam (2026-06-27):**
+the **measured-over-generative** (M2-0) half of M3-2, built real. New `core/correction/anchor.py` is a
+pure, deterministic, GPU-free **homography-anchor validator**: `anchor_residuals` (per-frame horizontal
+XY distance, Z ignored — mono depth is ambiguous, **R-4**), `blend_to_anchor` (pull root XY toward the
+measured ground track), and `validate_against_anchor` → `AnchorReport` that **surfaces off-anchor frames
+(R-6)** for the attention list / a confidence dip rather than silently accepting them. The re-fit is
+hardened with two constraints shared by **both** pose adapters (fake + `GVHMRPoseEstimator`, same
+contract): `foot_anchor` (lock root XY to the bbox-foot→world homography track, per-frame `(M,2)` or a
+single `(2,)`) and `anchor_blend` (partial pull); **Z is left untouched** so the mono height stays a
+single source of truth. **R-8 gating:** the generative cluster-occlusion completer
+(`OcclusionBackend` Protocol + `DiffusionVasOcclusionBackend` — Diffusion-VAS amodal masks + SAM-3
+masklets) is importable (no torch) but raises an actionable `NotImplementedError` pointing at the
+`occlusion` extra and the measured `--coherence` gap-fill alternative; it engages **only** when injected
+(`--occlusion-backend pkg:Factory`, ADR-0006, gated to `--pose gvhmr`), runs inside `refit` **before** the
+anchor lock is applied on top, and any completion it produces is meant to be validated against the same
+anchor. **E2E proof:** the dry-run re-fits the first subject's first 7 frames locked to its measured
+ground track → `on-anchor 12/12 (max residual 0.000 m, 0 off-anchor, R-6)`; golden path completes (exit
+0), Z-offset preserved, corrections bake empty on resolve (no regression). **Tests:** 14 new
+(`test_occlusion_anchor.py`) — pure anchor math (residuals/blend/validate + ragged rejection), the XY-only
+lock (parametrized fake+gvhmr, Z untouched, input intact), per-frame & blended anchors, refit→validate
+all-on-anchor, the R-8 occlusion gate + actionable no-backend error, an injected-stub proving the
+completion output flows then the anchor locks on top, and the wiring (inject + `requires --pose gvhmr`);
+suite **535 passed / 12 skipped**, no GPU/torch (**AC-7**).
 
 ---
 
