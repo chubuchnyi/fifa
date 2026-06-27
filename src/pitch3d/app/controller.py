@@ -14,6 +14,7 @@ import hashlib
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,6 +52,7 @@ from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.review import AttentionItem, attention_list
 from ..core.scene.scene import Episode, EpisodeSource, Scene, Source, SourceKind
 from ..core.scene.units import TimeBase
+from ..core.scene.versioning import Snapshot, SnapshotStore, scene_fingerprint
 
 if TYPE_CHECKING:  # avoid a wiring↔controller import cycle
     from .wiring import AppPorts
@@ -70,6 +72,7 @@ class Application:
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
+    _snapshots: SnapshotStore = field(default_factory=SnapshotStore, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
     def _next(self, kind: str) -> int:
@@ -211,6 +214,34 @@ class Application:
                 c.enabled = bool(enabled)
                 return c
         raise KeyError(f"no correction {correction_id} in {scene_id}")
+
+    # --- versioning (M3-6: named snapshots + rollback) ------------------------
+    def snapshot(self, scene_id: str, name: str, *, note: str | None = None) -> Snapshot:
+        """Checkpoint the live scene under ``name`` (overwrites a same-named snapshot)."""
+        scene = self.get_scene(scene_id)
+        return self._snapshots.take(
+            scene, name, note=note, created_at=datetime.now(UTC).isoformat()
+        )
+
+    def list_snapshots(self, scene_id: str) -> list[Snapshot]:
+        """Named checkpoints taken for ``scene_id`` (oldest-first by name registration)."""
+        self.get_scene(scene_id)  # validate existence
+        return self._snapshots.list(scene_id)
+
+    def rollback(self, scene_id: str, name: str) -> Scene:
+        """Replace the live scene with a fresh copy of the named snapshot; return it.
+
+        The snapshot stays intact, so the same checkpoint can be rolled back to repeatedly even
+        after further edits (ADR-0002: this restores the whole correction stack, not raw geometry).
+        """
+        self.get_scene(scene_id)  # validate existence
+        restored = self._snapshots.restore(scene_id, name)
+        self._scenes[scene_id] = restored
+        return restored
+
+    def scene_fingerprint(self, scene_id: str) -> str:
+        """Content-addressed digest of the live scene (ADR-0004) — equal content, equal digest."""
+        return scene_fingerprint(self.get_scene(scene_id))
 
     # --- preview (FR-23: resolve as-if, without storing) ----------------------
     def preview(self, scene_id: str, candidate: Correction) -> dict[str, Any]:
