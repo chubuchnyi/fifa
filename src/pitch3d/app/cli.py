@@ -78,7 +78,7 @@ def run_dry_run(
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake",
-    stitch: bool = False, coherence: bool = False,
+    stitch: bool = True, coherence: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -432,9 +432,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="learned temporal denoiser for TEMPORAL_SMOOTHING method='learned' "
                              "(M3-8): 'fake' (real GPU-free gaussian), 'learned' (gated "
                              "HTD-Refine/StableMotion, R-8) or a dotted-path BYO MotionPrior")
-    parser.add_argument("--stitch", action="store_true",
-                        help="re-link fragmented tracklets between TRACK and POSE so "
-                             "occluded players don't 'appear from nowhere' (off by default)")
+    parser.add_argument("--no-stitch", dest="stitch", action="store_false",
+                        help="disable track-continuity stitching (ON by default): without it, "
+                             "occluded players re-enter as NEW track ids and spawn phantom "
+                             "bodies (the #202 swarm)")
     parser.add_argument("--coherence", action="store_true",
                         help="bridge short interior pose gaps (slerp/lerp) + add auto "
                              "temporal-smoothing corrections (off by default)")

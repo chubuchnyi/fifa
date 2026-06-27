@@ -13,7 +13,7 @@
 #   FRAMES=8                                --frames
 #   OUT=out/run                             --out-dir (relative to repo)
 #   FORMAT=smplx_npz                        --format (json carries the ball; smplx_npz = bodies)
-#   STITCH=1                                --stitch    (continuity; off unless =1)
+#   STITCH=1                                continuity stitching (ON by default; set 0 to disable)
 #   COHERENCE=1                             --coherence (gap-fill + smoothing; off unless =1)
 # The SMPLest-X backend reads its own env (PITCH3D_SMPLESTX_REPO / _CKPT / _DEVICE;
 # defaults /workspace/repos/SMPLest-X + smplest_x_h on cuda) — see the backend factory.
@@ -39,12 +39,13 @@ else
   echo "== calibration: proxy (set PNLCALIB_REPO to a staged checkout to enable real PnLCalib)"
 fi
 
-# Optional continuity (Step 1-2) + temporal coherence (Step 3). Both off unless set to 1:
-#   STITCH=1     re-link fragmented tracklets before POSE so occluded players don't
-#                'appear from nowhere' (real ByteTrack fragments under occlusion).
-#   COHERENCE=1  bridge short interior pose gaps (slerp/lerp) + auto temporal-smoothing.
+# Continuity stitching is ON by default (part of correct reconstruction): re-link fragmented
+# tracklets before POSE so an occluded player keeps ONE identity instead of re-entering as a new
+# track id and spawning a phantom body (#202). Set STITCH=0 to disable. Temporal coherence
+# (gap-fill via slerp/lerp + auto temporal-smoothing) stays opt-in via COHERENCE=1.
 COH_ARGS=()
-if [ "${STITCH:-0}" = "1" ]; then COH_ARGS+=(--stitch); echo "== continuity: --stitch ON"; fi
+if [ "${STITCH:-1}" = "1" ]; then echo "== continuity: stitch ON (default)";
+else COH_ARGS+=(--no-stitch); echo "== continuity: stitch OFF (STITCH=${STITCH})"; fi
 if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
 
 cd "$REPO"

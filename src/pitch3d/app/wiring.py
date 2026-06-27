@@ -196,6 +196,10 @@ def default_ports(
 
         trk = ByteTrackTracker(
             device=device,
+            # Drop un-stitchable 1-frame singletons (no velocity -> noise, not a real track).
+            # Kept low so genuine multi-frame fragments survive for the stitch pass to re-link
+            # (raising this further would starve stitch, which runs AFTER this filter). See #202.
+            min_track_frames=2,
             backend=_resolve_backend(tracker_backend, TrackingBackend)
             if tracker_backend else None,
         )

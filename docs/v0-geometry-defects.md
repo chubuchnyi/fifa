@@ -27,9 +27,20 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   wired at `pipeline.py:96-98` but only runs when `stitch_cfg` is non-None — it defaults to None (CLI
   `--stitch`, off). `assemble_scene()` (`core/orchestration/assemble.py:44-57`) then makes one Subject
   per track_id, no dedup / cap.
-- **Fix:** stitch on by default (`pipeline.py` `stitch_cfg`) + raise `min_track_frames` to ~5–10 for a
-  25 fps clip (`tracking.py:143`). Local, unit-testable, no GPU — the cheapest first win.
-- **Note:** this run saved no `scene.json`, so the exact count is pending a re-run with export.
+- **Fix (LANDED 2026-06-27, local):** stitch made the **uniform default** across all reconstruction
+  entrypoints — CLI flag flipped `--stitch`→`--no-stitch` (default ON), `pod_real_e2e.sh` +
+  `pod_make_video.sh` default stitch on; the real ByteTrack path now sets `min_track_frames=2` in
+  `app/wiring.py` to drop un-stitchable 1-frame singletons. Full suite green (557 passed).
+- **Corrected understanding (important):** (1) the stitch pass reasons in **pixel space** (bbox centres;
+  `max_center_dist` in bbox-widths — `continuity.py:34,79-81`), so #202 is **independent of #203's
+  homography collapse**. (2) The tracker's `min_track_frames` filter runs **before** stitch
+  (`pipeline.py`), so raising it too high *starves* stitch of fragments to re-link — hence keep it low
+  (2) and rely on stitch's own post-link blip drop (`StitchConfig.min_track_frames=3`). (3)
+  `demo_video.sh` **already** defaulted `STITCH=1`, so the 300f swarm appeared *with stitch on*.
+- **Therefore — validation, not blind tuning:** the body count must be **measured** on a pod re-run
+  (`scene.json` exists at `$OUT/export/scene.json`; read `len(scene.subjects)`). Only if it is still
+  far above ~22 do we tune stitch gates (`max_gap`/`max_center_dist`) or add ByteTrack re-id — *after*
+  seeing the number, never before.
 
 ## D2 — Virtual cameras don't frame the action  (task #204)
 - **Symptom:** broadcast & goal cameras render ~95 % empty field + sky; players are a faint speck
