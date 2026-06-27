@@ -94,7 +94,7 @@ show up in 3D and export.
 
 ---
 
-## M2 — Photoreal layer 🟡  (+ ViewSynthesizer **seam A**)
+## M2 — Photoreal layer 🟢  (+ ViewSynthesizer **seam A**)
 
 **Goal (TZ M2):** photoreal render of the edited scene; edit↔render stays in sync.
 
@@ -116,16 +116,20 @@ per M2-0). The numpy vertex-splat pass (M2-3) is debug-grade scaffolding, not th
 | **M2-7 Real photoreal renderer ✅ (2026-06-25)** — `CyclesRenderPass`: Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import), the photoreal path alongside the no-dep splat debug viz. Rigid-root placement (LBS=M2-8), neutral ground (material=M2-9), R-6 tint intact | `adapters/render`, `adapters/blender` |
 | **M2-8 Posed, textured avatar** — **8a ✅ (2026-06-27): per-frame SMPL-X LBS** (geometry follows the edited pose, incl. limbs), pure-numpy (no torch/GPU), posed through Cycles; **8b ✅ (2026-06-27): measured surface texture** — the scene camera + decoded source frames thread into `observe`, the subject is posed at its *measured* pose into a capped, evenly-spread set of reference frames, and the pure projection/z-buffer sampler paints per-vertex colour from real pixels (R-6 marks unmeasured grey) | `adapters/models`, `adapters/render`, `adapters/blender` |
 | **M2-9 Measured env materials + lighting ✅ (2026-06-27)** — procedural grass PBR (mowing stripes + bump) for the measured pitch, the standard line markings rendered as flat white ribbons, and a physically-based (multiple-scattering) sky + matched key-light sun; stadium stays gated/marked (R-8 → M3) | `core/scene`, `adapters/render`, `adapters/blender` |
-| **M2-10 Edit↔render sync + photoreal `observe`** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no manual redo (AC-4 proper); `observe` returns photoreal multi-view (A-8); seam-A orbit becomes a re-render of the 3D scene at orbit cameras, no generative (A-9) | `app`, `adapters/render`, `adapters/viewsynth` |
+| **M2-10 Edit↔render sync + photoreal `observe` ✅ (2026-06-27)** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no avatar rebuild (AC-4: gated test renders the *same* PLY twice, clean vs after a ROOT_TRANSLATION+POSE_BODY_JOINT correction, and the forearm/root move in pixels); `observe` returns **photoreal** multi-view via `CyclesSceneObserver` (A-8, `--observer cycles`); seam-A orbit is a real **re-render of the resolved 3D scene** at the orbit cameras via `CyclesViewSynthesizer` (A-9, `--viewsynth cycles`, non-generative, cached, `editable=False`) | `app`, `adapters/render` |
 
-**Exit criteria (TZ AC-4, AC-5a — measured-photoreal reading, option A):** a *real renderer*
-(Blender/Cycles) yields a photoreal frame of the resolved scene — textured, LBS-posed avatars on a
-grass pitch under scene lighting, unmeasured regions honestly marked (**not** the numpy vertex-splat
-viz); editing an SMPL pose (root *and* limbs) re-projects into that photoreal frame with no manual
-redo; `observe` returns photoreal multi-view; seam A yields a photoreal limited-orbit by re-rendering
-the 3D scene at orbit cameras, **cached**, clearly flagged "video, not editable". **Honest ceiling:**
-measured-only ≈ textured mannequins (single broadcast cam ⇒ half the body unmeasured; naked SMPL-X ⇒
-no clothing geometry; no stadium) — broadcast-convincing fidelity is M3.
+**Exit criteria (TZ AC-4, AC-5a — measured-photoreal reading, option A) — ✅ MET (2026-06-27):** a
+*real renderer* (Blender/Cycles) yields a photoreal frame of the resolved scene — textured, LBS-posed
+avatars on a grass pitch under scene lighting, unmeasured regions honestly marked (**not** the numpy
+vertex-splat viz); editing an SMPL pose (root *and* limbs) re-projects into that photoreal frame with
+no manual redo; `observe` returns photoreal multi-view; seam A yields a photoreal limited-orbit by
+re-rendering the 3D scene at orbit cameras, **cached**, clearly flagged "video, not editable". All
+four are gated-tested on real Blender + verified in the integrated CLI E2E (below). **Honest ceiling
+(R-6, holds at 🟢):** measured-only ≈ textured mannequins (single broadcast cam ⇒ half the body
+unmeasured; naked SMPL-X ⇒ no clothing geometry; no stadium); and the *texture* is only as good as the
+pose alignment — on the **fake** pose pipeline coverage is 0% (synthetic bodies don't sit on the real
+players, all honest R-6 grey), so genuine per-player colour waits on the still-gated GVHMR pose (M1).
+The *renderer and all seams are real*; broadcast-convincing fidelity is M3.
 
 **Boundary reminder (R-14/R-15):** seam A only for moderate moves; arbitrary free camera stays on
 the splat/avatar path.
@@ -257,23 +261,25 @@ camera at ¼ the pixels); `--render orbit` re-shoots the orbit at 640×360 with 
 preserved and `is_video=True`. Honest scope (R-6): the lever changes *resolution only* — final-grade
 fidelity (texture, AA, real generative steps) still rides the heavy backends, which stay gated.
 **Honest status (re-assessed 2026-06-27): the M2 GOAL — a photoreal render of textured, LBS-posed
-avatars on grass — is NOT met.** M2-0…M2-6 delivered the render-pass *architecture* (seam, edit↔render
-sync on the rigid root, content-addressed cache, preview-downscale, measured pitch-env, seam-A
-contract) plus a measured **vertex-splat** visualization — debug-grade, pure-numpy, *not* a photoreal
-renderer. **M2-7 wired a real Blender/Cycles renderer, M2-8a LBS-poses the avatars through it,
-M2-8b paints them from measured pixels, and M2-9 puts them on the measured grass pitch** (below) —
-root *and* per-joint limbs follow the resolved pose (a bent elbow renders bent), front-facing,
-in-frustum verts take the player's real broadcast colour (unseen verts stay honest R-6 grey), and the
-ground is now a **grass-PBR pitch carrying the standard line markings under a physical sky** (not a
-neutral plane). What's left is **M2-10**: edit↔render/observe *through Cycles* (a pose edit
-re-projecting into the Cycles frame with no manual redo, `observe` returning photoreal multi-view) and
-the seam-A "video" is still a fake re-shoot. Texture quality is also only as good as the *pose
-alignment*: on the **fake** pose pipeline the synthetic bodies don't sit on the real players, so
-measured coverage is sparse (~1%, real-clip E2E) — genuine coverage waits on the still-gated GVHMR
-pose. So the photoreal output does **not** yet exist — that needs **M2-10** (edit↔render/observe
-through Cycles) on top of real pose. **M2 stays 🟡 because the photoreal output does not exist — not
-because the generative backends are gated.** Measured ceiling: textured avatars on grass;
-broadcast-convincing fidelity is M3. Next within M2: **M2-10**.
+avatars on grass, edit↔render/observe in sync — is MET (🟢).** M2-0…M2-6 delivered the render-pass
+*architecture* (seam, edit↔render sync on the rigid root, content-addressed cache, preview-downscale,
+measured pitch-env, seam-A contract) plus a measured **vertex-splat** visualization — debug-grade,
+pure-numpy. **M2-7 wired a real Blender/Cycles renderer, M2-8a LBS-poses the avatars through it,
+M2-8b paints them from measured pixels, M2-9 puts them on the measured grass pitch, and M2-10 closes
+the loop** (below) — root *and* per-joint limbs follow the resolved pose (a bent elbow renders bent),
+in-frustum verts take the player's real broadcast colour (unseen verts stay honest R-6 grey), the
+ground is a **grass-PBR pitch with the standard line markings under a physical sky**, and now an
+**edit re-projects into the Cycles frame with no avatar rebuild** (AC-4), `observe` returns
+**photoreal** multi-view (A-8, `CyclesSceneObserver`), and seam A is a real **re-render of the 3D
+scene** at the orbit cameras (A-9, `CyclesViewSynthesizer`) — cached, `editable=False`, no generative.
+All four exit clauses are gated-tested on real Blender and verified in the integrated CLI E2E
+(`--render cycles --observer cycles --viewsynth cycles`: 6 photoreal observe views, 2 rendered frames,
+a cached seam-A orbit at overlap 0.78). **R-6 honesty, unchanged at 🟢:** the *measured* ceiling is
+textured mannequins (single broadcast cam ⇒ half the body unmeasured; naked SMPL-X ⇒ no clothing
+geometry; no stadium), and texture quality is only as good as the *pose alignment* — on the **fake**
+pose pipeline the synthetic bodies don't sit on the real players, so measured coverage is ~0–1%
+(genuine per-player colour waits on the still-gated GVHMR pose, M1). The renderer and all seams are
+real and in sync; **broadcast-convincing fidelity is M3.** Next: **M3**.
 
 **Progress — M2-7 `CyclesRenderPass` wired E2E (2026-06-25):** the first *real* renderer — a
 Blender/Cycles `RenderPass` over the **resolved** scene, the photoreal path alongside the no-dep
@@ -371,6 +377,34 @@ edit↔render/observe *through Cycles* and the seam-A re-render are still **M2-1
 loop (edit a pose → see it re-render; `observe` returns photoreal views) does not yet exist — **M2
 stays 🟡. Next: M2-10.**
 
+**Progress — M2-10 edit↔render/observe sync through Cycles wired E2E (2026-06-27) — M2 GOAL met,
+flipped 🟡→🟢:** the photoreal loop now *closes* through the real renderer. Three seams, no new
+heavy machinery — each reuses `CyclesRenderPass` so what the agent edits, observes and orbits are the
+same photoreal pixels. **(AC-4) Edit re-projects with no avatar rebuild:** `CyclesRenderPass` already
+resolves `scene.corrections` at render time (`_pose_avatar` → `resolve_subject_motion` → SMPL-X LBS),
+so an edit is layered, not baked — proven by a Blender+SMPL-X gated test that renders the *same* PLY
+twice (clean vs after a `ROOT_TRANSLATION` **and** a `POSE_BODY_JOINT` correction) and asserts the
+root move + forearm swing change a localized block of pixels (a rebuild-required pipeline would render
+two identical frames). **(A-8) Photoreal `observe`:** `CyclesSceneObserver` (`adapters/render/observe.py`,
+`--observer cycles`) renders each canonical viewpoint as its own single-frame Cycles pass and copies
+the frame out to a stable per-view URI before the next overwrites it; the camera-free overlay/radar/UI
+delegate to the fake (same split as the proxy observer). **(A-9) Seam-A orbit = real re-render:**
+`CyclesViewSynthesizer` (`adapters/render/cycles_orbit.py`, `--viewsynth cycles`) makes the bounded
+orbit honest — it re-renders the *resolved 3D scene* (passed as `scene_hints["scene"]`) at the orbit
+cameras instead of hallucinating frames; `frustum_overlap` falls with the re-aim, the result stays
+`editable=False` "video, not editable", and the generative seam B stays gated (R-8). The controller's
+orbit cache now keys on a content `_orbit_fingerprint` of the resolved poses + assets, so an edit
+busts the cache (the orbit would show different geometry) while an unedited re-call still hits it.
+**E2E proof (R-6 honest):** `--avatar textured --env pitch --render cycles --observer cycles
+--viewsynth cycles` ran the whole loop — reconstruct → **observe (6 photoreal views)** → edit →
+resolve → **observe again** → render (2 frames) → **seam-A orbit (overlap 0.78, editable=False,
+cached + deduped over 2 calls)** → export. Tests: 3 new Blender-gated tests pass in 23.5 s; pure
+wiring/contract tests pin the selectors, the scene-hint requirement, the gated seam B, and the
+cache-bust-on-edit. **Honest ceiling (unchanged, R-6):** the avatars are textured *mannequins* and on
+the fake-pose path coverage is 0% (bodies don't sit on real players → all R-6 grey) — genuine colour
+waits on the gated GVHMR pose (M1); broadcast fidelity is M3. **The renderer + all seams are real and
+in sync, so M2 is 🟢. Next: M3.**
+
 ---
 
 ## M3 — Quality & polish ⬜  (+ ViewSynthesizer **seam B**)
@@ -420,8 +454,8 @@ fakes) ship in **M0**; the loop gets sharper feedback as fakes are replaced.
 | A-5 `FakeSceneObserver` (stdlib PNGs, no renderer) | M0 | `adapters/fakes` | ✅ |
 | A-6 Live MCP `serve()` over the app controller (`mcp` extra) | M1 | `adapters/mcp`, `app` | ✅ dispatch (tool→use-case→text/image blocks) real + unit-tested on fakes; SDK stdio loop lazy-imported, gated behind the `mcp` extra |
 | A-7 `observe` returns real `FRAME_OVERLAY` (reprojection) + proxy `SCENE_3D` | M1 | `adapters/blender`, `adapters/render` | ✅ reprojection `RenderPass` real (`ReprojectionOverlayRenderPass`); proxy `SCENE_3D` real via `BlenderSceneObserver` (out-of-process `blender --background`, Workbench/CPU, gated on a Blender binary) — `--observer blender` |
-| A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ⬜ |
-| A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/viewsynth` | ⬜ |
+| A-8 `observe` returns **photoreal** `SCENE_3D` from canonical viewpoints | M2 | `adapters/render` | ✅ `CyclesSceneObserver` renders each viewpoint through Cycles (`--observer cycles`); 2D overlay/radar/UI delegate to the fake (M2-10) |
+| A-9 Orbit viewpoints via ViewSynthesizer seam A in `observe` | M2 | `adapters/render` | ✅ `CyclesViewSynthesizer` re-renders the resolved 3D scene at the orbit cameras (`--viewsynth cycles`, non-generative, cached, `editable=False`); generative seam B stays gated (M2-10) |
 | A-10 Agent autonomy hardening: bounded edits, attention-driven targeting, eval harness | M3 | `app`, `core/agent` | ⬜ |
 
 **Invariants (hold at every milestone):** the agent edits *only* via `Correction` tools

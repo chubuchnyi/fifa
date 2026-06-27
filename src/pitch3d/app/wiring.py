@@ -79,7 +79,7 @@ def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
     ball: str = "fake", env: str = "fake", avatar: str = "fake", render: str = "fake",
-    export: str = "fake", observer: str = "fake",
+    export: str = "fake", observer: str = "fake", viewsynth: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
@@ -109,9 +109,14 @@ def default_ports(
     ``"fake"``
     or ``"gltf"`` (real SMPL-X ``.npz`` + canonical JSON now; glTF/GLB gated behind the
     ``export`` extra).
-    ``observer``: ``"fake"`` (stdlib PNGs) or ``"blender"`` (real proxy ``SCENE_3D`` via a
-    ``blender --background`` subprocess; needs the binary on ``$PITCH3D_BLENDER``/``PATH``). The
-    real model adapters need their extra (+ weights/GPU) at *call* time; importing them stays light.
+    ``observer``: ``"fake"`` (stdlib PNGs), ``"blender"`` (real proxy ``SCENE_3D`` via a
+    ``blender --background`` subprocess) or ``"cycles"`` (M2-10/A-8: photoreal ``SCENE_3D`` — the
+    resolved measured scene Cycles-rendered per viewpoint; needs ``$PITCH3D_BLENDER``).
+    ``viewsynth``: ``"fake"`` (the gated generative seam-A/B stand-in) or ``"cycles"`` (M2-10/A-9:
+    the non-generative seam-A backend that re-renders the reconstructed 3D scene at the orbit
+    cameras; ``Application.render_orbit`` then yields a photoreal *video, not editable*; needs
+    ``$PITCH3D_BLENDER``). The real model adapters need their extra (+ weights/GPU) at *call* time;
+    importing them stays light.
 
     ``device`` (default ``"cpu"``, the local concept-validation profile) is forwarded to every
     real perception adapter; pass ``"cuda"`` where a GPU exists. Each adapter's own dataclass
@@ -229,9 +234,18 @@ def default_ports(
         raise ValueError(f"unknown ball {ball!r}; expected 'fake' or 'tracknet'")
 
     out = Path(out_dir)
-    # One synthesizer instance backs both the seam-A render selector and the render_orbit
-    # use-case (so they share a backend); real generative synths stay gated (R-8, ADR-0007).
-    vs: ViewSynthesizer = FakeViewSynthesizer(out_dir=out / "synth")
+    # One synthesizer instance backs both the seam-A render selector and the render_orbit use-case
+    # (so they share a backend). 'fake' is the gated generative stand-in; 'cycles' is the
+    # non-generative seam-A backend that re-renders the reconstructed 3D scene at the orbit cameras
+    # (A-9). Real *generative* synths stay gated (R-8, ADR-0007).
+    if viewsynth == "fake":
+        vs: ViewSynthesizer = FakeViewSynthesizer(out_dir=out / "synth")
+    elif viewsynth == "cycles":
+        from ..adapters.render import CyclesViewSynthesizer
+
+        vs = CyclesViewSynthesizer(out_dir=out / "synth")
+    else:
+        raise ValueError(f"unknown viewsynth {viewsynth!r}; expected 'fake' or 'cycles'")
     if render == "fake":
         rnd: RenderPass = FakeRenderPass(out_dir=out / "render")
     elif render == "overlay":
@@ -270,8 +284,12 @@ def default_ports(
         from ..adapters.blender import BlenderSceneObserver
 
         obs = BlenderSceneObserver(out_dir=out / "observations")
+    elif observer == "cycles":
+        from ..adapters.render import CyclesSceneObserver
+
+        obs = CyclesSceneObserver(out_dir=out / "observations")
     else:
-        raise ValueError(f"unknown observer {observer!r}; expected 'fake' or 'blender'")
+        raise ValueError(f"unknown observer {observer!r}; expected 'fake', 'blender' or 'cycles'")
 
     if env == "fake":
         env_rec: EnvReconstructor = FakeEnvReconstructor(out_dir=out / "assets")

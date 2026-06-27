@@ -262,3 +262,85 @@ def test_cycles_posed_avatar_limbs_follow_the_pose(tmp_path, make_scene):
     # (constant Cycles seed), so this is geometry, not render noise. A rigid bug would give 0.
     assert n_changed > 80
     assert n_changed < 0.4 * f0.shape[0] * f0.shape[1]
+
+
+# --- Blender + SMPL-X gated: an EDIT re-projects with no avatar rebuild (M2-10, AC-4) ----
+@pytest.mark.skipif(
+    locate_blender() is None or locate_smplx_model() is None,
+    reason="needs a Blender binary and the SMPL-X model (.npz)",
+)
+def test_cycles_pose_edit_reprojects_without_avatar_rebuild(tmp_path, make_scene):
+    # The M2-10 AC-4 proof: an *edit* — a Correction layered onto the scene, root *and* a limb —
+    # re-projects into the Cycles frame with no avatar rebuild. We render the SAME avatar PLY twice:
+    # once clean, once after appending a ROOT_TRANSLATION and a POSE_BODY_JOINT correction. The pass
+    # resolves scene.corrections at render time (resolve_subject_motion → LBS), so the second frame
+    # shows the moved root and bent elbow though the mesh on disk never changed. A pipeline that
+    # baked the proposal into the asset (rebuild-required) would render two identical frames.
+    import cv2
+
+    from pitch3d.core.correction.engine import make_offset
+    from pitch3d.core.scene.layers import CorrectionTarget, TargetKind
+
+    model = SmplxModel.load(locate_smplx_model())
+    betas = np.zeros(10)
+    verts = model.shaped(betas)
+    rgb = np.tile(np.array([[220, 40, 40]], dtype=np.uint8), (verts.shape[0], 1))
+    measured = np.ones(verts.shape[0], dtype=bool)
+    uri = write_vertex_colored_ply(tmp_path / "avatar_5.ply", verts, model.faces, rgb, measured)
+
+    # One frame, arm abducted clear of the torso so an elbow edit shows against the sky (3/4 view).
+    body = np.zeros((1, N_SMPLX_BODY_JOINTS, 3))
+    body[0, 15] = [0.0, 0.0, -1.1]
+    pose = PoseSequence(
+        frames=np.array([0]),
+        global_orient=np.array([[0.0, 1.2, 0.0]]),
+        body_pose=body,
+        transl=np.array([[0.0, 0.2, 2.4]]),
+    )
+    subj = Subject(track_id=5, proposal=SubjectMotion(SmplxShape(betas), pose))
+    scene = make_scene(subjects=[subj])
+    ref = RenderAssetRef(
+        id="a-5", kind=RenderAssetKind.AVATAR_TEXTURED_SMPLX, uri=uri,
+        model=ModelInfo(name="t", backend=Backend.FAKE), subject_track_id=5,
+    )
+    scene.render_assets = [ref]
+
+    intr = CameraIntrinsics(fx=130.0, fy=130.0, cx=80.0, cy=60.0, width=160, height=120)
+    cam = CameraTrack.identity(intr, 1)
+
+    # Render 1: the proposal as-is (no edits).
+    clean = CyclesRenderPass(out_dir=tmp_path / "clean", samples=16).render(
+        scene, cam, RenderQuality.FINAL
+    )
+
+    # The edit: nudge the root sideways AND bend the left elbow (SMPL-X joint 18 == body_pose row
+    # 17). We only append corrections to the SAME scene — the PLY asset is untouched, not rebuilt.
+    scene.corrections.append(
+        make_offset(
+            "e-root",
+            CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=5),
+            (0, 0),
+            np.array([0.18, 0.0, 0.0]),
+        )
+    )
+    scene.corrections.append(
+        make_offset(
+            "e-elbow",
+            CorrectionTarget(kind=TargetKind.POSE_BODY_JOINT, subject_track_id=5, joint_index=17),
+            (0, 0),
+            np.array([1.8, 0.0, 1.8]),
+        )
+    )
+    edited = CyclesRenderPass(out_dir=tmp_path / "edited", samples=16).render(
+        scene, cam, RenderQuality.FINAL
+    )
+
+    f0 = cv2.imread(str(Path(clean.uri) / "frame_00000.png"))
+    f1 = cv2.imread(str(Path(edited.uri) / "frame_00000.png"))
+    assert f0 is not None and f1 is not None
+    changed = np.abs(f0.astype(int) - f1.astype(int)).max(axis=2) > 20
+    n_changed = int(changed.sum())
+    # The edit moved the root and swung the forearm → a substantial but localized pixel change; the
+    # grass/sky background is identical (default Cycles seed), so this is the edit, not noise.
+    assert n_changed > 80
+    assert n_changed < 0.6 * f0.shape[0] * f0.shape[1]

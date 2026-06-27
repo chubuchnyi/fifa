@@ -11,12 +11,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+
 from pitch3d.adapters.fakes import FakeViewSynthesizer
 from pitch3d.adapters.render import ViewSynthOrbitRenderPass, orbit_render_result
 from pitch3d.app import build_app
 from pitch3d.app.wiring import default_ports
 from pitch3d.core.ports.render import RenderQuality
 from pitch3d.core.scene.assets import SynthViewSeam
+from pitch3d.core.scene.layers import CorrectionTarget, TargetKind
 
 
 class _CountingSynth(FakeViewSynthesizer):
@@ -64,6 +67,25 @@ def test_changing_the_orbit_deviation_is_a_new_cache_entry(app, clip):
     scene_id = app.run_reconstruction(episode.id)
     app.render_orbit(scene_id, max_deviation_deg=10.0)
     app.render_orbit(scene_id, max_deviation_deg=30.0)  # different params ⇒ recompute
+    assert app.ports.viewsynth.calls == 2
+
+
+def test_editing_the_scene_busts_the_orbit_cache(app, clip):
+    # A-9 correctness: a re-render seam-A backend re-shoots the *resolved* 3D scene, so an edit must
+    # invalidate the orbit cache (the orbit would show different geometry) while an unedited re-call
+    # still hits it. The controller keys the cache on a fingerprint of the resolved poses + assets.
+    app.ports.viewsynth = _CountingSynth(out_dir=app.out_dir / "synth")
+    episode = app.register_clip(clip, name="t")
+    scene_id = app.run_reconstruction(episode.id)
+    app.render_orbit(scene_id)  # miss ⇒ 1 re-shoot
+    track_id = app.get_scene(scene_id).subjects[0].track_id
+    app.apply_offset(
+        scene_id,
+        CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=track_id),
+        (0, 7),
+        np.array([0.0, 0.0, 0.5]),
+    )
+    app.render_orbit(scene_id)  # the resolved scene changed ⇒ fingerprint differs ⇒ recompute
     assert app.ports.viewsynth.calls == 2
 
 

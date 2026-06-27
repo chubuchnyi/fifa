@@ -69,6 +69,7 @@ def run_dry_run(
     clip_path: str | None = None, detector: str = "fake", tracker: str = "fake",
     calibrator: str = "fake", pose: str = "fake", ball: str = "fake", env: str = "fake",
     avatar: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
+    viewsynth: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
@@ -88,7 +89,8 @@ def run_dry_run(
     ports = default_ports(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, env=env, avatar=avatar, render=render,
-        export=export, observer=observer, device=device, detector_weights=detector_weights,
+        export=export, observer=observer, viewsynth=viewsynth, device=device,
+        detector_weights=detector_weights,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend,
@@ -227,7 +229,7 @@ def run_dry_run(
     lineup = {
         "detect": detector, "track": tracker, "calibrate": calibrator, "pose": pose,
         "ball": ball, "env": env, "avatar": avatar, "render": render, "export": export,
-        "observe": observer,
+        "observe": observer, "viewsynth": viewsynth,
     }
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
@@ -280,9 +282,14 @@ def main(argv: list[str] | None = None) -> int:
                              "limited-orbit re-shoot (video, not editable)")
     parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
                         help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
-    parser.add_argument("--observer", default="fake", choices=["fake", "blender"],
-                        help="scene observer; 'blender' renders real proxy SCENE_3D "
-                             "($PITCH3D_BLENDER or 'blender' on PATH)")
+    parser.add_argument("--observer", default="fake", choices=["fake", "blender", "cycles"],
+                        help="scene observer; 'blender' renders real proxy SCENE_3D, 'cycles' "
+                             "renders photoreal SCENE_3D per viewpoint (M2-10/A-8); both need "
+                             "$PITCH3D_BLENDER or 'blender' on PATH")
+    parser.add_argument("--viewsynth", default="fake", choices=["fake", "cycles"],
+                        help="seam-A view synthesizer; 'cycles' re-renders the reconstructed 3D "
+                             "scene at the orbit cameras (non-generative, M2-10/A-9, needs "
+                             "$PITCH3D_BLENDER); 'fake' is the gated generative stand-in (R-8)")
     parser.add_argument("--device", default="cpu", choices=["cpu", "cuda"],
                         help="inference device for real perception adapters "
                              "(default: cpu, the local concept-validation profile)")
@@ -330,6 +337,7 @@ def main(argv: list[str] | None = None) -> int:
         render=args.render,
         export=args.export,
         observer=args.observer,
+        viewsynth=args.viewsynth,
         device=args.device,
         detector_weights=args.detector_weights,
         detector_classes=args.detector_classes,

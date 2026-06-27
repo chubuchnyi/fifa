@@ -10,6 +10,7 @@ directly (single source of truth, ADR-0002).
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -332,15 +333,30 @@ class Application:
             resolved, frames, max_deviation_deg=max_deviation_deg
         ).scaled(q.scale)
         span = f"{int(frames[0])}-{int(frames[-1])}" if frames.shape[0] else "empty"
+        # Content-address on the *resolved* scene too: a seam-A backend that re-renders the 3D
+        # scene (A-9) must re-shoot after any edit/asset rebuild, so an edit busts the cache while
+        # an unedited re-call still hits it. A generative backend ignores the fingerprint's effect.
         key = self.ports.cache.key_for(
             "viewsynth_orbit",
             f"{clip.source_id}:{span}",
-            {"max_deviation_deg": float(max_deviation_deg), "quality": q.value},
+            {
+                "max_deviation_deg": float(max_deviation_deg),
+                "quality": q.value,
+                "scene": _orbit_fingerprint(resolved),
+            },
             self.ports.viewsynth.info().name,
         )
         ref = self.ports.cache.get(key)
         if ref is None:
-            hints = {**(scene_hints or {}), "quality": q.value}
+            # Pass the resolved scene as a 3D hint so a re-render backend (CyclesViewSynthesizer,
+            # A-9) can re-shoot the actual geometry; generative backends ignore it and synthesize
+            # from the clip (ADR-0007). The orbit camera is prescribed (estimated=False).
+            hints = {
+                **(scene_hints or {}),
+                "quality": q.value,
+                "scene": resolved,
+                "max_deviation_deg": float(max_deviation_deg),
+            }
             ref = self.ports.viewsynth.render_orbit(clip, orbit_cam, hints)
             self.ports.cache.put(key, ref)
         stored = self._scenes[scene_id]
@@ -374,6 +390,23 @@ class Application:
             translation=np.tile(cam0.translation[0], (t, 1)),
             estimated=True,
         )
+
+
+def _orbit_fingerprint(scene: Scene) -> str:
+    """A short content hash of the resolved scene's render-relevant state (poses + assets).
+
+    Keys the seam-A orbit cache so a re-render backend (A-9, :class:`CyclesViewSynthesizer`)
+    re-shoots whenever an edit or asset rebuild changes what the orbit would show, while an
+    unedited re-call still hits the cache (ADR-0004).
+    """
+    h = hashlib.sha256()
+    for s in sorted(scene.subjects, key=lambda s: s.track_id):
+        p = s.proposal.pose
+        for arr in (p.frames, p.global_orient, p.body_pose, p.transl, s.proposal.shape.betas):
+            h.update(np.ascontiguousarray(arr).tobytes())
+    for a in sorted(scene.render_assets, key=lambda a: a.id):
+        h.update(f"{a.id}|{a.uri}|{a.kind.value}".encode())
+    return h.hexdigest()[:16]
 
 
 def _target(spec) -> CorrectionTarget:
