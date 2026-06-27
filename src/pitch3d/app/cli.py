@@ -21,7 +21,7 @@ import numpy as np
 from ..adapters.io import FFmpegIngestor
 from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.coherence import CoherenceConfig
-from ..core.correction.engine import make_offset
+from ..core.correction.engine import make_offset, make_smoothing
 from ..core.orchestration import StitchConfig
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
@@ -75,6 +75,7 @@ def run_dry_run(
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
+    motion_prior: str = "fake",
     stitch: bool = False, coherence: bool = False,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -95,6 +96,7 @@ def run_dry_run(
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
+        motion_prior=motion_prior,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -194,6 +196,32 @@ def run_dry_run(
         f"(max residual {report.worst_residual_m:.3f} m, {report.n_off_anchor} off-anchor, R-6)"
     )
 
+    # 8d) M3-8: a learned temporal denoiser offered through the SAME smoothing Correction seam
+    #     (method="learned"). PREVIEWED (FR-23, not committed) so the gated learned model swaps in
+    #     without changing this path — here the GPU-free fake prior denoises the subject's stepped
+    #     root path. The pure moving_average/gaussian methods need no prior; the learned model
+    #     (HTD-Refine/StableMotion) is gated (R-8, --motion-prior learned).
+    smooth_cand = make_smoothing(
+        "cand-learned-smooth", target, (int(frames[0]), int(frames[-1])), method="learned",
+        note="dry-run learned motion-prior denoise (preview only)",
+    )
+    n_corr = len(app.get_scene(scene_id).corrections)
+    try:
+        pv_smooth = app.preview(scene_id, smooth_cand)
+        assert len(app.get_scene(scene_id).corrections) == n_corr, "preview must not mutate"
+        span = pv_smooth["frame_range"][1] - pv_smooth["frame_range"][0] + 1
+        print(
+            f"== M3-8 learned-smoothing[preview]: MotionPrior '{ports.motion_prior.info().name}' "
+            f"denoised subject {tid} root over {span} frame(s) → max_abs_change "
+            f"{pv_smooth['max_abs_change']:.4f} m (not committed; learned model gated R-8 — "
+            f"--motion-prior learned)"
+        )
+    except (NotImplementedError, RuntimeError) as exc:
+        print(
+            f"\n== M3-8 learned-smoothing[preview]: skipped — learned model not wired "
+            f"({type(exc).__name__}); use --motion-prior fake (GPU-free gaussian)"
+        )
+
     # 8b) SEAM B (ADR-0007, FR-30): the data amplifier. Synthesize N pseudo-multi-views from the
     #     single broadcast camera and attach them to the scene; the env/avatar reconstruction below
     #     consumes them as extra calibrated input (AC-5b). Unlike seam A these are data, not video —
@@ -276,7 +304,7 @@ def run_dry_run(
     lineup = {
         "detect": detector, "track": tracker, "calibrate": calibrator, "pose": pose,
         "ball": ball, "env": env, "avatar": avatar, "render": render, "export": export,
-        "observe": observer, "viewsynth": viewsynth,
+        "observe": observer, "viewsynth": viewsynth, "motion_prior": motion_prior,
     }
     real = [f"{k}={v}" for k, v in lineup.items() if v != "fake"]
     fake = [k for k, v in lineup.items() if v == "fake"]
@@ -374,6 +402,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="inject a bring-your-own OcclusionBackend (Diffusion-VAS amodal + "
                              "SAM-3 masklets, M3-2) used by REFIT 'complete_occlusions'; "
                              "requires --pose gvhmr")
+    parser.add_argument("--motion-prior", default="fake", metavar="fake|learned|pkg:Factory",
+                        help="learned temporal denoiser for TEMPORAL_SMOOTHING method='learned' "
+                             "(M3-8): 'fake' (real GPU-free gaussian), 'learned' (gated "
+                             "HTD-Refine/StableMotion, R-8) or a dotted-path BYO MotionPrior")
     parser.add_argument("--stitch", action="store_true",
                         help="re-link fragmented tracklets between TRACK and POSE so "
                              "occluded players don't 'appear from nowhere' (off by default)")
@@ -410,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
         tracker_backend=args.tracker_backend,
         avatar_backend=args.avatar_backend,
         occlusion_backend=args.occlusion_backend,
+        motion_prior=args.motion_prior,
         stitch=args.stitch,
         coherence=args.coherence,
     )

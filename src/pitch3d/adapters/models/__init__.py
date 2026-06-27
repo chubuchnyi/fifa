@@ -33,6 +33,7 @@ from .calibration import (
     PitchKeypointBackend,
 )
 from .detection import DETECTOR_CLASS_MAPS, RFDETRBackend, RFDETRDetector
+from .motion import LearnedMotionPrior
 from .pose import (
     DiffusionVasOcclusionBackend,
     GVHMRBackend,
@@ -95,6 +96,7 @@ __all__ = [
     "GaussianAvatarBuilder",
     "GaussianRefiner",
     "KeypointFieldCalibrator",
+    "LearnedMotionPrior",
     "MeasuredPitchEnvReconstructor",
     "OcclusionBackend",
     "PitchKeypointBackend",

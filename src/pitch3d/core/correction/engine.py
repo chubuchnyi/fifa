@@ -10,7 +10,8 @@ tested in isolation:
 
 * ``CONSTANT_OFFSET``     add a vector / compose a rotation across the range.
 * ``KEYFRAME_INTERP``     fill the range between operator keyframes (lerp / slerp).
-* ``TEMPORAL_SMOOTHING``  windowed moving-average / gaussian (quaternion-aware).
+* ``TEMPORAL_SMOOTHING``  windowed moving-average / gaussian (quaternion-aware), or a learned
+  denoiser (``method="learned"``) via the injected :class:`MotionPrior` port (M3-8).
 * ``REFIT``               re-run constraint-guided HMR via the injected port and splice.
 
 Rotation targets are handled honestly in rotation space (compose / slerp / quaternion
@@ -46,6 +47,7 @@ from .rotations import (
 
 if TYPE_CHECKING:
     from ..ports.io import ClipRef
+    from ..ports.motion_prior import MotionPrior
     from ..ports.pose import PoseEstimator
 
 _ROTATION_KINDS = (TargetKind.POSE_BODY_JOINT, TargetKind.ROOT_ORIENTATION)
@@ -163,7 +165,12 @@ def _range_rows(frames_arr: np.ndarray, frame_range: FrameRange) -> np.ndarray:
 
 
 def _apply_inplace(
-    arr: np.ndarray, frames_arr: np.ndarray, corr: Correction, *, is_rotation: bool
+    arr: np.ndarray,
+    frames_arr: np.ndarray,
+    corr: Correction,
+    *,
+    is_rotation: bool,
+    motion_prior: MotionPrior | None = None,
 ) -> None:
     """Apply one non-REFIT correction to the rows of ``arr`` that fall in its range."""
     rows = _range_rows(frames_arr, corr.frame_range)
@@ -187,11 +194,23 @@ def _apply_inplace(
         )
     elif mode == CorrectionMode.TEMPORAL_SMOOTHING:
         p = corr.payload
-        arr[rows] = (
-            smooth_rotation(arr[rows], p.window, p.method, p.sigma)
-            if is_rotation
-            else smooth_vector(arr[rows], p.window, p.method, p.sigma)
-        )
+        if p.method == "learned":
+            if motion_prior is None:
+                raise ValueError(
+                    "TEMPORAL_SMOOTHING method='learned' needs a MotionPrior port — pass "
+                    "motion_prior=<MotionPrior> to resolve (CLI: --motion-prior). The fake "
+                    "denoises with no GPU; the learned model (HTD-Refine/StableMotion) is "
+                    "gated (R-8). The ball trajectory has no motion prior."
+                )
+            arr[rows] = motion_prior.denoise(
+                arr[rows], np.asarray(frames_arr)[rows], is_rotation=is_rotation
+            )
+        else:
+            arr[rows] = (
+                smooth_rotation(arr[rows], p.window, p.method, p.sigma)
+                if is_rotation
+                else smooth_vector(arr[rows], p.window, p.method, p.sigma)
+            )
     else:  # REFIT is resolved at the motion level, not per-array
         raise ValueError(f"{mode} is not an in-place array mode")
 
@@ -228,6 +247,7 @@ def resolve_subject_motion(
     *,
     refit_port: PoseEstimator | None = None,
     clip: ClipRef | None = None,
+    motion_prior: MotionPrior | None = None,
 ) -> SubjectMotion:
     """Return ``proposal ⊕ corrections`` for one subject; ``proposal`` is never mutated.
 
@@ -248,14 +268,19 @@ def resolve_subject_motion(
             if j is None:
                 raise ValueError("POSE_BODY_JOINT correction requires target.joint_index")
             _apply_inplace(
-                resolved.pose.body_pose[:, j, :], resolved.pose.frames, corr, is_rotation=True
+                resolved.pose.body_pose[:, j, :], resolved.pose.frames, corr,
+                is_rotation=True, motion_prior=motion_prior,
             )
         elif kind == TargetKind.ROOT_ORIENTATION:
             _apply_inplace(
-                resolved.pose.global_orient, resolved.pose.frames, corr, is_rotation=True
+                resolved.pose.global_orient, resolved.pose.frames, corr,
+                is_rotation=True, motion_prior=motion_prior,
             )
         elif kind == TargetKind.ROOT_TRANSLATION:
-            _apply_inplace(resolved.pose.transl, resolved.pose.frames, corr, is_rotation=False)
+            _apply_inplace(
+                resolved.pose.transl, resolved.pose.frames, corr,
+                is_rotation=False, motion_prior=motion_prior,
+            )
         elif kind == TargetKind.SHAPE_BETA:
             if corr.mode != CorrectionMode.CONSTANT_OFFSET:
                 raise ValueError("SHAPE_BETA supports CONSTANT_OFFSET only (β is frame-invariant)")
@@ -288,10 +313,12 @@ def preview_subject_motion(
     *,
     refit_port: PoseEstimator | None = None,
     clip: ClipRef | None = None,
+    motion_prior: MotionPrior | None = None,
 ) -> SubjectMotion:
     """FR-23: resolve *as if* ``candidate`` were added, without storing it or mutating state."""
     return resolve_subject_motion(
-        proposal, [*corrections, candidate], refit_port=refit_port, clip=clip
+        proposal, [*corrections, candidate],
+        refit_port=refit_port, clip=clip, motion_prior=motion_prior,
     )
 
 

@@ -160,7 +160,10 @@ class Application:
     def resolved(self, scene_id: str) -> Scene:
         """The resolved scene (proposal ⊕ corrections), REFIT-aware."""
         scene = self._scenes[scene_id]
-        return resolve_scene(scene, refit_port=self.ports.pose, clip=self._scene_clip.get(scene_id))
+        return resolve_scene(
+            scene, refit_port=self.ports.pose, clip=self._scene_clip.get(scene_id),
+            motion_prior=self.ports.motion_prior,
+        )
 
     # --- visual + textual feedback (the LLM loop) -----------------------------
     def observe(
@@ -262,8 +265,8 @@ class Application:
                 raise ValueError("non-ball correction target is missing a subject_track_id")
             subj = scene.subject(tid)
             existing = scene.corrections_for(tid)
-            base_m = resolve_subject_motion(subj.proposal, existing, refit_port=self.ports.pose, clip=clip)
-            prev_m = preview_subject_motion(subj.proposal, existing, candidate, refit_port=self.ports.pose, clip=clip)
+            base_m = resolve_subject_motion(subj.proposal, existing, refit_port=self.ports.pose, clip=clip, motion_prior=self.ports.motion_prior)
+            prev_m = preview_subject_motion(subj.proposal, existing, candidate, refit_port=self.ports.pose, clip=clip, motion_prior=self.ports.motion_prior)
             base, prev = _targeted_array(base_m, tgt), _targeted_array(prev_m, tgt)
         max_change = float(np.max(np.abs(np.asarray(prev) - np.asarray(base)))) if np.size(base) else 0.0
         return {

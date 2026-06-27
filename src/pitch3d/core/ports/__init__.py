@@ -10,6 +10,7 @@ from .cache import Cache, content_key
 from .export import Exporter, ExportFormat, ExportResult
 from .io import ClipRef, CropRef
 from .jobs import JobHandle, JobQueue, JobState, Worker
+from .motion_prior import MotionPrior
 from .observation import (
     Observation,
     ObservationImage,
@@ -53,6 +54,7 @@ __all__ = [
     "JobQueue",
     "JobState",
     "ModelProvider",
+    "MotionPrior",
     "Observation",
     "ObservationImage",
     "ObservationKind",

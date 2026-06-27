@@ -11,6 +11,7 @@ from __future__ import annotations
 from .cache import DiskCache, MemoryCache
 from .export import FakeExporter
 from .jobs import InProcessJobQueue, InProcessWorker
+from .motion_prior import FakeMotionPrior
 from .observer import FakeSceneObserver
 from .perception import (
     FakeBallTracker,
@@ -31,6 +32,7 @@ __all__ = [
     "FakeEnvReconstructor",
     "FakeExporter",
     "FakeFieldCalibrator",
+    "FakeMotionPrior",
     "FakePoseEstimator",
     "FakeRenderPass",
     "FakeSceneObserver",

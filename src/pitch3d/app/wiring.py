@@ -16,6 +16,7 @@ from typing import Any
 from ..core.ports.cache import Cache
 from ..core.ports.export import Exporter
 from ..core.ports.jobs import JobQueue
+from ..core.ports.motion_prior import MotionPrior
 from ..core.ports.observation import SceneObserver
 from ..core.ports.perception import BallTracker, Detector, FieldCalibrator, Tracker
 from ..core.ports.pose import PoseEstimator
@@ -42,6 +43,7 @@ class AppPorts:
     exporter: Exporter
     cache: Cache
     queue: JobQueue
+    motion_prior: MotionPrior
     model_version: str = "fake-0"
 
 
@@ -84,6 +86,7 @@ def default_ports(
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
+    motion_prior: str = "fake",
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -142,6 +145,12 @@ def default_ports(
     pairing one with ``"fake"`` raises. ``occlusion_backend`` injects a cluster-occlusion completer
     (Diffusion-VAS + SAM-3, M3-2) into the GVHMR adapter (needs ``pose="gvhmr"``); the re-fit only
     calls it when a correction sets ``complete_occlusions``.
+
+    ``motion_prior`` (M3-8) selects the temporal denoiser a ``TEMPORAL_SMOOTHING`` correction with
+    ``method="learned"`` calls: ``"fake"`` (default — the real GPU-free gaussian denoiser),
+    ``"learned"`` (the gated HTD-Refine/StableMotion model — importable, raises until the ``motion``
+    extra is wired, R-8), or a dotted-path ``"package.module:Factory"`` BYO ``MotionPrior``
+    (ADR-0006). The pure ``moving_average``/``gaussian`` smoothing methods need no prior at all.
     """
     from ..adapters.fakes import (
         DiskCache,
@@ -151,6 +160,7 @@ def default_ports(
         FakeEnvReconstructor,
         FakeExporter,
         FakeFieldCalibrator,
+        FakeMotionPrior,
         FakePoseEstimator,
         FakeRenderPass,
         FakeSceneObserver,
@@ -346,6 +356,19 @@ def default_ports(
     else:
         raise ValueError(f"unknown avatar {avatar!r}; expected 'fake', 'textured' or 'gaussian'")
 
+    # Learned motion-prior denoiser (M3-8), engaged via a TEMPORAL_SMOOTHING correction with
+    # method="learned": "fake" is the real GPU-free gaussian denoiser; "learned" is the gated
+    # HTD-Refine/StableMotion model (raises until `motion` extra is wired, R-8); anything else is
+    # a dotted-path BYO MotionPrior (ADR-0006). The pure moving_average/gaussian methods need none.
+    if motion_prior == "fake":
+        mp: MotionPrior = FakeMotionPrior()
+    elif motion_prior == "learned":
+        from ..adapters.models import LearnedMotionPrior
+
+        mp = LearnedMotionPrior(device=device)
+    else:
+        mp = _resolve_backend(motion_prior, MotionPrior)
+
     return AppPorts(
         detector=det,
         tracker=trk,
@@ -360,6 +383,7 @@ def default_ports(
         exporter=exp,
         cache=DiskCache(root=out / "cache"),
         queue=InProcessJobQueue(),
+        motion_prior=mp,
     )
 
 

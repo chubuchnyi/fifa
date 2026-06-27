@@ -452,7 +452,7 @@ in sync, so M2 is 🟢. Next: M3.**
 | ✅ **M3-5 Confidence map + "needs attention" prioritization UI** | `adapters/render`, `core/scene` |
 | M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
 | M3-7 Web export (three.js / R3F) | `adapters/export` |
-| **M3-8 Learned motion-prior smoothing (option)** — a learned denoiser/motion-prior as an alternative to moving-average, behind the existing `smoothing`/`refit` Correction seam. Leading candidates: **HTD-Refine**, **StableMotion** (purpose-built denoisers); MotionBricks = generative fallback | `adapters/models` ↔ `core/correction` |
+| ✅ **M3-8 Learned motion-prior smoothing (option)** — a learned denoiser/motion-prior as an alternative to moving-average, behind the existing `smoothing`/`refit` Correction seam. Leading candidates: **HTD-Refine**, **StableMotion** (purpose-built denoisers); MotionBricks = generative fallback | `adapters/models` ↔ `core/correction` |
 
 **Exit criteria (TZ AC-5b, AC-6, AC-7):** seam B emits N synthetic views accepted by
 reconstruction as multi-view input; export + three.js viewer open externally without scale/coord
@@ -569,6 +569,33 @@ lock (parametrized fake+gvhmr, Z untouched, input intact), per-frame & blended a
 all-on-anchor, the R-8 occlusion gate + actionable no-backend error, an injected-stub proving the
 completion output flows then the anchor locks on top, and the wiring (inject + `requires --pose gvhmr`);
 suite **535 passed / 12 skipped**, no GPU/torch (**AC-7**).
+
+**Progress — M3-8 learned motion-prior through the existing smoothing seam (2026-06-27):** the seam
+half, built real. A learned denoiser is offered as a **new `method="learned"` on the existing
+`TEMPORAL_SMOOTHING` correction** (reuses `make_smoothing`/`SmoothingPayload` — no new mode or payload),
+routed through an injected **`MotionPrior` port** (`core/ports/motion_prior.py`, `denoise(values, frames,
+*, is_rotation)`), exactly mirroring how REFIT routes through `refit_port`. The engine threads
+`motion_prior` through `resolve_subject_motion`/`preview_subject_motion`/`resolve_scene` and the
+controller/CLI, so a learned model stays a normal, inspectable **correction** (ADR-0002), never a hidden
+edit. `FakeMotionPrior` (`adapters/fakes`) is a **fake-real, GPU-free** zero-phase gaussian denoiser
+(reuses the engine smoothers, rotation-aware via `is_rotation`) — the seam runs and is tested now, not a
+stub; the pure `moving_average`/`gaussian` methods still need **no** prior. **R-8 gating:**
+`LearnedMotionPrior` (`adapters/models/motion.py`, HTD-Refine/StableMotion-class) is importable (no torch)
+but `denoise` raises an actionable `NotImplementedError` pointing at the `motion` extra, the GPU-free fake,
+and — crucially — that any learned completion must be **validated against the homography anchor** (off-prior
+drift is hallucinated, not measured, **R-6**); it engages only when wired (`--motion-prior learned` or a
+dotted-path BYO, ADR-0006). **E2E proof:** the dry-run *previews* (FR-23, not committed) a learned-smooth of
+the first subject's stepped root path → `MotionPrior 'FakeMotionPrior' denoised subject 0 root over 12
+frame(s) → max_abs_change 0.0365 m`; with `--motion-prior learned` the gate **degrades gracefully**
+(`skipped — learned model not wired (NotImplementedError)`) and the golden path still completes (exit 0),
+corrections bake empty on resolve (no regression). **Tests:** 13 new (`test_motion_prior.py`) — the fake
+prior is a `MotionPrior` + softens a step (total-variation drops, input not mutated) + deterministic and
+rotation-aware; the engine routes `method="learned"` through the port (== `fake.denoise`, differs from the
+proposal, proposal intact), raises actionably with no prior, passes `is_rotation` per target (translation
+euclidean, orientation rotation), and touches only its frame range; pure smoothing still needs no prior;
+preview threads the prior; the gated model raises; wiring defaults to the fake, selects the gated learned,
+accepts a dotted-path BYO, and rejects a bad spec. Suite **548 passed / 12 skipped**, no GPU/torch
+(**AC-7**).
 
 ---
 

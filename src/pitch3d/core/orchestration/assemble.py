@@ -21,6 +21,7 @@ from .pipeline import ReconstructionResult
 
 if TYPE_CHECKING:
     from ..ports.io import ClipRef
+    from ..ports.motion_prior import MotionPrior
     from ..ports.pose import PoseEstimator
 
 _CLS_TO_ROLE = {
@@ -71,18 +72,24 @@ def assemble_scene(
 
 
 def resolve_scene(
-    scene: Scene, *, refit_port: PoseEstimator | None = None, clip: ClipRef | None = None
+    scene: Scene,
+    *,
+    refit_port: PoseEstimator | None = None,
+    clip: ClipRef | None = None,
+    motion_prior: MotionPrior | None = None,
 ) -> Scene:
     """Return a copy of ``scene`` with every subject/ball resolved and the stack baked empty.
 
-    REFIT corrections call ``refit_port`` (the :class:`PoseEstimator`) over ``clip``; pass both
-    when the scene may contain REFIT corrections. The input scene is never mutated.
+    REFIT corrections call ``refit_port`` (the :class:`PoseEstimator`) over ``clip``; learned
+    TEMPORAL_SMOOTHING corrections call ``motion_prior`` (the :class:`MotionPrior`). Pass them when
+    the scene may contain those corrections. The input scene is never mutated.
     """
     resolved_subjects = [
         replace(
             s,
             proposal=resolve_subject_motion(
-                s.proposal, scene.corrections_for(s.track_id), refit_port=refit_port, clip=clip
+                s.proposal, scene.corrections_for(s.track_id),
+                refit_port=refit_port, clip=clip, motion_prior=motion_prior,
             ),
         )
         for s in scene.subjects
