@@ -1,9 +1,17 @@
 # M1 — Status & Forward Plan
 
-*Snapshot: 2026-06-25. Companion to `roadmap.md` (which is the step-by-step M1 build log);
+*Snapshot: 2026-06-27. Companion to `roadmap.md` (which is the step-by-step M1 build log);
 this doc is the higher-level "where are we / what's blocking / what's next" view.*
 
 ## TL;DR
+
+**M1 CLOSED 🟢 (2026-06-27).** The editable loop runs end to end on a real clip and all three exit
+criteria are MET (AC-1 B1 reprojection median **0.236 m**; AC-2 four-mode propagation + preview +
+non-destructive resolve, tested + pod corr-1; AC-3 F-curve edits + export). Suite **480 passed / 5
+display-gated skips**. Documented ceiling (R-6): the photoreal-grade pose/ball *heavy* nets ship as
+injection-seam stubs (real backends inject by dotted path, ADR-0006); the GUI live-Blender session is
+display-gated; metric-XY is measured on lined footage. M2 (measured photoreal) is also 🟢; next is M3.
+
 
 The full pipeline runs end-to-end on fake adapters (`tests/e2e/test_dry_run.py`) and three
 of five perception stages are real: **detector (RF-DETR)** and **tracker (ByteTrack)** are
@@ -31,9 +39,9 @@ bake-off (B2); everything else on the near-term path is autonomous, pure-core wo
 | Milestone | Scope | Status |
 |---|---|---|
 | **M0** | Hexagonal skeleton, ports/adapters, fakes, e2e dry-run | ✅ Complete |
-| **M1** | Editable vertical slice: real perception backends behind the seams | 🟡 In progress (calib live; pose+ball stubbed; geometry + typing work open) |
-| **M2** | Photoreal render / observer (real Blender SCENE_3D) | ⬜ Not started |
-| **M3** | Polish, LLM-over-MCP editing north-star (ADR-0008) | ⬜ Not started |
+| **M1** | Editable vertical slice: real perception backends behind the seams | 🟢 Complete (2026-06-27 — AC-1/2/3 met; pose/ball heavy nets are injection-seam stubs, GUI session display-gated) |
+| **M2** | Photoreal render / observer (real Blender SCENE_3D) | 🟢 Complete (measured photoreal via Cycles; broadcast fidelity → M3; see `roadmap.md`) |
+| **M3** | Polish, LLM-over-MCP editing north-star (ADR-0008) + broadcast-grade generative fill | ⬜ Not started (next) |
 
 ## Perception-backend matrix
 
@@ -49,7 +57,7 @@ of the public repo.
 | **Pose** | `--pose gvhmr` | ✅ root-grounding (per-frame foot-plane anchor, T2) + constraint refit (core) | ✅ SMPLest-X-H (0.69B) **pod-verified on CUDA** — smoke + real-frame seam + full golden-path export (re-run 2026-06-24 on Blackwell via `scripts/pod.sh`) | `--pose-backend pitch3d.adapters.models.smplestx_backend:make`; runtime/wiring proven on real broadcast pixels (1920×1080 clip → 6 subjects → `subject_*.npz`) — **first MPJPE MEASURED 2026-06-24**: 3DPW `test`, off-the-shelf, condition A (GT camera), no-PA → **Local MPJPE 0.512 m** (mean of **11** single-subject 3DPW seqs, 767 frames, stride 15; see B2) |
 | **Ball** | `--ball tracknet` | ✅ threshold + gap-fill (core) | ✅ WASB adapter **pod-verified on CUDA** (smoke + full E2E, 2026-06-23) | `--ball-backend pitch3d.adapters.models.wasb_backend:make`; stage via `scripts/stage_wasb_weight.sh`; smoke `scripts/smoke_wasb_gpu.py` |
 | Render | `--render overlay` | ✅ reprojection PNGs (dependency-free) | n/a | real, no GPU |
-| Export | `--export gltf` | ✅ SMPL-X npz + JSON round-trip | (glTF binary TODO) | |
+| Export | `--export gltf` | ✅ SMPL-X npz + JSON round-trip + glTF/GLB assembly (Z-up→Y-up, unit-tested) | `pygltflib` serialization behind `export` extra | real; pod E2E exports a full scene |
 | Observer | `--observer blender` | — | ⬜ needs Blender + display | see **B4** |
 
 ## Blockers / Bugs / Open tickets
@@ -264,12 +272,14 @@ would need the richer-calibration path (option 2).
 
 The project gates on neither mypy nor ruff, so debt has accumulated. Measured state:
 
-- **mypy: 33 → 15** after safe fixes. Fixed: `ReconstructionResult.detections/tracks` were bare
+- **mypy: 33 → 15** after safe fixes (M0/M1); **→ 20 today (2026-06-27)** — the M2-7..M2-10 render
+  adapters regressed it by 5 (a new `int | None`/tuple cluster, see the render-cluster bullet below);
+  the original 15 are unchanged. Fixed: `ReconstructionResult.detections/tracks` were bare
   `object` (now `Detections`/`Tracks`); a `RenderResult` shadowing the `render: str` param in
   `cli.py`; widened a `look_at`/`camera_at` `up` default; explicit RGB 3-tuples in overlay/proxy;
   the 6 `controller.py`/`blender/runner.py` `None`-handling gaps (below); and the `tracking.py`
   comprehension (below).
-  Remaining 15, deferred with reason:
+  Remaining 20, deferred with reason:
   - **~14** — `Correction.payload` is `object` (13 in `correction/engine.py` + 1 `blender/live.py`,
     all `.delta`/keyframe attr access); the engine narrows it by `corr.mode` (which mypy can't
     follow), so a proper fix needs `isinstance`/`cast` at each dispatch site. Invasive on pure,
@@ -279,11 +289,18 @@ The project gates on neither mypy nor ruff, so debt has accumulated. Measured st
     with no `subject_track_id` raises `ValueError`; `BlenderSceneObserver` routes its overlay/ui/radar
     delegators through a `_delegate` property narrowing the always-set fallback. +3 covering tests.
   - **1** `detection.py` lazy `_model: object` — intentional, to avoid importing torch at module load.
+  - **+5 (M2-7..M2-10 render cluster, new 2026-06-27)** — `int | None`/tuple arg-type guards on the
+    photoreal render + avatar adapters: `render/avatar_splat.py` (3: lines 162/201/251 — frame index
+    and an RGB tuple), `render/cycles.py` (1: line 189 — frame index), `models/avatar.py` (1: line
+    185 — a numpy `signedinteger` assignment). Same low-value/invasive trade-off as the rest:
+    `frame` is `int | None` on the port but always set on these paths; fixing means an `assert`/`cast`
+    per site. Deferred; fix opportunistically when next editing these files.
   - ~~**1** `tracking.py` list-comprehension element type~~ **FIXED**: a walrus guard narrows the
     appearance features (already filtered non-None by the `idx` selection above) — behavior-identical.
-- **ruff: 48 remaining** (cleared 7 safe auto-fixes this pass — 2 unused imports, 2 unsorted import
-  blocks, 3 redundant quoted annotations under `from __future__ import annotations`). The rest are
-  29 `E501` long lines + 18 `UP042` (str-enum style) + 1 `B024` — repo-wide style, not churned.
+- **ruff: 48 → 46 remaining today (2026-06-27, src+tests)** (cleared 7 safe auto-fixes the original
+  pass — 2 unused imports, 2 unsorted import blocks, 3 redundant quoted annotations under
+  `from __future__ import annotations`). The rest are 26 `E501` long lines + 18 `UP042` (str-enum
+  style) + 1 `B024` + 1 `I001` (one auto-fixable unsorted-import block) — repo-wide style, not churned.
 
 Stance: fix debt opportunistically in files we're already editing for real reasons; don't do a
 repo-wide lint sweep as a standalone change (high churn, zero functional value, ungated).
@@ -478,6 +495,26 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     subset — different sample, not GT accuracy); `ball height_confidence mean=0.25 min=0.00` with 8
     `low_ball_height` attention items (R-6 marked). The M2-10 photoreal **adapter** (observe / seam-A
     re-render / edit↔Cycles) is covered by unit+gated tests, not by this legacy `blender_animate` video.
+  - **M1 CLOSED 🟢 — milestone flipped 🟡→🟢 (2026-06-27).** With the editable loop proven end to end
+    on a real clip (above + the 2026-06-24/25 real-model E2E runs), all three TZ exit criteria are
+    honestly MET, so M1 is closed in `roadmap.md` (M1 header + steps 6/7/12 + M0-6) and here (milestone
+    table + TL;DR). **Evidence:** **AC-1** overlay-matches-source — quantified by **B1 SoccerNet
+    `calibration-2023`** reprojection (median **0.236 m**, completeness 0.745), the measured
+    overlay-to-source floor on real frames; **AC-2** fix-a-pose-propagate-three-ways — the four
+    correction modes (offset / keyframe-interp / temporal-smoothing / re-fit) with `preview_subject_motion`
+    and non-destructive resolve are unit-tested (`tests/unit/test_corrections.py`) and exercised on the
+    pod (`corr-1`); **AC-3** curves-edit-show-export — root/ball/axis-angle F-curves in the editable
+    `.blend`, mapped back to `Correction`s, resolved scene exports (glTF assembly tested + `.npz`/JSON;
+    pod E2E exports a full scene). Suite **480 passed / 5 display-gated skips** (exit 0). **Ceiling kept
+    visible (R-6, criteria not narrowed):** (1) the photoreal-grade pose/ball *heavy* nets ship as
+    **injection-seam stubs** — the pure halves are real + CPU-validated, real backends inject by dotted
+    path (ADR-0006, pod-validated on CUDA), the boxed heavy halves raise an actionable
+    `NotImplementedError`; (2) the **GUI** live-Blender placement session is **display-gated** (host-side
+    seam real + socket-tested, no display in CI); (3) the metric-XY floor is measured on **lined**
+    footage — an unlined clip grounds Z + topology, not absolute pitch XY. These are delivery/environment
+    seams, not missing capability. **Surveyed tails (open, non-blocking):** mypy 20 (15 deferred-payload
+    + the 5 new M2-render-cluster guards, above), ruff 46 (style backlog, not churned) — both ungated;
+    GUI live session + real Blender SCENE_3D observer track under **B4** / M2-M3.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 

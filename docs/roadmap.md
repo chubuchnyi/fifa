@@ -24,7 +24,7 @@ on fakes, glTF export path exists.
 | M0-3 Correction engine (4 modes) + rotations | `core/correction` | ✅ |
 | M0-4 Orchestration: Stage enum, Pipeline, cache-key, ball lift | `core/orchestration` | ✅ |
 | M0-5 Fakes (incl. FakeViewSynthesizer A+B), in-proc queue, cache | `adapters/fakes` | ✅ |
-| M0-6 Real-adapter + exporter stubs (`NotImplementedError`) | `adapters/{models,viewsynth,blender,render,export}` | 🟡 |
+| M0-6 Real-adapter + exporter skeletons behind every port (pure half real; heavy half real or injection-seam stub) | `adapters/{models,viewsynth,blender,render,export}` | 🟢 |
 | M0-7 CLI dry-run + wiring | `app` | ✅ |
 | M0-8 Core tests green without GPU/Blender | `tests` | ✅ |
 | M0-9 Observation port + viewpoint math + scene summary (LLM feedback) | `core/ports`, `core/agent` | ✅ |
@@ -37,16 +37,22 @@ propagate → render(fake) → export, and `pytest` is green. The LLM-feedback l
 
 ---
 
-## M1 — Editable loop (the vertical slice) 🟡
+## M1 — Editable loop (the vertical slice) 🟢
 
 **Goal (TZ M1):** a 3D scene on a real clip that can be **edited**, with edits propagated.
 Proxy only — no photoreal yet. This is the first milestone that replaces fakes with real models.
 
-**Status (snapshot — the live state, blockers and next steps live in
-[`m1-status-and-plan.md`](m1-status-and-plan.md)).** Every perception/render/export port now has a
-real adapter behind the same split (pure half unit-tested via an injected stub; heavy half
-lazy-imported behind its extra), selectable per-port via `default_ports(...)` and the
-`--detector/--tracker/--calibrator/--pose/--ball/--render/--export` flags.
+**Status — GOAL MET, closed 2026-06-27** (live state, blockers and next steps live in
+[`m1-status-and-plan.md`](m1-status-and-plan.md)). The editable loop runs end to end on a real clip:
+every perception/render/export port has a real adapter behind the same split (pure half unit-tested
+via an injected stub; heavy half lazy-imported behind its extra), selectable per-port via
+`default_ports(...)` and the `--detector/--tracker/--calibrator/--pose/--ball/--render/--export`
+flags. Suite green (480 passed / 5 display-gated skips). **Documented ceiling** (R-6, not narrowed):
+the photoreal-grade pose/ball *heavy* nets ship as **injection-seam stubs** (real backends inject by
+dotted path, ADR-0006 — pod-validated, not boxed); the **GUI** live-Blender placement session
+(step 10) is **display-gated** (host-side seam real + socket-tested, but no display in CI); and the
+metric-XY reprojection floor is measured on lined footage (B1, below) — an unlined clip grounds Z
+and topology but not absolute pitch XY.
 
 - **Real, no GPU, today:** overlay render (+ confidence highlighting, UX-3/FR-16), glTF/`.npz`
   export, the camera-free top-down **radar** VIEW, the live MCP `serve()` dispatch (SDK stdio loop
@@ -72,16 +78,26 @@ lazy-imported behind its extra), selectable per-port via `default_ports(...)` an
 4. **Track + teams** — ByteTrack/BoT-SORT + team clustering. `adapters/models` — 🟢 *CPU-validated (P2.3)*: `ByteTrackTracker` (pure association + appearance team clustering, unit-tested via injected stub); the live `ByteTrackBackend` (`cv` extra) needs **no learned weights or GPU** (supervision's ByteTrack + HSV torso sampling). Real run on CPU: detections → 16 stable tracks across 8 frames → teams A/B.
 5. **Field homography** — keypoint model + robust homography + temporal smoothing → world anchor. `adapters/models` — 🟢 *wired + robustified + B1-measured*: `KeypointFieldCalibrator` fits each frame with **RANSAC + confidence-weighted normalized DLT** (rejects mislocalised landmarks, the dominant real-broadcast failure) and scores confidence on the inliers × inlier-fraction (R-6 honesty); pure numpy, unit-tested. Validated on real PnLCalib output (messi frame: rejecting 2/18 outliers cut reprojection RMS 3.87 m → 0.36 m). Live keypoint net is injected by dotted path with `--calibrator-backend pkg.module:Factory` (ADR-0006) — the PnLCalib HRNet, now **benchmarked end-to-end on SoccerNet `calibration-2023`** (B1): completeness 0.745, **median 0.236 m** on the frames it locks on. A 2026-06-24 kp-threshold sweep (400 frames) showed the heatmap gate is a **precision/recall dial** — lowering it lifts completeness 0.745→0.918 but net line-accuracy stays flat ~0.61, so the real lever is **better landmarks**, not the gate (portrait / drone footage is still out-of-distribution for the net). A 2026-06-25 A/B of PnLCalib's full camera module (`--solver camera`: points **and** lines) vs the bare DLT confirmed the *solver* is not the lever — median a wash (0.170→0.179 m), completeness unchanged (~0.74) — but it does tighten line registration (line_acc@5px 0.757→0.811) and the error tail (p95 6.41→1.15 m); the remaining lever is **completeness** (the ~¼ of frames the detector drops).
 6. **HMR → SMPL-X** — GVHMR/WHAM; **root from homography**, foot-contact (anti-foot-slide). `adapters/models` — 🟢 *pure half CPU-validated (P2.4)*: `GVHMRPoseEstimator` grounds each subject's world root on the pitch from the field homography + assembles SMPL-X `SubjectMotion` + applies geometric refit (numpy, unit-tested). Validated on CPU on REAL ByteTrack tracks — 16 subjects grounded into world metres (Z = pelvis height). The **live `GVHMRBackend` is an unwired, GPU-bound stub**: GVHMR is a research repo (not pip), so the `hmr` extra ships only torch/smplx/chumpy, not the network/weights; `estimate_bodies` raises an actionable `NotImplementedError` (use `--pose fake`, or inject a vendored network by dotted path with `--pose-backend pkg.module:Factory` — the on-box config-not-fork seam, ADR-0006).
-7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟡 *pure half only*: `TrackNetBallTracker` (threshold + linear gap-fill with honest zero-confidence fills, unit-tested) runs end to end on the fake. The **live `TrackNetBackend` is an unimplemented stub** — unlike the rfdetr/bytetrack reals, the `ball` extra ships only torch (no TrackNet weights/decoder), so `detect_ball` raises an actionable `NotImplementedError` (use `--ball fake`, or inject a vendored network by dotted path with `--ball-backend pkg.module:Factory`, ADR-0006) until the network is wired. **Option to bench (2026):** *"Where Is The Ball"* (CVPR'25 CVsports) — a **calibration-free** monocular 2D→3D ball lift (predicts height; trained in sim, soccer-tested) as an alternative to our hand-rolled ballistic lift; evaluate behind the same seam once code releases.
+7. **Ball** — TrackNet 2D + **core ballistic 3D lift** (already implemented) with height confidence. `adapters/models` + `core/orchestration` — 🟢 *pure half CPU-validated* (parity with pose, step 6): `TrackNetBallTracker` (threshold + linear gap-fill with honest zero-confidence fills, unit-tested) runs end to end on the fake. The **live `TrackNetBackend` is an unimplemented stub** — unlike the rfdetr/bytetrack reals, the `ball` extra ships only torch (no TrackNet weights/decoder), so `detect_ball` raises an actionable `NotImplementedError` (use `--ball fake`, or inject a vendored network by dotted path with `--ball-backend pkg.module:Factory`, ADR-0006) until the network is wired. **Option to bench (2026):** *"Where Is The Ball"* (CVPR'25 CVsports) — a **calibration-free** monocular 2D→3D ball lift (predicts height; trained in sim, soccer-tested) as an alternative to our hand-rolled ballistic lift; evaluate behind the same seam once code releases.
 8. **Assemble Scene** — proposal layer + confidence map. `core/orchestration` — ✅
 9. **Proxy + overlay** — SMPL proxy in Blender; **reprojection overlay**; confidence highlighting. `adapters/render`, `adapters/blender` — ✅ *all real, no GPU*: `ReprojectionOverlayRenderPass` (pure pinhole projection + visibility + stdlib PNG, no extra) and the Blender proxy (`build_proxy_plan` → out-of-process `blender --background` → editable `.blend` / proxy `SCENE_3D` PNGs, Workbench/CPU). **Confidence highlighting** is real (`confidence_to_color` blends each marker toward a red warning colour as per-frame confidence drops; full confidence is a no-op so existing scenes render unchanged — UX-3/FR-16).
 10. **Edit** — pose bones/β, ball/root as F-curves, 2D radar VIEW + placement. `adapters/blender` ↔ `core/correction` — 🟡 *editing surface + radar VIEW are real*: `BlenderProxyBuilder` writes the editable `.blend` with root/ball location + axis-angle **F-curves** and β + per-joint body pose as keyframed channels (baked from the resolved proposal ⊕ corrections); edits there map back to `Correction`s, the source of truth (ADR-0002). The top-down **radar** is real on the read side — `render_radar` (pure numpy + stdlib PNG) draws a pitch + team-coloured subject dots + ball from the resolved world XY, surfaced as an `ObservationImage(kind=RADAR)` via `observe(include_radar=…)`. The *interactive* **placement** drag is now 🟡 *seam real, GUI pending (P1)*: the host side is complete and unit-tested over a socket pair — `radar_to_world` (the inverse of `world_to_radar`, turning a dragged radar pixel back into world XY), the `subject_<id>` id↔name contract (`subject_object_name`/`parse_subject_name`, one source of truth shared by the builder and the bridge), and `serve_edits`/`apply_drag`, which diff a dropped root against the *resolved* position and commit the offset through the **same** `apply_offset` use-case the MCP agent calls (human ≡ LLM, ADR-0008/0010). The live `launch_live_session` (GUI Blender, no `--background`) + the in-Blender `_live.py` depsgraph watcher stay ⬜ — they need a display + a Blender binary, so they are not run in CI (the same honest limitation as the GVHMR/TrackNet reals).
 11. **Propagate** — offset / interp / re-fit / smoothing with preview + undo (re-fit calls `PoseEstimator.refit`). `core/correction` — ✅
-12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export` — 🟡 *wired*: `GltfExporter` — SMPL-X `.npz` (resolved per subject) + canonical JSON are real (numpy/stdlib, no extra); glTF/GLB assembly (Z-up→Y-up) is real and unit-tested, the `pygltflib` serialization gated behind the `export` extra.
+12. **Export** — glTF + SMPL-X `.npz` + intermediate JSON. `adapters/export` — 🟢 *real + tested*: `GltfExporter` — SMPL-X `.npz` (resolved per subject) + canonical JSON are real (numpy/stdlib, no extra); glTF/GLB assembly (Z-up→Y-up) is real and unit-tested, the `pygltflib` serialization gated behind the `export` extra (the standard heavy-half optional-dep pattern, not a stub). Pod E2E exports a full scene.
 
-**Exit criteria (TZ AC-1, AC-2, AC-3):** reprojection overlay matches the source on wide shots;
-operator fixes a pose and propagates it three ways with preview+undo; ball/player curves edit and
-show up in 3D and export.
+**Exit criteria (TZ AC-1, AC-2, AC-3) — all MET (2026-06-27):**
+- **AC-1** *reprojection overlay matches the source on wide shots* — **MET.** Quantified on real
+  frames by the **B1 SoccerNet `calibration-2023`** reprojection benchmark (median **0.236 m**,
+  completeness 0.745) — a measured overlay-to-source floor, stronger than an eyeball; the overlay
+  pass itself is pure-pinhole and unit-tested. *Caveat:* B1 is lined footage; an unlined clip aligns
+  topology/Z but not absolute pitch XY.
+- **AC-2** *operator fixes a pose and propagates it three ways with preview+undo* — **MET.** All four
+  correction modes (offset / keyframe-interp / temporal-smoothing / re-fit) are unit-tested in
+  `tests/unit/test_corrections.py` with `preview_subject_motion` and non-destructive resolve
+  (ADR-0002); exercised on a real pod run (corr-1).
+- **AC-3** *ball/player curves edit and show up in 3D and export* — **MET.** Root/ball/axis-angle
+  F-curves are baked into the editable `.blend`, edits map back to `Correction`s, and the resolved
+  scene exports (glTF assembly tested + SMPL-X `.npz`/JSON; pod E2E exports a full scene).
 
 **Engineering notes**
 - Replace one fake at a time; the dry-run wiring is the integration harness.
@@ -91,6 +107,22 @@ show up in 3D and export.
   half (decode + inference, lazy torch/cv2, gated behind its extra). Select it in wiring per-port
   (`default_ports(detector="rfdetr")`) so the swap is isolated.
 - `re-fit` is the first place a model is called from inside a correction — keep it behind the port.
+
+**Progress — M1 GOAL met, flipped 🟡→🟢 (2026-06-27):** the editable loop *closes* on a real clip.
+Ingest → detect (RF-DETR, ~15–17 players/frame) → track + teams (ByteTrack, 16 stable tracks) →
+calibrate (PnLCalib HRNet behind the dotted-path seam, RANSAC+DLT, **B1 median 0.236 m**) → ground
+SMPL-X roots on the pitch → assemble proposal → edit via `Correction`s (the sole edit path, ADR-0002)
+→ propagate (4 modes + preview + non-destructive resolve) → overlay/radar/proxy render → export
+(glTF + `.npz` + JSON). **All three exit criteria are MET** (AC-1 B1 reprojection; AC-2 four-mode
+propagation tested + pod corr-1; AC-3 F-curve edits + export). Suite **480 passed / 5 display-gated
+skips**. **Honest ceiling (R-6, not narrowed):** (1) the photoreal-grade pose/ball *heavy* nets
+(GVHMR/SMPLest-X, TrackNet) ship as **injection-seam stubs** — real backends inject by dotted path
+(ADR-0006, pod-validated), the pure halves are real + CPU-validated, the boxed heavy halves raise an
+actionable `NotImplementedError`; (2) the **GUI** live-Blender placement session (step 10) is
+**display-gated** — host-side seam real + socket-tested, but no display in CI; (3) the metric-XY
+floor is measured on **lined** footage (B1) — an unlined clip grounds Z + topology, not absolute
+pitch XY. These are delivery/environment seams, not missing capability. **The loop is real,
+editable, and in sync, so M1 is 🟢. Photoreal is M2 (🟢); broadcast fidelity is M3.**
 
 ---
 
