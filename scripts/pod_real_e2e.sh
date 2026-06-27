@@ -28,15 +28,21 @@ FRAMES="${FRAMES:-8}"
 OUT="${OUT:-out/run}"
 FORMAT="${FORMAT:-smplx_npz}"
 
-# Optional REAL calibration: set PNLCALIB_REPO (+ its weights) to swap the proxy field
-# calibrator for the wired PnLCalib backend (ADR-0006 dotted path). Empty/absent -> proxy.
+# REAL field calibration is the DEFAULT now (#203). The proxy "fake" calibrator maps the WHOLE
+# frame into a 30 m top-down box with NO perspective, so an oblique broadcast collapses every
+# player onto a thin world band — the v0 depth/scale bug. Default PNLCALIB_REPO to the pod's staged
+# checkout; the `-d` guard falls back to the proxy ONLY when the repo is genuinely absent (e.g. a
+# local CPU box). Force the proxy explicitly with PNLCALIB_REPO= (empty). The backend reads its own
+# PNLCALIB_WEIGHTS_* paths (pod defaults are baked into pnlcalib_backend.make()).
+PNLCALIB_REPO="${PNLCALIB_REPO-/workspace/repos/PnLCalib}"
+export PNLCALIB_REPO
 CALIB_ARGS=()
-if [ -n "${PNLCALIB_REPO:-}" ] && [ -d "${PNLCALIB_REPO}" ]; then
+if [ -n "${PNLCALIB_REPO}" ] && [ -d "${PNLCALIB_REPO}" ]; then
   CALIB_ARGS=(--calibrator keypoints
               --calibrator-backend pitch3d.adapters.models.pnlcalib_backend:make)
   echo "== calibration: REAL PnLCalib (${PNLCALIB_REPO})"
 else
-  echo "== calibration: proxy (set PNLCALIB_REPO to a staged checkout to enable real PnLCalib)"
+  echo "== calibration: PROXY fake — #203 depth COLLAPSE expected (PnLCalib repo absent: '${PNLCALIB_REPO:-unset}')"
 fi
 
 # Continuity stitching is ON by default (part of correct reconstruction): re-link fragmented

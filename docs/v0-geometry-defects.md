@@ -61,15 +61,27 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   a 105×68 m pitch.
 - **Evidence:** `sideline_t06`, `top_t06`.
 - **Hypothesis:** calibration → ground placement collapses depth, or world units / scale are off.
-- **Root cause (code):** the homography `H`. `FieldCalibration.image_to_world()`
-  (`core/scene/field.py:39-51`) applies `H` to foot points; it is invoked per subject in
-  `GVHMRPoseEstimator._ground_root()` (`adapters/models/pose.py:256-279`, foot = bbox bottom). If `H`
-  is identity / degenerate (fallback at `calibration.py:333`; real path
-  `CameraModuleFieldCalibrator.calibrate()` `calibration.py:422-455`), every foot maps to ~origin /
-  pixel-space → no real spread across the 105×68 m pitch (`core/scene/units.py:60-63`).
-- **Fix:** verify/repair calibration so `H` is valid for the clip (log `image_to_world` of a known
-  foot point). This is the **deepest root** — it also drives D2. Likely needs a pod re-run with calib
-  logging.
+- **Hypothesis (original):** `H` is the identity/degenerate *fallback* (`calibration.py:333`).
+- **Root cause (CONFIRMED 2026-06-27, local — not the identity fallback):** the defect render used the
+  **`--calibrator fake`** path (the CLI default — `cli.py:361`), i.e. `FakeFieldCalibrator`
+  (`adapters/fakes/perception.py:125-146`). That "proxy planar" calibrator is a **top-down orthographic
+  toy**: `H` linearly maps image (u,v) → world with `scale = _FAKE_PITCH_SPAN_M / clip.width` and
+  `_FAKE_PITCH_SPAN_M = 30.0`. So it (a) crams the *entire* frame into a **30 × 17 m** world box (the
+  105×68 m pitch is unrepresentable) and (b) has **no perspective term** — an oblique broadcast can't be
+  un-projected, so downfield depth folds onto a thin world-Y band. Real PnLCalib was wired
+  (`adapters/models/pnlcalib_backend.py`) but is **opt-in and was OFF** in the default render path
+  (`demo_video.sh` `REAL_CALIB=0`; `pod_real_e2e.sh` proxy unless `PNLCALIB_REPO` set). `image_to_world`
+  (`core/scene/field.py`) and `_ground_root` (`adapters/models/pose.py`) are correct — they were just fed
+  the toy `H`. **Numeric proof (this machine):** realistic broadcast feet → world span **22.7 × 7.3 m**;
+  full-frame ceiling **30 × 17 m**. The y-axis (~7 m) IS D3's "thin horizon line / tight blob".
+- **Fix (LANDED 2026-06-27, local):** make REAL PnLCalib the **default** in the render path (analogous
+  to #202's stitch default). `pod_real_e2e.sh` now defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`
+  and only uses the proxy when that staged repo is genuinely absent (the `-d` guard; force proxy with
+  `PNLCALIB_REPO=`). `demo_video.sh` flips `REAL_CALIB`→1 by default (opt out with `--no-real-calib`).
+  The backend's `make()` already defaults the weights to the pod paths. This is the **deepest root** —
+  it also drives D2/#204 (cameras frame whatever the placement says). **VALIDATION (pod):** re-run the
+  reconstruction (real calib now default), log `image_to_world` of a known foot point, and confirm the
+  subjects spread across ~105×68 m in `scene.json` — only then is #203 closed.
 
 ## D4 — Bare environment  (task #205)
 - **Symptom:** green plane + grey sky; no pitch lines / markings / goals.
