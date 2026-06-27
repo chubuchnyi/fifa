@@ -36,18 +36,33 @@ class FieldCalibration:
         self.frames = np.asarray(self.frames, dtype=int)
         self.confidence = np.asarray(self.confidence, dtype=float).reshape(-1)
 
+    def _frame_row(self, frame_index: int) -> int:
+        i = int(np.searchsorted(self.frames, frame_index))
+        return min(max(i, 0), self.homographies.shape[0] - 1)
+
     def image_to_world(self, frame_index: int, uv: np.ndarray) -> np.ndarray:
         """Project image points ``uv`` (N,2) to world plane points (N,2) at a frame.
 
         Used to put player feet onto the pitch (FR-7) and to lift the ball's ground
         contacts. Pure projective transform; no model involved.
         """
-        i = int(np.searchsorted(self.frames, frame_index))
-        i = min(max(i, 0), self.homographies.shape[0] - 1)
-        h = self.homographies[i]
+        h = self.homographies[self._frame_row(frame_index)]
         uv = np.asarray(uv, dtype=float).reshape(-1, 2)
         ones = np.ones((uv.shape[0], 1))
         hom = np.hstack([uv, ones]) @ h.T
+        return hom[:, :2] / hom[:, 2:3]
+
+    def world_to_image(self, frame_index: int, xy: np.ndarray) -> np.ndarray:
+        """Project world plane points ``xy`` (N,2) back to image pixels (N,2) at a frame.
+
+        The inverse of :meth:`image_to_world` (``H⁻¹``). Used to place a known world
+        anchor — e.g. a player's foot — into the image so it can be matched against a
+        2D detection (the ball), which is how ball ground contacts are found (#206).
+        """
+        hinv = np.linalg.inv(self.homographies[self._frame_row(frame_index)])
+        xy = np.asarray(xy, dtype=float).reshape(-1, 2)
+        ones = np.ones((xy.shape[0], 1))
+        hom = np.hstack([xy, ones]) @ hinv.T
         return hom[:, :2] / hom[:, 2:3]
 
 

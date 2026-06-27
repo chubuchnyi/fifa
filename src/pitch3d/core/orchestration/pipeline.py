@@ -102,7 +102,9 @@ class ReconstructionPipeline:
             Stage.POSE, lambda: self.pose.estimate(clip, trk, cal), extra_params=pose_extra
         )
         ball2d = stage(Stage.BALL, lambda: self.ball.track_ball(clip))
-        ball3d = lift_ball_to_3d(ball2d, cal, on_ground=on_ground, fps=clip.fps)
+        ball3d = lift_ball_to_3d(
+            ball2d, cal, on_ground=on_ground, motions=motions, fps=clip.fps
+        )
 
         return ReconstructionResult(
             detections=det,

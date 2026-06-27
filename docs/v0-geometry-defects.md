@@ -138,19 +138,43 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   beyond the pitch edge. The system flags this honestly (low `height_confidence`), rather than fabricating
   a height. Code: `core/scene/field.py image_to_world` (ground-plane un-projection) + the ball lift in the
   ball backend / `assemble`.
-- **Candidate fixes (diagnose locally first — `/tmp/val_scene.json`, no pod):** (a) pin ball to ground
-  (z = ball radius) when `height_confidence` is low; (b) gate/clamp detections that un-project outside
-  ±52.5 × ±34; (c) bias the ball toward the player cluster when 2D is ambiguous. Validate: ball positions
-  land inside the pitch and near the action.
+- **Diagnosis (CONFIRMED 2026-06-27, local on `/tmp/val_scene.json`, no pod):** the ball's `track_2d` is in
+  the **same ~1920×1080 space as the homography** (player feet project to u≈20–1896 — so scaling the ball
+  2D was a red herring and made it worse). The ball is **airborne for the entire 48-frame window** (ball
+  image-v 449–525 sits *above* every player foot at v 556–894), so ground-plane un-projection overshoots
+  ~13 m and the old lift compounded it by treating the two **frozen** WASB endpoints (f0–5 and f42–47 are
+  exact-duplicate pixels — the tracker lost the ball and held its last pixel) as ground contacts, drawing a
+  straight interpolation between two points that are *both* off the pitch.
+- **Fix (LANDED 2026-06-27, local) — contact-anchoring (user's instruction "положение игроков, касающихся
+  мяча, брать за основу"):** a ball is only at a *known* world point when a player plays it. New pure-core
+  `detect_ball_contacts()` (`core/orchestration/ball_lift.py`) finds the frames where the ball's 2D
+  detection lands on a player's **projected foot** (new `FieldCalibration.world_to_image`, the `H⁻¹` of
+  `image_to_world`), keeps one anchor per player, and gates anchors by a **plausible-speed** test
+  (≤ 35 m/s) that drops spurious "nearest player" matches where a high airborne ball merely lines up with a
+  distant player's image column. `lift_ball_to_3d(..., motions=…)` then pins the ball XY to those feet,
+  interpolates between, and keeps the existing gravity-parabola Z; it falls back to the mono ground
+  projection when no contact is found. Stale (frozen) frames are excluded as anchors. Wired in
+  `pipeline.py` (passes `motions`). 7 new tests (`test_ball_lift.py` + `test_field_calibration.py`).
+- **VALIDATED numerically 2026-06-27 (re-running the *real* core lift on `/tmp/val_scene.json`):** ball
+  in-pitch **0/48 → 48/48**; anchors found = the kick→receive pass the user described: **t12 @ f10
+  (−36.3, −24.8) → t18 @ f19 (−32.8, −28.1)** (~4.8 m ground pass, ~13 m/s, Z apex 0.16 m). New ball span
+  X[−36.3, −32.8] Y[−28.1, −24.8] — inside the player cluster, no longer 30 m away off the field.
+- **VALIDATED visually 2026-06-27:** (a) top-down schematic (`/tmp/ball_fix_topdown.png`) shows the OLD
+  ball (red) beyond the touchline at Y≈−38 vs the NEW ball (blue) inside the pitch tracing the t12→t18
+  pass, anchors on the contacting feet; (b) full Blender re-render (top + broadcast, scene re-built from
+  `/tmp/val_scene_fixed.json` via `anim_export.py`) — top + broadcast views show players AND ball clustered
+  inside the left half of the pitch, none off-field. #206 CLOSED.
 
 ---
 
-## Status / next — v0 PLAYER/PITCH geometry ACHIEVED 2026-06-27 (#202–#205); ball #206 OPEN
+## Status / next — v0 GEOMETRY ACHIEVED 2026-06-27 (#202–#206 all CLOSED)
 - **#202 / D1 — CLOSED:** body count = **20** (`out/val/export/scene.json`), no swarm.
 - **#203 / D3 — CLOSED:** root spread **34 m (length) × 40 m (width)**, pelvis 0.69–1.01 m; real PnLCalib
   default; the fake-calib 22×7 m collapse is gone.
 - **#204 / D2 — CLOSED:** broadcast + top cameras frame the action (`out/val/video/*.mp4`).
 - **#205 / D4 — CLOSED:** full pitch markings + goal frames render (`pitch: 2848 line-tris + 72 goal-tris`).
+- **#206 / D5 — CLOSED:** ball in-pitch **0/48 → 48/48** via contact-anchoring (t12→t18 pass); numeric +
+  top-down schematic + Blender re-render all confirm the ball is among the players on the field.
 - **Validation run:** ONE batched pod pass (pod `zueopp6nzozxb7`, 48 frames, real RF-DETR · ByteTrack ·
   PnLCalib · SMPLest-X · WASB), reused for the cheap top/broadcast re-render; pod STOPPED after. Local
   copies: `/tmp/val_video/{broadcast,top}.mp4`, `/tmp/val_scene.json`.

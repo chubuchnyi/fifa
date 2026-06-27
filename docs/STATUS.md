@@ -20,7 +20,7 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v0 = correct GEOMETRY is DONE (validated 2026-06-27).** Next bar = **v1 (recognizability)**: kit colours, shirt numbers, simple stadium.
-- **NEXT ACTION:** **v0 = correct GEOMETRY is ACHIEVED & VALIDATED** (pod `zueopp6nzozxb7`, 48f real run, now STOPPED). All four defects closed: #202 body count = **20** (was a swarm); #203 root spread = **34×40 m** real-scale (fake-calib 22×7 m collapse gone, real PnLCalib default); #204 broadcast/top cameras frame the action; #205 pitch lines + goal frames render. Eye-judged from `out/val/video/{broadcast,top}.mp4` (local copies `/tmp/val_video/`, scene `/tmp/val_scene.json`). **NEXT BAR → v1 (recognizability):** team kit colours (teams already split A/B in the render), shirt numbers (OCR where readable, else roster), simple stadium backdrop. Pick the first v1 sub-task and scope it.
+- **NEXT ACTION:** **v0 = correct GEOMETRY is ACHIEVED & VALIDATED** (pod `zueopp6nzozxb7`, 48f real run, now STOPPED). All five defects closed: #202 body count = **20** (was a swarm); #203 root spread = **34×40 m** real-scale (fake-calib 22×7 m collapse gone, real PnLCalib default); #204 broadcast/top cameras frame the action; #205 pitch lines + goal frames render; **#206 ball now in-pitch 0/48→48/48** via contact-anchoring (recovered the t12→t18 pass). Eye-judged from `out/val/video/{broadcast,top}.mp4` (local copies `/tmp/val_video/`, scene `/tmp/val_scene.json`). **NEXT BAR → v1 (recognizability):** team kit colours (teams already split A/B in the render), shirt numbers (OCR where readable, else roster), simple stadium backdrop. Pick the first v1 sub-task and scope it.
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -58,14 +58,14 @@ cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body
 | #203 | Depth collapse / wrong world scale (players not spread across pitch) | **VALIDATED on pod ✓ (34×40 m spread)** | done | NOT the identity fallback: the default render used `--calibrator fake` = `FakeFieldCalibrator` (`adapters/fakes/perception.py:125`), a 30 m **top-down orthographic toy** `H` with NO perspective. Numeric proof: whole frame → 30×17 m world box; realistic feet → 22.7×7.3 m; the ~7 m y-axis is the "thin horizon" blob. Real PnLCalib was wired (`adapters/models/pnlcalib_backend.py`) but opt-in & OFF. | DONE + VALIDATED 2026-06-27: real PnLCalib is now the **default** render calib (`pod_real_e2e.sh` defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`; run echoed `calibration: REAL PnLCalib`). **Pod 48f scene.json root spread: X (length) 34.1 m, Y (width) 40.0 m, Z (pelvis) 0.69–1.01 m** — i.e. real-scale spread within the touchlines, NOT the fake-calib 22×7 m collapse; the ~7 m "thin horizon" is gone. Players cluster in one half (localized broadcast action), as expected. **Deepest root — also fixes #204.** |
 | #204 | Virtual cameras don't frame the action (players tiny at horizon) | **VALIDATED on pod ✓ (broadcast frames the pitch)** | done | the VIDEO render (`blender_animate.py`) derives its OWN cameras from `ctr`/`span` of the loaded geometry — NOT `viewpoints.py`/`controller.py` (those drive the *in-pipeline* render, a different path). With #203's collapsed 22×7 m blob + a bare plane, the cams framed empty grass. | DONE + VALIDATED 2026-06-27: #205 folds the FULL pitch bounds into `ctr`/`span` + #203 puts bodies on the field. **Pod render eye-check (`out/val/video/{broadcast,top}.mp4`): broadcast camera frames the whole pitch at a realistic oblique angle (players fill the action third, not a horizon speck); top camera frames the full 105×68 m.** No per-frame tracking camera needed for v0. |
 | #205 | Bare pitch (no lines / no goals) | **VALIDATED on pod ✓ (lines + goals render)** | done | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE + VALIDATED 2026-06-27: measured `goal_frame_geometry()` + `pitch_line_ribbons()` in pure core; `anim_export.py` writes `pitch.npz`, `blender_animate.py` builds `pitch_lines` + `goals`. **Pod 48f run: `anim_export` logged `pitch: 2848 line-tris + 72 goal-tris (105x68 m)`; render eye-check confirms full markings (boxes, circle, arcs, halfway) + goal frames on both views.** |
-| #206 | Ball lands OUTSIDE the pitch (surfaced during v0 validation) | **OPEN — newly found** | likely no (local diag) | monocular height ambiguity: an airborne ball un-projected on the ground plane (z=0) via the homography gets pushed beyond the pitch; possibly a false/edge WASB 2D detection. `field.py image_to_world` + ball lift in the ball backend / assemble. | Pod 48f `scene.json` ball: `positions_3d` Y≈−38 m (touchline ±34), X up to −53.6 (goal line −52.5), ~30 m from the player centroid (−33,−8); `height_confidence` mean 0.25 (0.00 for many = `low_ball_height`); `on_ground` 2/48; `track_2d` v≈450–525/1080. Candidate fixes: pin ball to ground (z=radius) when height-conf low; gate/clamp out-of-pitch detections; constrain near the player cluster. Diagnose locally on `/tmp/val_scene.json` first (no pod). |
+| #206 | Ball lands OUTSIDE the pitch (surfaced during v0 validation) | **VALIDATED ✓ (0/48→48/48 in-pitch); contact-anchored** | no (local) | monocular height ambiguity: the ball is airborne the whole window (image-v 449–525 above all feet 556–894) so ground-plane un-projection overshoots ~13 m, and the old lift drew a straight line between the two **frozen** WASB endpoints (both off-pitch). `field.py` + `ball_lift.py`. | DONE + VALIDATED 2026-06-27 (local, no pod) — **contact-anchoring** per user instruction: new pure-core `detect_ball_contacts()` finds frames where the ball 2D lands on a player's projected foot (new `FieldCalibration.world_to_image`), keeps one anchor/player, gates by plausible speed (≤35 m/s) to drop depth-spurious matches; `lift_ball_to_3d(motions=…)` pins ball XY to those feet + ballistic Z, falls back to mono projection if no contact; stale (frozen) frames excluded; wired in `pipeline.py`. **Re-run on `/tmp/val_scene.json`: ball in-pitch 0/48 → 48/48; recovered the pass t12@f10 (−36.3,−24.8) → t18@f19 (−32.8,−28.1).** 7 new tests; full suite green. **Visual VALIDATED:** top-down schematic (`/tmp/ball_fix_topdown.png`, old ball red off-pitch vs new blue on-pitch) + full Blender re-render (top + broadcast from `/tmp/val_scene_fixed.json`) — ball among players on the field. #206 CLOSED. |
 
 **Validation — DONE 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run, `out/val/`):** the four v0 *player/
 pitch* defects validated end-to-end. #202 body count = **20** (scene.json); #203 root spread = **34×40 m**
 real-scale; #204 broadcast/top cameras frame the action; #205 pitch lines + goals render. Numbers from
 `scene.json`, eye-judged from `out/val/video/{broadcast,top}.mp4`. Pod STOPPED. **v0 player geometry:
-ACHIEVED.** ⚠️ Validation also **surfaced #206** — the ball lands outside the pitch (separate defect,
-diagnosable locally from `/tmp/val_scene.json`).
+ACHIEVED.** Validation also surfaced **#206** (ball off-pitch); diagnosed + fixed locally
+(contact-anchoring) and **VALIDATED 0/48→48/48** — #206 now CLOSED, so **all of v0 geometry is done**.
 
 ---
 
@@ -133,6 +133,25 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-06-27** — **#206 ball fix LANDED + VALIDATED → all of v0 geometry now CLOSED.** Root (confirmed
+  locally on `/tmp/val_scene.json`, no pod): the ball is airborne the entire 48-frame window (its image-v
+  449–525 sits above every player foot at v 556–894), so ground-plane un-projection overshoots ~13 m, and
+  the old lift compounded it by treating the two **frozen** WASB endpoints (exact-duplicate pixels — the
+  tracker lost the ball) as ground contacts and drawing a straight line between two off-pitch points. **Fix
+  — contact-anchoring** (user's instruction "положение игроков, касающихся мяча, брать за основу"): new
+  pure-core `detect_ball_contacts()` (`core/orchestration/ball_lift.py`) finds frames where the ball's 2D
+  lands on a player's **projected foot** (new `FieldCalibration.world_to_image` = the `H⁻¹` of
+  `image_to_world`), keeps one anchor per player, and gates by a plausible-speed test (≤35 m/s) to drop
+  depth-spurious "nearest player" matches; `lift_ball_to_3d(motions=…)` pins ball XY to those feet,
+  interpolates between, keeps gravity-parabola Z, and falls back to mono projection when no contact; stale
+  frozen frames excluded; wired in `pipeline.py`. **Validated:** re-running the real core lift → ball
+  in-pitch **0/48 → 48/48**, recovering exactly the kick→receive pass the user described — **t12 @ f10
+  (−36.3,−24.8) → t18 @ f19 (−32.8,−28.1)** (~4.8 m, ~13 m/s, Z apex 0.16 m). Top-down schematic
+  (`/tmp/ball_fix_topdown.png`): old ball red beyond the touchline (Y≈−38) vs new ball blue on-pitch on
+  the t12→t18 line. Full Blender re-render (top + broadcast from `/tmp/val_scene_fixed.json`): ball among
+  players inside the pitch. 7 new tests (`test_ball_lift.py` + `test_field_calibration.py`); ruff + mypy
+  clean; full unit suite green. **#206 CLOSED → v0 geometry (#202–#206) fully done. NEXT BAR → v1
+  (recognizability):** kit colours (teams already A/B), shirt numbers, simple stadium.
 - **2026-06-27** — **v0 = correct GEOMETRY: ACHIEVED & VALIDATED end-to-end on the pod.** ONE batched
   48-frame real run (pod `zueopp6nzozxb7`: RF-DETR · ByteTrack · real PnLCalib · SMPLest-X · WASB →
   `out/val/export/scene.json`, then a cheap top/broadcast re-render via `REUSE_SCENE=1`). Measured: **#202
