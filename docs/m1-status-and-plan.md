@@ -10,7 +10,11 @@ criteria are MET (AC-1 B1 reprojection median **0.236 m**; AC-2 four-mode propag
 non-destructive resolve, tested + pod corr-1; AC-3 F-curve edits + export). Suite **480 passed / 5
 display-gated skips**. Documented ceiling (R-6): the photoreal-grade pose/ball *heavy* nets ship as
 injection-seam stubs (real backends inject by dotted path, ADR-0006); the GUI live-Blender session is
-display-gated; metric-XY is measured on lined footage. M2 (measured photoreal) is also 🟢; next is M3.
+display-gated; metric-XY is measured on lined footage. M2 (measured photoreal) is also 🟢, and **M3
+(quality & polish) closed 🟢 (2026-06-27)** — every M3 seam (M3-1…M3-8) plus the **A-10** bounded
+autonomy loop is wired end-to-end on fakes (suite **557 passed / 12 skipped**), with the
+generative/learned heavy halves kept as honest gated stubs (R-8). Next: **M4** (optional, real
+multi-camera) or wiring the gated reals on a GPU box.
 
 
 The full pipeline runs end-to-end on fake adapters (`tests/e2e/test_dry_run.py`) and three
@@ -41,7 +45,8 @@ bake-off (B2); everything else on the near-term path is autonomous, pure-core wo
 | **M0** | Hexagonal skeleton, ports/adapters, fakes, e2e dry-run | ✅ Complete |
 | **M1** | Editable vertical slice: real perception backends behind the seams | 🟢 Complete (2026-06-27 — AC-1/2/3 met; pose/ball heavy nets are injection-seam stubs, GUI session display-gated) |
 | **M2** | Photoreal render / observer (real Blender SCENE_3D) | 🟢 Complete (measured photoreal via Cycles; broadcast fidelity → M3; see `roadmap.md`) |
-| **M3** | Polish, LLM-over-MCP editing north-star (ADR-0008) + broadcast-grade generative fill | ⬜ Not started (next) |
+| **M3** | Polish, LLM-over-MCP editing north-star (ADR-0008) + broadcast-grade generative fill | 🟢 Complete (2026-06-27 — M3-1…M3-8 + A-10 all wired E2E on fakes; seam B AC-5b, three.js viewer AC-6, suite 557 passed AC-7; generative/learned heavy halves gated R-8; agent track A-1…A-10 ✅; see `roadmap.md`) |
+| **M4** | (optional) Real multi-camera — synchronized calibrated sources | ⬜ Not started (optional; the data model already treats cameras as a list, so it's an adapter + orchestration change, not a core rewrite) |
 
 ## Perception-backend matrix
 

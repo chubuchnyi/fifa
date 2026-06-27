@@ -439,7 +439,7 @@ in sync, so M2 is 🟢. Next: M3.**
 
 ---
 
-## M3 — Quality & polish 🟡  (+ ViewSynthesizer **seam B**)
+## M3 — Quality & polish 🟢  (+ ViewSynthesizer **seam B**)
 
 **Goal (TZ M3):** raise reconstruction quality and operator efficiency.
 
@@ -450,8 +450,8 @@ in sync, so M2 is 🟢. Next: M3.**
 | ✅ **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
 | ✅ **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
 | ✅ **M3-5 Confidence map + "needs attention" prioritization UI** | `adapters/render`, `core/scene` |
-| M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
-| M3-7 Web export (three.js / R3F) | `adapters/export` |
+| ✅ **M3-6 Versioning / named snapshots / rollback** — pure-core `SnapshotStore` (`core/scene/versioning.py`): a named `Snapshot` is a **deep, independent copy** of the `Scene` tagged with a **content-addressed SHA-256 fingerprint** (ADR-0004, over the canonical-JSON codec) so a redundant snapshot is detectable and a rollback to current state is a provable no-op; both `take` and `restore` copy, so a checkpoint stays pristine. Exposed as `snapshot`/`list_snapshots`/`rollback` use-cases on the shared controller API (the same surface the operator and MCP agent drive, ADR-0008/0010) — the checkpoint primitive an agent uses to bracket a risky edit. | `core/scene`, `app` |
+| ✅ **M3-7 Web export (three.js / R3F)** — `WebViewerExporter` (`adapters/export/web.py`): a **dependency-free** self-contained `index.html` (no build step, no server — scene data inlined) + standalone `scene.json`; shows the **resolved** subject roots + ball as animated team-coloured markers on a metric pitch in glTF **Y-up** (reuses the glTF Z-up→Y-up conversion, opens without scale/coord loss, AC-6). Honest scope (R-6): markers, not SMPL-X meshes. | `adapters/export` |
 | ✅ **M3-8 Learned motion-prior smoothing (option)** — a learned denoiser/motion-prior as an alternative to moving-average, behind the existing `smoothing`/`refit` Correction seam. Leading candidates: **HTD-Refine**, **StableMotion** (purpose-built denoisers); MotionBricks = generative fallback | `adapters/models` ↔ `core/correction` |
 
 **Exit criteria (TZ AC-5b, AC-6, AC-7):** seam B emits N synthetic views accepted by
@@ -482,6 +482,22 @@ samples each); the generated viewer JS passes `node --check`. **Tests:** 6 new (
 + the supports-matrix updated; suite **486 passed / 5 skipped**. **Honest scope (R-6):** markers, not
 SMPL-X meshes — the full textured-mesh web viewer rides the gated `.glb` path (`export` extra) in a
 later increment; the WebGL render itself isn't headlessly testable here (open `index.html` to view).
+
+**Progress — M3-6 named snapshots + rollback (2026-06-27):** the operator-efficiency primitive, pure
+core. Corrections are the sole edit path (ADR-0002) and the proposal is never mutated, so the state
+worth checkpointing is the whole `Scene` (correction stack + assembled assets). New
+`core/scene/versioning.py`: a `Snapshot` is a **deep, independent copy** tagged with a
+**content-addressed SHA-256 fingerprint** (`scene_fingerprint`, reusing the canonical-JSON
+`serialization.encode` codec, ADR-0004) — identical content → identical digest, so a redundant
+snapshot is detectable and a rollback to the *current* state is a **provable no-op**. `SnapshotStore`
+is in-memory, no I/O (last-write-wins per name); **both `take` and `restore` deep-copy**, so a
+checkpoint stays pristine even as the live scene keeps being edited. Wired as `snapshot` /
+`list_snapshots` / `rollback` use-cases on the shared `app` controller — the same surface the operator
+and the MCP agent drive (ADR-0008/0010), i.e. the checkpoint an agent can use to bracket a risky edit
+and roll back if the attention list gets worse. **Tests:** 9 (`test_versioning.py`) — fingerprint is
+content-addressed + stable across deep copies, snapshots are independent (mutating the live scene or a
+restored copy leaves the snapshot untouched), rollback-to-current is a no-op, last-write-wins on name,
+empty name rejected. Pure core, **no GPU/Blender** (**AC-7**).
 
 **Progress — M3-3/M3-4 ViewSynthesizer seam B wired E2E (2026-06-27):** the **headline M3 exit
 (AC-5b)**. The seam-B contract was *defined* in M0 (`ViewSynthesizer.amplify` /
@@ -625,9 +641,26 @@ input untouched, proposal intact); targeting fixes the worst (3 m) before the le
 pulls); an on-anchor scene needs no edits; deterministic. Suite **557 passed / 12 skipped**, no
 GPU/Blender/LLM (**AC-7**).
 
+**M3 GOAL met, flipped 🟡→🟢 (2026-06-27):** quality & operator-efficiency — every M3 seam closed end
+to end. **M3-1** per-subject Gaussian avatars, **M3-2** anchor-hardened re-fit + occlusion robustness,
+**M3-3/M3-4** ViewSynthesizer seam B (`amplify` + `inpaint_occlusions`), **M3-5** confidence map +
+"needs attention" UI, **M3-6** named snapshots + rollback, **M3-7** dependency-free three.js viewer,
+**M3-8** the learned motion-prior seam, and **A-10** the bounded autonomy loop — all run through the
+*real* path with pure, GPU-free halves that are unit-tested. Every generative/learned heavy half stays
+an **honest gated stub** behind an extra or dotted-path injection (**R-8**): the avatar refiner, amodal
+occlusion completion, view-synth diffusion, and the learned denoiser each raise an actionable
+`NotImplementedError` until wired — never silently faked. **Exit criteria met:** seam B feeds N
+synthetic views into reconstruction (**AC-5b**), the web viewer opens externally without scale/coord
+loss (**AC-6**), and the whole suite — **557 passed / 12 skipped** — runs on fakes with **no
+GPU/Blender/LLM** (**AC-7**). The agent track closes with it (A-1…A-10 all ✅): the M3 agent exit — a
+seeded-wrong pose fixed end to end, verified by the attention list clearing — is proven in the dry-run.
+**R-6 honesty (unchanged at 🟢):** 🟢 means every seam is real and *measured* where it can be, with
+generative realism deferred behind gates — not that the heavy models ship. **Next: M4 (optional, real
+multi-camera), or wiring the gated reals on a GPU box.**
+
 ---
 
-## Agent / MCP automation track (cross-cutting, ADR-0008) ⬜
+## Agent / MCP automation track (cross-cutting, ADR-0008) 🟢  (through M3; extends with M4)
 
 The north-star: **automate operator work with an LLM** that drives the same use-cases a human
 does, over MCP, with visual feedback. This is not a milestone — it *rides on top of* each one,
