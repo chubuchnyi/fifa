@@ -8,6 +8,7 @@ The real ByteTrack adapter is exercised with an *injected* stub backend, so its 
 from __future__ import annotations
 
 import importlib.util
+from collections import Counter
 
 import numpy as np
 import pytest
@@ -99,6 +100,33 @@ def test_bytetrack_clusters_two_teams_and_excludes_referee():
     assert by_id[4].team_id == "B"
     assert by_id[3].team_id is None  # referee → no team
     assert {t.id for t in tracks.teams} == {"A", "B"}
+
+
+def test_team_color_rgb_is_measured_from_the_cluster():
+    # color_rgb was never set (render fell back to an arbitrary tab10 index); it must now carry the
+    # cluster's *measured* kit colour so the render paints the real shirts: A red-ish, B blue-ish.
+    tracks = ByteTrackTracker(backend=_StubTrackingBackend(_CANNED)).track(_clip(), _DETS)
+    by_id = {t.id: t for t in tracks.teams}
+    assert by_id["A"].color_rgb is not None and by_id["B"].color_rgb is not None
+    ar, ag, ab = by_id["A"].color_rgb
+    br, bg, bb = by_id["B"].color_rgb
+    assert ar > ag and ar > ab  # team A reads red
+    assert bb > br and bb > bg  # team B reads blue
+
+
+def test_brightness_outlier_does_not_collapse_the_split():
+    # The 19/1 collapse: raw-HSV euclidean k-means seeds its 2nd centroid on a light/shadow (high-V)
+    # torso, so that one player splits off and everyone else lands in a single team. A hue-aware
+    # feature must instead split on kit colour — all reds one team, all blues the other, 5/5.
+    reds = [_raw(i, "player", [10.0, 180.0, 120.0]) for i in range(4)]
+    reds.append(_raw(4, "player", [10.0, 180.0, 250.0]))  # same hue, much brighter — the outlier
+    blues = [_raw(i, "player", [120.0, 180.0, 120.0]) for i in range(5, 10)]
+    tracks = ByteTrackTracker(backend=_StubTrackingBackend(reds + blues)).track(_clip(), _DETS)
+    team_of = {t.track_id: t.team_id for t in tracks.tracklets}
+    assert len({team_of[i] for i in range(5)}) == 1  # every red (incl. the bright one) → one team
+    assert len({team_of[i] for i in range(5, 10)}) == 1  # every blue → one team
+    assert team_of[0] != team_of[5]  # and the two kits are different teams
+    assert sorted(Counter(team_of.values()).values()) == [5, 5]  # balanced, not the old 1/9
 
 
 def test_majority_vote_resolves_flickering_class():

@@ -122,6 +122,33 @@ def _kmeans(feats: np.ndarray, k: int, *, iters: int = 50) -> np.ndarray:
     return labels
 
 
+def _hsv_to_feature(hsv: np.ndarray) -> np.ndarray:
+    """Mean-HSV rows (OpenCV ranges H∈[0,180], S,V∈[0,255]) → a hue-aware, euclidean-safe feature.
+
+    Hue is *circular*, so raw-HSV euclidean k-means is wrong: a single light/shadow (high-V) torso
+    becomes the farthest point and seeds a 1-vs-rest split (the observed 19/1 collapse). Encode hue
+    as a chroma vector scaled by saturation (a grey / low-sat torso contributes ~no hue, so it can't
+    masquerade as a colour) and downweight brightness, so the split is driven by *kit colour*.
+    """
+    hsv = np.asarray(hsv, dtype=float).reshape(-1, 3)
+    hue = hsv[:, 0] * (np.pi / 90.0)  # H∈[0,180] → angle [0, 2π)
+    sat = hsv[:, 1] / 255.0
+    val = hsv[:, 2] / 255.0
+    return np.stack([sat * np.cos(hue), sat * np.sin(hue), 0.25 * val], axis=1)
+
+
+def _hsv_to_rgb01(hsv: np.ndarray) -> tuple[float, float, float]:
+    """Pure-numpy mean-HSV (OpenCV ranges) → 0..1 RGB for ``Team.color_rgb`` (no cv2 here)."""
+    h = (float(hsv[0]) / 180.0) * 6.0  # OpenCV hue [0,180] → sextant [0,6)
+    s = min(max(float(hsv[1]) / 255.0, 0.0), 1.0)
+    v = min(max(float(hsv[2]) / 255.0, 0.0), 1.0)
+    i = int(np.floor(h)) % 6
+    f = h - np.floor(h)
+    p, q, t = v * (1.0 - s), v * (1.0 - s * f), v * (1.0 - s * (1.0 - f))
+    r, g, b = ((v, t, p), (q, v, p), (p, v, t), (p, q, v), (t, p, v), (v, p, q))[i]
+    return (float(r), float(g), float(b))
+
+
 @dataclass
 class ByteTrackTracker(Tracker):
     """ByteTrack association + appearance team clustering (FR-6) — pure over an injected backend.
@@ -169,16 +196,16 @@ class ByteTrackTracker(Tracker):
         return Tracks(tracklets=tracklets, teams=teams)
 
     def _assign_teams(self, raw: list[RawTracklet], tracklets: list[Tracklet]) -> list[Team]:
-        """Cluster team-bearing tracks by appearance and stamp ``team_id`` in place."""
+        """Cluster team-bearing tracks by kit colour; stamp ``team_id`` + set ``color_rgb``."""
         idx = [
             i for i, t in enumerate(tracklets)
             if t.cls in TEAM_CLASSES and raw[i].appearance is not None
         ]
         if not idx:
             return []
-        feats = np.stack([a for i in idx if (a := raw[i].appearance) is not None])
+        hsv = np.stack([a for i in idx if (a := raw[i].appearance) is not None])
         k = min(self.n_teams, len(self.team_ids), len(idx))
-        labels = _kmeans(feats, k)
+        labels = _kmeans(_hsv_to_feature(hsv), k)
 
         # Map raw cluster ids → stable team ids by the smallest track id in each cluster, so the
         # labelling does not depend on k-means' internal ordering.
@@ -190,11 +217,16 @@ class ByteTrackTracker(Tracker):
         order = sorted(set(labels.tolist()), key=_min_track_id)
         remap = {c: pos for pos, c in enumerate(order)}
 
+        team_of = [self.team_ids[remap[int(labels[j])]] for j in range(len(idx))]
         used: dict[str, Team] = {}
         for j, i in enumerate(idx):
-            tid = self.team_ids[remap[labels[j]]]
-            tracklets[i].team_id = tid
-            used.setdefault(tid, Team(id=tid, name=f"Team {tid}"))
+            tracklets[i].team_id = team_of[j]
+            used.setdefault(team_of[j], Team(id=team_of[j], name=f"Team {team_of[j]}"))
+        # Representative kit colour per team = mean HSV of its members → RGB, so the render paints
+        # the *measured* colour instead of an arbitrary palette index (v1 recognizability).
+        for tid, team in used.items():
+            members = hsv[[j for j in range(len(idx)) if team_of[j] == tid]]
+            team.color_rgb = _hsv_to_rgb01(members.mean(axis=0))
         return [used[t] for t in self.team_ids if t in used]
 
     def _default_backend(self) -> TrackingBackend:
@@ -257,12 +289,19 @@ class ByteTrackBackend:
         return out
 
     def _sample_appearance(self, clip, boxes):  # pragma: no cover - heavy path (needs cv2 + media)
-        """Mean torso HSV per track id, sampled from the first few frames it appears in."""
+        """Robust torso kit-colour (median HSV) per track id, from the first frames it appears in.
+
+        Three robustness measures, because a raw mean over the whole bbox was washing the kit
+        colour out (→ the 19/1 mis-cluster): (1) sample only a *central* upper-torso patch (middle
+        50% width, 25–50% height) to dodge arms, shorts, the head and the pitch around the
+        silhouette; (2) drop grass-green pixels (the dominant background contaminant); (3) take the
+        **median**, not the mean, so a stray skin/background pixel can't drag the estimate.
+        """
         from .detection import _iter_frames
 
         wanted: dict[int, list[tuple[int, np.ndarray]]] = {}
         for tid, seq in boxes.items():
-            for frame, box, _ in seq[:5]:
+            for frame, box, _ in seq[:8]:
                 wanted.setdefault(frame, []).append((tid, box))
         if not wanted:
             return {}
@@ -272,13 +311,24 @@ class ByteTrackBackend:
 
         for frame, image in _iter_frames(clip):
             for tid, box in wanted.get(frame, []):
-                x0, y0, x1, y1 = (int(round(v)) for v in box)
-                cy0, cy1 = y0 + (y1 - y0) // 4, y0 + (y1 - y0) // 2  # upper torso band
-                crop = image[max(cy0, 0):max(cy1, cy0 + 1), max(x0, 0):max(x1, x0 + 1)]
-                if crop.size:
-                    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-                    acc.setdefault(tid, []).append(hsv.reshape(-1, 3).mean(axis=0))
-        return {tid: np.mean(vals, axis=0) for tid, vals in acc.items() if vals}
+                x0, y0, x1, y1 = (float(v) for v in box)
+                w, h = x1 - x0, y1 - y0
+                ix0, iy0 = max(int(round(x0 + 0.25 * w)), 0), max(int(round(y0 + 0.25 * h)), 0)
+                ix1 = max(int(round(x0 + 0.75 * w)), ix0 + 1)
+                iy1 = max(int(round(y0 + 0.50 * h)), iy0 + 1)
+                crop = image[iy0:iy1, ix0:ix1]
+                if not crop.size:
+                    continue
+                hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV).reshape(-1, 3).astype(float)
+                green = (
+                    (hsv[:, 0] >= 35) & (hsv[:, 0] <= 85)
+                    & (hsv[:, 1] >= 60) & (hsv[:, 2] >= 40)
+                )
+                kept = hsv[~green]
+                if kept.shape[0] < max(8, hsv.shape[0] // 10):
+                    kept = hsv  # almost all grass (bad box) → don't fabricate, use the raw patch
+                acc.setdefault(tid, []).append(np.median(kept, axis=0))
+        return {tid: np.median(np.stack(vals), axis=0) for tid, vals in acc.items() if vals}
 
     def _import_sv(self):  # pragma: no cover - exercised only without the extra
         try:

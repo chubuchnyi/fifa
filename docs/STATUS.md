@@ -19,8 +19,8 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v0 = correct GEOMETRY is DONE (validated 2026-06-27).** Next bar = **v1 (recognizability)**: kit colours, shirt numbers, simple stadium.
-- **NEXT ACTION:** **v0 = correct GEOMETRY is ACHIEVED & VALIDATED** (pod `zueopp6nzozxb7`, 48f real run, now STOPPED). All five defects closed: #202 body count = **20** (was a swarm); #203 root spread = **34×40 m** real-scale (fake-calib 22×7 m collapse gone, real PnLCalib default); #204 broadcast/top cameras frame the action; #205 pitch lines + goal frames render; **#206 ball now in-pitch 0/48→48/48** via contact-anchoring (recovered the t12→t18 pass). Eye-judged from `out/val/video/{broadcast,top}.mp4` (local copies `/tmp/val_video/`, scene `/tmp/val_scene.json`). **NEXT BAR → v1 (recognizability):** team kit colours (teams already split A/B in the render), shirt numbers (OCR where readable, else roster), simple stadium backdrop. Pick the first v1 sub-task and scope it.
+- **Current focus:** **v1 (recognizability)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). Remaining v1: shirt numbers, simple stadium.
+- **NEXT ACTION:** **v1 step 1 DONE — measured kit colours + fixed the 19/1 team split → 10/10** (validated locally, no pod). Team A = **yellow** (Colombia) RGB (0.689,0.651,0.275); Team B = **light-blue** (Congo DR) RGB (0.302,0.524,0.647). Root: euclidean k-means on raw circular hue + `Team.color_rgb` never set; fix = hue-aware chroma clustering + measured `color_rgb` (pure core) + robust torso sampling (backend). Eye-checked in `/tmp/val_frames_v1` + zoomed `/tmp/v1_zoom_{9,15}.png`; 555 passed/10 skipped, ruff+mypy clean; committed. **NEXT v1 sub-task → shirt numbers** (OCR where readable, else roster), then simple stadium backdrop — scope with the user before starting.
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -39,8 +39,9 @@ the stadium is realistic and the same as the source. **Judged by eye.**
 - [x] **v0 — correct GEOMETRY (ACHIEVED 2026-06-27).** Stable ~22 players (measured **20**), correct
   world placement/scale (root spread **34×40 m**), poses, virtual cameras that frame the action, pitch
   with lines + goals. Validated end-to-end on the pod (`out/val/`); see §6. First "good" result.
-- [ ] **v1 — recognizability (CURRENT FOCUS).** Team kit colors (teams already split A/B in the render);
-  numbers (OCR where readable, else roster); simple stadium backdrop.
+- [ ] **v1 — recognizability (CURRENT FOCUS).** [x] Team **kit colours** — measured from torso pixels;
+  split repaired 19/1 → **10/10**; A=yellow, B=light-blue (validated 2026-06-27, see §6). [ ] shirt numbers
+  (OCR where readable, else roster). [ ] simple stadium backdrop.
 - [ ] **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
   `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
 
@@ -133,6 +134,25 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-06-27** — **v1 step 1 LANDED: measured kit colours + repaired the 19/1 team split → 10/10.**
+  First v1 (recognizability) sub-task. Two coupled bugs found while validating the real-clip teams: (1) the
+  classifier collapsed **19/1** — `_assign_teams` ran euclidean k-means on **raw mean-HSV**, but OpenCV hue
+  is circular (H∈[0,180]) and a single bright/shadow (high-V) torso becomes the farthest point, so it seeds
+  a 1-vs-rest split instead of splitting on kit colour; (2) `Team.color_rgb` was **never set**, so the render
+  fell back to an arbitrary tab10 palette (teams were A/B but not the real shirts). **Fix
+  (measured-over-generative, pure core):** new `_hsv_to_feature` maps mean-HSV → a hue-aware, euclidean-safe
+  chroma feature `[sat·cos(hue), sat·sin(hue), 0.25·val]` (respects circularity, downweights brightness) and
+  `_assign_teams` now sets each `Team.color_rgb` to its cluster's measured mean (`_hsv_to_rgb01`, pure numpy);
+  the heavy `_sample_appearance` backend samples a **central upper-torso patch**, rejects grass-green, and
+  medians per-frame + across the first 8 frames. **Validated locally, no pod** (`/tmp/kit_measure.py`):
+  reproject each subject's foot world-XY via `FieldCalibration.world_to_image` (the #206 `H⁻¹`) to sample
+  real torso pixels → split is now **10/10** (was 19/1), **Team A = yellow (Colombia) RGB (0.689,0.651,0.275)
+  H≈27**, **Team B = light-blue (Congo DR) RGB (0.302,0.524,0.647) H≈100**, consistent hues per cluster.
+  Colours bake through to `anim_subject_*.npz` (t6,t14→yellow; t3,t11→blue); Blender re-render
+  `/tmp/val_frames_v1/{top,broadcast}` + zoomed crops `/tmp/v1_zoom_{9,15}.png` show two clearly distinct
+  team colours on the pitch. 2 new tests (`test_team_color_rgb_is_measured_from_the_cluster`,
+  `test_brightness_outlier_does_not_collapse_the_split`); full suite **555 passed / 10 skipped**; ruff + mypy
+  clean. **NEXT v1 sub-tasks:** shirt numbers (OCR where readable, else roster), simple stadium backdrop.
 - **2026-06-27** — **#206 ball fix LANDED + VALIDATED → all of v0 geometry now CLOSED.** Root (confirmed
   locally on `/tmp/val_scene.json`, no pod): the ball is airborne the entire 48-frame window (its image-v
   449–525 sits above every player foot at v 556–894), so ground-plane un-projection overshoots ~13 m, and
