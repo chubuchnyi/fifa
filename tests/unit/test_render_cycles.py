@@ -27,11 +27,18 @@ from pitch3d.adapters.blender.cycles_plan import (
     write_cycles_plan,
 )
 from pitch3d.adapters.models.avatar import write_vertex_colored_ply
+from pitch3d.adapters.models.smplx_lbs import SmplxModel, locate_smplx_model
 from pitch3d.adapters.render.cycles import CyclesRenderPass
 from pitch3d.core.correction.rotations import axis_angle_to_matrix
 from pitch3d.core.ports.render import RenderQuality
 from pitch3d.core.scene.assets import RenderAssetKind, RenderAssetRef
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
+from pitch3d.core.scene.motion import (
+    N_SMPLX_BODY_JOINTS,
+    PoseSequence,
+    SmplxShape,
+    SubjectMotion,
+)
 from pitch3d.core.scene.provenance import Backend, ModelInfo
 from pitch3d.core.scene.subject import Subject
 
@@ -125,6 +132,28 @@ def test_plan_json_round_trip(tmp_path, make_motion, make_scene):
     )
 
 
+def test_plan_round_trips_posed_mesh_and_vert_index(tmp_path, make_motion, make_scene):
+    # A posed mesh (M2-8): root + limbs are baked into per-frame LBS verts, so the placement is an
+    # identity matrix plus the pose-row ``vert_index`` (not a root matrix). Both the ``posed`` flag
+    # and per-frame ``vert_index`` must survive the JSON subprocess boundary so the script swaps the
+    # right geometry per frame.
+    subj = Subject(track_id=7, proposal=make_motion([0, 1], transl_z=5.0))
+    scene = make_scene(subjects=[subj])
+    plan = build_cycles_plan(
+        scene, _camera(2), meshes=[CyclesMeshRef("avatar_7", "avatar_7.npz", 7, posed=True)]
+    )
+    assert plan.meshes[0].posed is True
+    pl0 = plan.frames[0].placements[0]
+    assert pl0.visible and pl0.vert_index == 0
+    np.testing.assert_allclose(pl0.matrix_world, np.eye(4))
+    assert [f.placements[0].vert_index for f in plan.frames] == [0, 1]
+
+    back = load_cycles_plan(write_cycles_plan(plan, tmp_path / "posed.json"))
+    assert back.meshes[0].posed is True
+    assert [f.placements[0].vert_index for f in back.frames] == [0, 1]
+    np.testing.assert_allclose(back.frames[0].placements[0].matrix_world, np.eye(4))
+
+
 # --- the in-Blender script's arg parser is pure (no bpy) -----------------------
 def test_cycles_script_parses_flags():
     argv = ["blender", "--python", "x.py", "--",
@@ -156,3 +185,64 @@ def test_cycles_render_produces_a_nonempty_frame(tmp_path, make_motion, make_sce
     assert res.n_frames == 1 and not res.is_video
     assert frame.is_file() and frame.stat().st_size > 0
     assert "cycles" in res.note and "avatars=1" in (Path(res.uri) / "manifest.txt").read_text()
+
+
+# --- Blender + SMPL-X gated: the limbs actually follow the pose (M2-8a headline) ----
+@pytest.mark.skipif(
+    locate_blender() is None or locate_smplx_model() is None,
+    reason="needs a Blender binary and the SMPL-X model (.npz)",
+)
+def test_cycles_posed_avatar_limbs_follow_the_pose(tmp_path, make_scene):
+    # The headline M2-8a proof: a real SMPL-X avatar rendered through Cycles must *articulate*. The
+    # two frames share root, camera and Cycles seed (constant); only the left-elbow angle differs
+    # (rest vs a hard bend). A rigid placement would render two identical frames (one canonical mesh
+    # at one root) — only per-frame LBS can move pixels, and only where the forearm swung.
+    import cv2
+
+    model = SmplxModel.load(locate_smplx_model())
+    betas = np.zeros(10)
+    verts = model.shaped(betas)
+    rgb = np.tile(np.array([[220, 40, 40]], dtype=np.uint8), (verts.shape[0], 1))  # high contrast
+    measured = np.ones(verts.shape[0], dtype=bool)
+    uri = write_vertex_colored_ply(tmp_path / "avatar_5.ply", verts, model.faces, rgb, measured)
+
+    # The left shoulder is abducted the SAME on both frames (arm held clear of the torso, against
+    # the sky); only the left elbow (SMPL-X joint 18 == body_pose row 17) bends on frame 1. So any
+    # pixel that changes between the two frames is the forearm articulating — nothing else differs.
+    shoulder = [0.0, 0.0, -1.1]
+    body = np.zeros((2, N_SMPLX_BODY_JOINTS, 3))
+    body[0, 15] = body[1, 15] = shoulder
+    body[1, 17] = [1.8, 0.0, 1.8]
+    pose = PoseSequence(
+        frames=np.array([0, 1]),
+        global_orient=np.tile([0.0, 1.2, 0.0], (2, 1)),  # ~70 deg about Y → a 3/4 view of the arm
+        body_pose=body,
+        transl=np.tile([0.0, 0.2, 2.4], (2, 1)),
+    )
+    subj = Subject(track_id=5, proposal=SubjectMotion(SmplxShape(betas), pose))
+    scene = make_scene(subjects=[subj])
+    scene.render_assets = [
+        RenderAssetRef(
+            id="a-5", kind=RenderAssetKind.AVATAR_TEXTURED_SMPLX, uri=uri,
+            model=ModelInfo(name="t", backend=Backend.FAKE), subject_track_id=5,
+        )
+    ]
+
+    # A zoomed-in camera so the arm fills enough pixels for the swing to be unmistakable.
+    intr = CameraIntrinsics(fx=130.0, fy=130.0, cx=80.0, cy=60.0, width=160, height=120)
+    res = CyclesRenderPass(out_dir=tmp_path / "render", samples=16).render(
+        scene, CameraTrack.identity(intr, 2), RenderQuality.FINAL
+    )
+    assert res.n_frames == 2
+    manifest = (Path(res.uri) / "manifest.txt").read_text()
+    assert "avatars=1" in manifest and "posed=1" in manifest  # the posed path ran, not rigid
+
+    f0 = cv2.imread(str(Path(res.uri) / "frame_00000.png"))
+    f1 = cv2.imread(str(Path(res.uri) / "frame_00001.png"))
+    assert f0 is not None and f1 is not None
+    changed = np.abs(f0.astype(int) - f1.astype(int)).max(axis=2) > 20
+    n_changed = int(changed.sum())
+    # The forearm swing moves a big block of pixels, but only locally — the background is identical
+    # (constant Cycles seed), so this is geometry, not render noise. A rigid bug would give 0.
+    assert n_changed > 80
+    assert n_changed < 0.4 * f0.shape[0] * f0.shape[1]

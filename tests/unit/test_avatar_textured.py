@@ -29,6 +29,7 @@ from pitch3d.adapters.models.avatar import (
     vertex_normals,
     write_vertex_colored_ply,
 )
+from pitch3d.adapters.models.smplx_lbs import N_SMPLX_VERTS, locate_smplx_model
 from pitch3d.core.ports.io import CropRef
 from pitch3d.core.scene.assets import RenderAssetKind
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
@@ -213,13 +214,23 @@ def test_build_with_no_frames_is_geometry_only_and_honest(tmp_path, make_motion)
     assert flags == [0, 0, 0]
 
 
-def test_default_backend_heavy_path_is_gated():
-    # No backend injected → the real SMPL-X backend, which is an honest unwired stub. It raises
-    # NotImplementedError (model present) or RuntimeError (avatar extra absent) — never silently.
+def test_default_backend_geometry_half_wired_or_gated(make_motion):
+    # No backend injected → the real SMPL-X backend. M2-8a wired its geometry: with the model
+    # present it returns the canonical shaped mesh, geometry-only (frames=[], every vertex
+    # measured=0 until M2-8b). Without the model it raises an actionable RuntimeError — never a
+    # silent fabricated mesh.
     builder = TexturedSmplxAvatarBuilder(out_dir=Path("out/assets"))
-    assert isinstance(builder._backend(), SmplxTextureBackend)
-    with pytest.raises((NotImplementedError, RuntimeError)):
-        builder._backend().observe(Subject(track_id=1, proposal=None), [])  # type: ignore[arg-type]
+    backend = builder._backend()
+    assert isinstance(backend, SmplxTextureBackend)
+    subject = Subject(track_id=1, proposal=make_motion([0]))
+    if locate_smplx_model() is None:
+        with pytest.raises(RuntimeError):
+            backend.observe(subject, [])
+        return
+    obs = backend.observe(subject, [])
+    assert obs.canonical_vertices.shape == (N_SMPLX_VERTS, 3)
+    assert obs.faces.shape == (20908, 3)
+    assert obs.frames == []
 
 
 # --- SyntheticAvatarMeshBackend (the injectable, dependency-free measured path) -------------

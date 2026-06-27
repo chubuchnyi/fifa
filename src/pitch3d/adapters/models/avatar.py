@@ -18,11 +18,13 @@ no GPU**:
   (a light z-buffer) vertices, samples their colour, and averages across all reference frames
   into one measured per-vertex texture + an observation count. Writes a vertex-coloured PLY
   (geometry + colour + the per-vertex ``measured`` flag). Numpy + stdlib; unit-tested via a stub.
-* :class:`SmplxTextureBackend` — the **heavy** half: *not wired yet* (roadmap M2). Turning a
-  subject's resolved SMPL-X params into posed world vertices needs the SMPL-X body model
-  (non-commercial), and sampling needs the decoded source frames + the scene camera, so it is
-  built with that scene context and gated behind the ``avatar`` extra; :meth:`observe` raises an
-  actionable ``NotImplementedError``. The pure half above is complete and tested.
+* :class:`SmplxTextureBackend` — the SMPL-X half. Its **geometry** is wired (M2-8a): the subject's
+  resolved ``betas`` become the canonical mesh via the pure-numpy SMPL-X forward
+  (:mod:`.smplx_lbs`, no torch/GPU), and the render pass poses it per frame for the limbs. Its
+  **texture** half is M2-8b: :meth:`observe` returns no reference frames yet (geometry-only, every
+  vertex ``measured=0``, honest R-6), because sampling still needs the decoded source frames + the
+  scene camera threaded into the builder. The (non-commercial) SMPL-X model is the gated asset — its
+  absence raises an actionable error, never a silent fake.
 
 Swap it in via ``default_ports(avatar="textured")`` (wiring) or inject a vendored backend by
 dotted path with ``--avatar-backend pkg.module:Factory`` (ADR-0006) — one fake replaced at a time.
@@ -46,6 +48,7 @@ from ...core.scene.camera import CameraIntrinsics, CameraTrack
 from ...core.scene.projection import camera_center, project_world_points_with_depth
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from .smplx_lbs import SmplxModel, locate_smplx_model
 
 #: Neutral grey written for vertices with no measured observation (the honest "unknown" colour;
 #: the per-vertex ``measured`` flag is the real signal — never read this as a true appearance).
@@ -330,42 +333,48 @@ class TexturedSmplxAvatarBuilder(AvatarBuilder):
 
 @dataclass
 class SmplxTextureBackend:
-    """Real SMPL-X meshing + frame sampling: lazy torch/smplx imports, no import cost.
+    """Real SMPL-X meshing (M2-8a geometry wired) + frame sampling (M2-8b, pending).
 
-    Posing a subject into world vertices needs the SMPL-X body model and sampling needs the
-    decoded source frames + the scene camera, so a real instance is constructed with that scene
-    context. Imported only when :meth:`observe` is first called, so this module stays import-safe
-    without the ``avatar`` extra.
+    :meth:`observe` shapes the subject's resolved ``betas`` into the canonical mesh with the
+    pure-numpy SMPL-X forward (no torch/GPU) and returns it geometry-only — the render pass poses
+    the limbs per frame. Texture sampling needs the decoded source frames + the scene camera
+    threaded in (M2-8b), so no reference frames are returned yet (every vertex ``measured=0``, R-6).
+    The model ``.npz`` is loaded lazily on first :meth:`observe`, located like every gated asset.
     """
 
     device: str = "cuda"
-    _model: object = None
+    _model: SmplxModel | None = None
 
-    def observe(  # pragma: no cover - heavy path
+    def observe(
         self, subject: Subject, ref_crops: Sequence[CropRef]
     ) -> AvatarMeshObservations:
-        self._load()
-        raise NotImplementedError(
-            "measured SMPL-X texturing is not wired yet (roadmap M2). The pure half "
-            "(projection + front-facing/z-buffer visibility + per-vertex colour averaging + "
-            "the measured/PLY writer) is complete and tested; the heavy half needs (a) the "
-            "SMPL-X body model (non-commercial) to pose the subject's resolved params into "
-            "world vertices, (b) the decoded source frames, and (c) the scene camera — it is "
-            "built with that scene context. Inject an AvatarMeshBackend (--avatar-backend "
-            "pkg.module:Factory) that yields a canonical mesh + per-frame posed "
-            "vertices/camera/pixels, or keep the fake (--avatar fake)."
+        """Canonical SMPL-X mesh for the subject's resolved shape — geometry-only (M2-8a).
+
+        The subject's ``betas`` are turned into the rest/canonical mesh with the pure-numpy SMPL-X
+        forward (no torch/GPU); the render pass poses it per frame for the limbs. No reference
+        frames are sampled here, so every vertex is left ``measured=0`` (honest R-6 grey) until
+        M2-8b threads the scene camera + decoded pixels into texturing. The model is the gated
+        asset — its absence raises an actionable error rather than fabricating geometry.
+        """
+        model = self._smplx_model()
+        return AvatarMeshObservations(
+            canonical_vertices=model.shaped(subject.proposal.shape.betas),
+            faces=model.faces,
+            frames=[],
         )
 
-    def _load(self) -> object:  # pragma: no cover - exercised only without the extra
+    def _smplx_model(self) -> SmplxModel:
+        """Load (and cache) the pure-numpy SMPL-X model, or raise an actionable locate error."""
         if self._model is None:
-            try:
-                import torch  # noqa: F401  (stand-in for the SMPL-X body-model stack)
-            except ImportError as exc:
+            path = locate_smplx_model()
+            if path is None:
                 raise RuntimeError(
-                    "SMPL-X texturing needs the avatar extra. Install it "
-                    "(`pip install 'pitch3d[avatar]'`) or inject an AvatarMeshBackend."
-                ) from exc
-            self._model = object()
+                    "SMPL-X meshing needs the (non-commercial) SMPL-X model .npz. Point "
+                    "$PITCH3D_SMPLX_MODELS at the models dir (or $PITCH3D_SMPLX_MODEL at the "
+                    "file), inject an AvatarMeshBackend (--avatar-backend pkg.module:Factory), "
+                    "or keep the fake (--avatar fake)."
+                )
+            self._model = SmplxModel.load(path)
         return self._model
 
 

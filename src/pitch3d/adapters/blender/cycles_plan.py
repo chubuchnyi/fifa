@@ -16,9 +16,12 @@ Two conventions meet here and only the camera optical frame needs a flip:
   +y down). Blender's camera looks down its local **-Z** with **+Y up**, and ``matrix_world`` is
   camera→world. ``diag(1, -1, -1)`` maps the OpenCV optical axes onto Blender's.
 
-Honest scope (M2-7): a mesh is placed by its resolved root **rigid** transform only — identical to
-the splat pass — so per-joint limb articulation (LBS) is *not* applied here (that is M2-8). The
-environment is a single neutral ground plane; the measured grass/line material is M2-9.
+Two avatar geometry layouts are supported. A **rigid** mesh (M2-7) is one canonical mesh placed by
+its resolved root transform — identical to the splat pass. A **posed** mesh (M2-8) carries per-frame
+LBS vertices (the resolved root *and* per-joint limb articulation, baked on the pure side via
+:mod:`...models.smplx_lbs`); the plan then carries identity placements + a per-frame ``vert_index``
+and the script swaps the geometry each frame, so the limbs follow the resolved pose. The environment
+is still a single neutral ground plane; the measured grass/line material is M2-9.
 """
 
 from __future__ import annotations
@@ -109,11 +112,18 @@ def blender_lens_params(
 
 @dataclass
 class CyclesMeshRef:
-    """A per-subject avatar mesh the script loads once from ``<mesh_dir>/<npz>`` and reuses."""
+    """A per-subject avatar mesh the script loads once from ``<mesh_dir>/<npz>`` and reuses.
+
+    ``posed=False`` (M2-7) the NPZ holds one canonical ``(V, 3)`` mesh placed rigidly by each
+    frame's root ``matrix_world``. ``posed=True`` (M2-8) the NPZ holds per-pose-frame LBS vertices
+    ``(T, V, 3)`` (root *and* limbs already baked on the pure side); placements are identity and the
+    script swaps in row ``vert_index`` each output frame, so the limbs follow the resolved pose.
+    """
 
     name: str
     npz: str
     track_id: int
+    posed: bool = False
 
 
 @dataclass
@@ -122,11 +132,14 @@ class CyclesPlacement:
 
     ``visible=False`` (subject absent this frame) hides the object for that render rather than
     fabricating a position — the same "no placement, no fabrication" rule the splat pass follows.
+    ``vert_index >= 0`` (posed mesh) selects the LBS-vertex row to swap in this frame; ``-1`` (the
+    default) is a rigid mesh placed by ``matrix_world`` alone.
     """
 
     name: str
     matrix_world: np.ndarray  # (4, 4) object→world
     visible: bool
+    vert_index: int = -1
 
 
 @dataclass
@@ -197,13 +210,20 @@ def build_cycles_plan(
                 placements.append(CyclesPlacement(mesh.name, np.eye(4), visible=False))
                 continue
             row = int(hit[0])
-            placements.append(
-                CyclesPlacement(
-                    mesh.name,
-                    root_object_matrix(pose.global_orient[row], pose.transl[row]),
-                    visible=True,
+            if mesh.posed:
+                # Root + limbs are baked into the per-frame LBS vertices; place identity and let the
+                # script swap in row ``row``. (transl is already in the baked world vertices.)
+                placements.append(
+                    CyclesPlacement(mesh.name, np.eye(4), visible=True, vert_index=row)
                 )
-            )
+            else:
+                placements.append(
+                    CyclesPlacement(
+                        mesh.name,
+                        root_object_matrix(pose.global_orient[row], pose.transl[row]),
+                        visible=True,
+                    )
+                )
         frames.append(
             CyclesFrame(
                 index=i,
@@ -244,7 +264,10 @@ def write_cycles_plan(plan: CyclesPlan, path: str | Path) -> Path:
 def load_cycles_plan(path: str | Path) -> CyclesPlan:
     """Reload a plan from JSON — symmetric with :func:`write_cycles_plan` (used by tests)."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
-    meshes = [CyclesMeshRef(m["name"], m["npz"], int(m["track_id"])) for m in data["meshes"]]
+    meshes = [
+        CyclesMeshRef(m["name"], m["npz"], int(m["track_id"]), bool(m.get("posed", False)))
+        for m in data["meshes"]
+    ]
     frames = [
         CyclesFrame(
             index=int(f["index"]),
@@ -254,6 +277,7 @@ def load_cycles_plan(path: str | Path) -> CyclesPlan:
                     p["name"],
                     np.asarray(p["matrix_world"], dtype=float).reshape(4, 4),
                     bool(p["visible"]),
+                    int(p.get("vert_index", -1)),
                 )
                 for p in f["placements"]
             ],
@@ -286,13 +310,21 @@ def _plan_dict(plan: CyclesPlan) -> dict:
         "ground_size": plan.ground_size,
         "up_axis": plan.up_axis,
         "camera_intrinsics": plan.camera_intrinsics,
-        "meshes": [{"name": m.name, "npz": m.npz, "track_id": m.track_id} for m in plan.meshes],
+        "meshes": [
+            {"name": m.name, "npz": m.npz, "track_id": m.track_id, "posed": m.posed}
+            for m in plan.meshes
+        ],
         "frames": [
             {
                 "index": f.index,
                 "camera_matrix_world": f.camera_matrix_world,
                 "placements": [
-                    {"name": p.name, "matrix_world": p.matrix_world, "visible": p.visible}
+                    {
+                        "name": p.name,
+                        "matrix_world": p.matrix_world,
+                        "visible": p.visible,
+                        "vert_index": p.vert_index,
+                    }
                     for p in f.placements
                 ],
             }

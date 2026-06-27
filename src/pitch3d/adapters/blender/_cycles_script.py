@@ -14,8 +14,10 @@ Self-contained on purpose: only stdlib + ``bpy``/``mathutils`` + ``numpy`` (all 
 it carries no dependency on the ``pitch3d`` package, and ``bpy`` is imported only when run as
 Blender's ``__main__`` — importing this file in a normal interpreter never pulls in ``bpy``.
 
-Honest scope (M2-7): avatars are placed by their root **rigid** transform only (no LBS — M2-8); the
-environment is a single neutral matte ground plane (measured grass/line material is M2-9).
+Avatars render either **rigid** (one canonical ``(V, 3)`` mesh placed by its root ``matrix_world``,
+M2-7) or **posed** (per-frame LBS vertices ``(T, V, 3)`` in the NPZ; the script swaps row
+``vert_index`` into the mesh each frame so the limbs follow the resolved pose, M2-8). The
+environment is still a single neutral matte ground plane (measured grass/line material is M2-9).
 """
 
 from __future__ import annotations
@@ -102,8 +104,12 @@ def _build_avatar(bpy, mesh_dir, spec):  # pragma: no cover - needs bpy
 
     data = np.load(os.path.join(mesh_dir, spec["npz"]))
     verts, faces, rgb = data["verts"], data["faces"], data["rgb"]
+    # Posed avatars carry per-frame LBS vertices (T, V, 3); build topology from frame 0 and keep the
+    # stack so _render_frames can swap in each frame's row. Rigid avatars are a single (V, 3) mesh.
+    posed = verts if verts.ndim == 3 else None
+    base = verts[0] if posed is not None else verts
     me = bpy.data.meshes.new(spec["name"])
-    me.from_pydata(verts.tolist(), [], faces.tolist())
+    me.from_pydata(base.tolist(), [], faces.tolist())
     me.update()
     for poly in me.polygons:
         poly.use_smooth = True
@@ -123,7 +129,7 @@ def _build_avatar(bpy, mesh_dir, spec):  # pragma: no cover - needs bpy
     me.materials.append(mat)
     obj = bpy.data.objects.new(spec["name"], me)
     bpy.context.collection.objects.link(obj)
-    return obj
+    return obj, posed
 
 
 def _make_camera(bpy, plan):  # pragma: no cover - needs bpy
@@ -150,11 +156,18 @@ def _render_frames(bpy, Matrix, plan, cam, avatars, render_dir):  # pragma: no c
     for fr in plan["frames"]:
         cam.matrix_world = Matrix(fr["camera_matrix_world"])
         for pl in fr["placements"]:
-            obj = avatars.get(pl["name"])
-            if obj is None:
+            entry = avatars.get(pl["name"])
+            if entry is None:
                 continue
+            obj, posed = entry
             obj.hide_render = not pl["visible"]
             obj.matrix_world = Matrix(pl["matrix_world"])
+            idx = int(pl.get("vert_index", -1))
+            if posed is not None and idx >= 0:
+                # Swap this frame's LBS vertices into the shared mesh (identity placement, so the
+                # baked world coords land 1:1). update() marks it dirty for the depsgraph re-eval.
+                obj.data.vertices.foreach_set("co", posed[idx].reshape(-1))
+                obj.data.update()
         out = os.path.join(render_dir, f"frame_{int(fr['index']):05d}.png")
         scene.render.filepath = out
         bpy.ops.render.render(write_still=True)
