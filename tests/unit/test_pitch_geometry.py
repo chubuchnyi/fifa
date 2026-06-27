@@ -12,6 +12,10 @@ import numpy as np
 
 from pitch3d.core.scene.pitch import (
     _LINE_LIFT,
+    GOAL_FRAME_HEIGHT,
+    GOAL_INNER_WIDTH,
+    GOAL_POST_THICK,
+    goal_frame_geometry,
     pitch_line_ribbons,
     pitch_line_world_points,
     pitch_line_xy,
@@ -103,3 +107,31 @@ def test_ribbons_fit_inside_the_ground_plane():
     verts, _ = pitch_line_ribbons(FieldDimensions(length=105.0, width=68.0))
     assert np.abs(verts[:, 0]).max() < 70.0
     assert np.abs(verts[:, 1]).max() < 70.0
+
+
+# --- goal frames: posts + crossbar on each goal line (#205) ---
+def test_goal_frame_is_two_valid_boxed_goals():
+    # Two goals × (2 posts + 1 crossbar) = 6 boxes; each box is 8 verts + 12 triangles.
+    verts, faces = goal_frame_geometry(FieldDimensions())
+    assert verts.shape == (6 * 8, 3)
+    assert faces.shape == (6 * 12, 3)
+    assert 0 <= int(faces.min()) and int(faces.max()) < verts.shape[0]
+    assert np.isfinite(verts).all()
+
+
+def test_goals_stand_on_both_goal_lines_at_laws_dimensions():
+    dims = FieldDimensions(length=105.0, width=68.0)
+    verts, _ = goal_frame_geometry(dims, plane_z=0.0)
+    half_post = GOAL_POST_THICK / 2.0
+    # A goal frame straddles each goal line X = ±52.5 (±half the post thickness).
+    np.testing.assert_allclose(verts[:, 0].max(), 52.5 + half_post)
+    np.testing.assert_allclose(verts[:, 0].min(), -(52.5 + half_post))
+    # Mouth 7.32 m (posts at ±3.66), frame height 2.44 m (crossbar adds its thickness on top).
+    np.testing.assert_allclose(verts[:, 1].max(), GOAL_INNER_WIDTH / 2.0 + half_post)
+    np.testing.assert_allclose(verts[:, 2].min(), 0.0)
+    np.testing.assert_allclose(verts[:, 2].max(), GOAL_FRAME_HEIGHT + GOAL_POST_THICK)
+
+
+def test_goals_sit_on_the_requested_plane():
+    verts, _ = goal_frame_geometry(FieldDimensions(), plane_z=0.5)
+    np.testing.assert_allclose(verts[:, 2].min(), 0.5)

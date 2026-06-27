@@ -29,6 +29,7 @@ import torch
 
 from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
+from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.env import load_env
 
@@ -54,7 +55,9 @@ os.makedirs(OUT, exist_ok=True)
 # that existed only in a PRIOR run (e.g. anim_subject_22.npz) would otherwise linger and be
 # globbed by blender_animate.py — rendering a phantom body this scene never had. Purge the
 # per-subject + ball artifacts up front so the mesh dir reflects EXACTLY this scene.
-for _stale in glob.glob(os.path.join(OUT, "anim_subject_*.npz")) + [os.path.join(OUT, "ball.npz")]:
+for _stale in glob.glob(os.path.join(OUT, "anim_subject_*.npz")) + [
+    os.path.join(OUT, "ball.npz"), os.path.join(OUT, "pitch.npz")
+]:
     if os.path.exists(_stale):
         os.remove(_stale)
 
@@ -129,5 +132,24 @@ if scene.ball is not None:
     print(f"ball: {int(np.asarray(ball.frames).shape[0])} frames -> {os.path.basename(bdst)}")
 else:
     print("ball: none in scene (skipping ball.npz)")
+
+# Measured pitch markings + goal frames as world geometry for the renderer (#205). The dims are the
+# field's own (the homography anchors bodies to THIS template), so the lines/goals line up with the
+# subjects once placement is correct. blender_animate.py loads pitch.npz exactly like ball.npz.
+_dims = scene.field.dimensions
+_pv, _pf = pitch_line_ribbons(_dims)
+_gv, _gf = goal_frame_geometry(_dims)
+pdst = os.path.join(OUT, "pitch.npz")
+np.savez(
+    pdst,
+    pitch_verts=_pv.astype(np.float32),
+    pitch_faces=_pf.astype(np.int32),
+    goal_verts=_gv.astype(np.float32),
+    goal_faces=_gf.astype(np.int32),
+)
+print(
+    f"pitch: {_pf.shape[0]} line-tris + {_gf.shape[0]} goal-tris "
+    f"({_dims.length:g}x{_dims.width:g} m) -> {os.path.basename(pdst)}"
+)
 
 print(f"ANIM_EXPORT_OK ({len(scene.subjects)} subjects -> {OUT})")

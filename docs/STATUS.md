@@ -20,7 +20,7 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v0 = correct GEOMETRY.** Working the v0 punch-list (#202→#205) in ID order.
-- **NEXT ACTION:** #202 LOCAL fix landed (stitch on by default + singleton drop; 557 tests pass). Next local-doable work is **#205** (add `_build_goals()` mesh; ensure render uses the Cycles path). #203/#204 are GPU-bound (diagnosis needs a pod). Plan: finish local work, then ONE batched pod run to diagnose #203/#204 + validate #202/#205 by eye (must save `scene.json`).
+- **NEXT ACTION:** #202 + #205 LOCAL work landed (stitch on by default + singleton drop; measured pitch lines + goal frames now render — validated locally with the Blender binary; 560 tests pass). Remaining v0 work is **GPU-bound**: ONE batched pod run to (a) diagnose/repair #203 (homography `H` → log `image_to_world` of a known foot point on the Colombia clip), (b) re-render the real clip end-to-end with stitch + pitch/goals, **saving `scene.json`** so #202's body count and #203/#204 framing become eye-judgeable. STOP the pod when done.
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -57,7 +57,7 @@ cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body
 | #202 | Too many bodies (track-ID fragmentation); swarm grows over clip | **LOCAL FIX LANDED — validate on pod** | done(local) / pod(validate) | was: stitch OFF unless flag; tracker `min_track_frames=1` keeps 1-frame blips | DONE locally: stitch now ON by default everywhere (CLI `--no-stitch` opt-out; `pod_real_e2e.sh`/`pod_make_video.sh` default on; `wiring.py` real ByteTrack `min_track_frames=2` drops un-stitchable singletons). **KEY:** stitch is PIXEL-space → independent of #203; `demo_video.sh` ALREADY defaulted stitch on, so the swarm persisted DESPITE stitch → the body-count fix needs MEASUREMENT, not blind tuning. Validate: pod re-run logs `len(scene.subjects)` from `scene.json`; only THEN tune stitch gates / add ByteTrack re-id if still high. |
 | #203 | Depth collapse / wrong world scale (players not spread across pitch) | TODO | yes | homography `H` degenerate/identity fallback → `image_to_world` piles feet at ~origin (`core/scene/field.py`, `adapters/models/pose.py` `_ground_root`, `adapters/models/calibration.py`) | Verify/repair `H` on the real clip (log `image_to_world` of known foot pt). **Deepest root** — also fixes #204. Pod re-run. |
 | #204 | Virtual cameras don't frame the action (players tiny at horizon) | TODO | partial | cameras placed on 63 m radius around `action_centroid` (mean of collapsed roots); render uses one static cam frozen at frame 0 (`core/agent/viewpoints.py`, `app/controller.py`) | Mostly resolves with #203; then optional per-frame centroid-tracking camera. |
-| #205 | Bare pitch (no lines / no goals) | TODO | yes | pitch lines drawn only via Cycles pass; 300f video likely used non-Cycles path; goal mesh genuinely absent (`adapters/blender/_cycles_script.py`, `adapters/render/cycles.py`, `core/scene/pitch.py`) | Render via Cycles (lines appear) + add `_build_goals()` mesh. |
+| #205 | Bare pitch (no lines / no goals) | **CODE DONE + render-validated locally** | no (Blender CPU) | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE: added measured `goal_frame_geometry()` (2 posts + crossbar, Laws dims) to pure core `core/scene/pitch.py` next to existing `pitch_line_ribbons()`; `anim_export.py` now writes `pitch.npz` (line ribbons + goal frames in world m); `blender_animate.py` loads it, folds pitch bounds into camera framing, and builds `pitch_lines` + `goals` meshes (bare-plane fallback if absent). Validated LOCALLY with the Blender binary: top view shows full markings, goal close-up shows correct posts+crossbar. Appears automatically in the batched pod render. |
 
 **Validation:** after the local fixes (#202, #205-code), ONE GPU pod re-run renders v0 end-to-end; it
 **must save `scene.json`** (so #202's body count becomes a measured number) and we judge by eye. Batch
@@ -129,6 +129,17 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-06-27** — **#205 code done + validated locally.** The real video render is
+  `scripts/blender_animate.py` (builds its scene from scratch — it only drew a bare grass plane), so
+  the fix lives there, NOT in the in-pipeline Cycles adapter the original root-cause note guessed.
+  Added measured `goal_frame_geometry()` (2 posts + crossbar at Laws dims: 7.32 m mouth, 2.44 m high,
+  0.12 m square section) to pure core `core/scene/pitch.py`, beside the existing `pitch_line_ribbons()`;
+  `anim_export.py` now writes `pitch.npz` (line ribbons + goal frames, world metres) and purges it with
+  the other artifacts; `blender_animate.py` loads `pitch.npz`, folds the pitch bounds into the camera
+  framing (so the whole field stays in frame), and builds `pitch_lines` + `goals` meshes (bare-plane
+  fallback if absent). 3 new geometry tests (now 12 in `test_pitch_geometry.py`). Validated by rendering
+  the fixtures locally with the Blender binary (top view = full markings; goal close-up = correct
+  posts+crossbar). Full tree green (560 passed, 12 skipped); changed-line ruff clean; mypy clean.
 - **2026-06-27** — **#202 local fix landed.** Made stitch the uniform default across ALL
   reconstruction entrypoints (CLI flag flipped `--stitch`→`--no-stitch`, default ON;
   `pod_real_e2e.sh` + `pod_make_video.sh` default stitch on) and set the real ByteTrack path's

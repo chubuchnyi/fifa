@@ -27,6 +27,13 @@ GOAL_BOX_HALF_WIDTH = 9.16       # 18.32 m total (5.5 + 7.32 + 5.5)
 PENALTY_SPOT_DIST = 11.0
 PENALTY_ARC_RADIUS = 9.15
 
+# The goal FRAME (the structure) — distinct from the goal AREA box above. Laws of the Game: a
+# 7.32 m inner mouth, 2.44 m high; posts and crossbar are square in section here (~0.12 m). This is
+# measured render geometry the calibrated pitch plane carries (#205), not a hallucinated stadium.
+GOAL_INNER_WIDTH = 7.32
+GOAL_FRAME_HEIGHT = 2.44
+GOAL_POST_THICK = 0.12
+
 
 def _segment(p0: tuple[float, float], p1: tuple[float, float], spacing: float) -> np.ndarray:
     """Sample a straight line ``p0→p1`` every ~``spacing`` m (endpoints included)."""
@@ -163,3 +170,60 @@ def pitch_line_ribbons(
     if not verts:
         return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
     return np.asarray(verts, dtype=float), np.asarray(faces, dtype=int)
+
+
+def _box(
+    lo: tuple[float, float, float], hi: tuple[float, float, float]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Axis-aligned box ``lo→hi`` as ``(8 verts, 12 triangles)``, every face wound outward."""
+    x0, y0, z0 = lo
+    x1, y1, z1 = hi
+    v = np.array(
+        [[x0, y0, z0], [x1, y0, z0], [x1, y1, z0], [x0, y1, z0],
+         [x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+        dtype=float,
+    )
+    f = np.array(
+        [[0, 2, 1], [0, 3, 2],   # bottom (-Z)
+         [4, 5, 6], [4, 6, 7],   # top (+Z)
+         [0, 1, 5], [0, 5, 4],   # -Y
+         [2, 3, 7], [2, 7, 6],   # +Y
+         [1, 2, 6], [1, 6, 5],   # +X
+         [3, 0, 4], [3, 4, 7]],  # -X
+        dtype=int,
+    )
+    return v, f
+
+
+def goal_frame_geometry(
+    dimensions: FieldDimensions | None = None, *, plane_z: float = 0.0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Both goal frames (two posts + a crossbar each) as ``(verts (N, 3), faces (F, 3))`` in metres.
+
+    A goal stands on each goal line (``X = ±length/2``), centred on ``Y = 0``: two
+    ``GOAL_FRAME_HEIGHT``-tall posts at ``Y = ±GOAL_INNER_WIDTH/2`` joined by a crossbar at their
+    tops, each square in section (``GOAL_POST_THICK``). Nets and goal depth are deliberately omitted
+    (left to the appearance stage). Measured Laws geometry on the calibrated pitch plane (#205).
+    """
+    dims = dimensions or FieldDimensions()
+    hl = dims.length / 2.0
+    half = GOAL_INNER_WIDTH / 2.0
+    t = GOAL_POST_THICK
+    z0 = float(plane_z)
+    top = z0 + GOAL_FRAME_HEIGHT
+    vlist: list[np.ndarray] = []
+    flist: list[np.ndarray] = []
+    base = 0
+    for goal_x in (hl, -hl):
+        members = [
+            ((goal_x - t / 2, -half - t / 2, z0), (goal_x + t / 2, -half + t / 2, top)),  # post -Y
+            ((goal_x - t / 2, half - t / 2, z0), (goal_x + t / 2, half + t / 2, top)),     # post +Y
+            # crossbar joining the post tops
+            ((goal_x - t / 2, -half - t / 2, top), (goal_x + t / 2, half + t / 2, top + t)),
+        ]
+        for lo, hi in members:
+            v, f = _box(lo, hi)
+            vlist.append(v)
+            flist.append(f + base)
+            base += v.shape[0]
+    return np.vstack(vlist), np.vstack(flist)

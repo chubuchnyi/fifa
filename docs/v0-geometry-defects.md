@@ -81,8 +81,17 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   via the **Cycles** pass. The proxy / Workbench path draws no ground or pitch at all, so the 300-frame
   video likely used a non-Cycles path → bare plane. **Goal geometry is genuinely absent** (no goal mesh
   anywhere).
-- **Fix:** render the video via the Cycles path (so existing pitch lines appear) + add a
-  `_build_goals()` mesh for goal posts / nets.
+- **Fix (LANDED 2026-06-27, local):** corrected understanding first — the real video render is
+  `scripts/blender_animate.py`, which **builds its own Cycles scene from scratch** and simply never drew
+  the pitch (only a bare grass plane); the pitch-line geometry that *did* exist lived only in the other,
+  in-pipeline `cycles.py`/`_cycles_script.py` path, and a goal mesh was genuinely absent everywhere.
+  So the fix is in the video path, not "switch to Cycles". Added measured `goal_frame_geometry()`
+  (2 posts + crossbar, Laws dims) to pure core `core/scene/pitch.py` next to `pitch_line_ribbons()`;
+  `anim_export.py` exports `pitch.npz` (line ribbons + goal frames in world m); `blender_animate.py`
+  loads it, folds the pitch bounds into camera framing, and builds `pitch_lines` + `goals` meshes
+  (bare-plane fallback if `pitch.npz` absent). 3 new tests (12 total in `test_pitch_geometry.py`).
+  **Validated locally** with the Blender binary: top view shows the full markings, goal close-up shows
+  correct posts+crossbar. Will appear automatically in the batched pod render.
 
 ---
 

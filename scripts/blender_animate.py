@@ -89,8 +89,20 @@ for mp in mesh_files:
     lo = np.minimum(lo, verts.reshape(-1, 3).min(0))
     hi = np.maximum(hi, verts.reshape(-1, 3).max(0))
 
+# Measured pitch markings + goal frames (anim_export.py's pitch.npz, #205). Loaded BEFORE the
+# camera framing so lo/hi — hence ctr/span — span the whole pitch, not just the bodies: that keeps
+# the full field (and its lines/goals) in frame even while world placement is still being fixed.
+pitch_path = os.path.join(IN, "pitch.npz")
+pitch_npz = np.load(pitch_path) if os.path.exists(pitch_path) else None
+if pitch_npz is not None:
+    for _key in ("pitch_verts", "goal_verts"):
+        _pv = np.asarray(pitch_npz[_key], dtype=float).reshape(-1, 3)
+        if _pv.size:
+            lo = np.minimum(lo, _pv.min(0))
+            hi = np.maximum(hi, _pv.max(0))
+
 ctr = (lo + hi) / 2.0
-span = float(max((hi - lo)[0], (hi - lo)[1], 1.0))  # horizontal extent of all motion
+span = float(max((hi - lo)[0], (hi - lo)[1], 1.0))  # horizontal extent of pitch + all motion
 
 # ── ball (optional) ──────────────────────────────────────────────────────────
 ball_path = os.path.join(IN, "ball.npz")
@@ -119,6 +131,35 @@ gmat = bpy.data.materials.new("grass")
 gmat.use_nodes = True
 gmat.node_tree.nodes.get("Principled BSDF").inputs["Base Color"].default_value = (0.06, 0.3, 0.09, 1)
 bpy.context.active_object.data.materials.append(gmat)
+
+
+def _add_static_mesh(name, verts, faces, rgb, roughness):
+    """Build a flat-shaded static mesh (pitch lines / goals) from world verts+faces."""
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(
+        np.asarray(verts, dtype=float).tolist(), [], np.asarray(faces, dtype=int).tolist()
+    )
+    me.update()
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(ob)
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    b = mat.node_tree.nodes.get("Principled BSDF")
+    b.inputs["Base Color"].default_value = (rgb[0], rgb[1], rgb[2], 1.0)
+    b.inputs["Roughness"].default_value = roughness
+    me.materials.append(mat)
+    return ob
+
+
+# Measured pitch lines (white) + goal frames (off-white) — the geometric reference that makes
+# placement judgeable by eye (#205). Nothing drawn if anim_export wrote no pitch.npz (older runs).
+if pitch_npz is not None:
+    if np.asarray(pitch_npz["pitch_faces"]).size:
+        _add_static_mesh("pitch_lines", pitch_npz["pitch_verts"], pitch_npz["pitch_faces"],
+                         (0.90, 0.90, 0.90), 0.5)
+    if np.asarray(pitch_npz["goal_faces"]).size:
+        _add_static_mesh("goals", pitch_npz["goal_verts"], pitch_npz["goal_faces"],
+                         (0.95, 0.95, 0.95), 0.35)
 
 bpy.ops.object.light_add(type="SUN", location=(ctr[0] + 8, ctr[1] - 8, 30))
 bpy.context.active_object.data.energy = 4.0
