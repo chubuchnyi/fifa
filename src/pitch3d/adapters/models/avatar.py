@@ -19,12 +19,13 @@ no GPU**:
   into one measured per-vertex texture + an observation count. Writes a vertex-coloured PLY
   (geometry + colour + the per-vertex ``measured`` flag). Numpy + stdlib; unit-tested via a stub.
 * :class:`SmplxTextureBackend` — the SMPL-X half. Its **geometry** is wired (M2-8a): the subject's
-  resolved ``betas`` become the canonical mesh via the pure-numpy SMPL-X forward
-  (:mod:`.smplx_lbs`, no torch/GPU), and the render pass poses it per frame for the limbs. Its
-  **texture** half is M2-8b: :meth:`observe` returns no reference frames yet (geometry-only, every
-  vertex ``measured=0``, honest R-6), because sampling still needs the decoded source frames + the
-  scene camera threaded into the builder. The (non-commercial) SMPL-X model is the gated asset — its
-  absence raises an actionable error, never a silent fake.
+  ``betas`` become the canonical mesh via the pure-numpy SMPL-X forward (:mod:`.smplx_lbs`, no
+  torch/GPU), and the render pass poses it per frame for the limbs. Its **texture** is wired
+  (M2-8b): given the scene camera + source clip, :meth:`observe` poses the subject at its measured
+  pose for a capped set of decoded broadcast frames so the pure half samples the player's real
+  pixels. Without a real source it stays geometry-only (every vertex ``measured=0``, honest R-6) —
+  never a fabricated look. The (non-commercial) SMPL-X model is the gated asset — its absence raises
+  an actionable error.
 
 Swap it in via ``default_ports(avatar="textured")`` (wiring) or inject a vendored backend by
 dotted path with ``--avatar-backend pkg.module:Factory`` (ADR-0006) — one fake replaced at a time.
@@ -34,6 +35,7 @@ end-to-end (tiny synthetic mesh, no SMPL-X/GPU) so the dry-run exercises this co
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,13 +43,14 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-from ...core.ports.io import CropRef
+from ...core.ports.io import ClipRef, CropRef
 from ...core.ports.reconstruction import AvatarBuilder
 from ...core.scene.assets import RenderAssetKind, RenderAssetRef, SynthViewRef
 from ...core.scene.camera import CameraIntrinsics, CameraTrack
 from ...core.scene.projection import camera_center, project_world_points_with_depth
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
+from ..io.frames import iter_clip_frames, resolve_source_path
 from .smplx_lbs import SmplxModel, locate_smplx_model
 
 #: Neutral grey written for vertices with no measured observation (the honest "unknown" colour;
@@ -106,9 +109,18 @@ class AvatarMeshBackend(Protocol):
     """
 
     def observe(
-        self, subject: Subject, ref_crops: Sequence[CropRef]
+        self,
+        subject: Subject,
+        ref_crops: Sequence[CropRef],
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> AvatarMeshObservations:
-        """Return the canonical mesh + the per-frame posed vertices/camera/pixels to sample."""
+        """Return the canonical mesh + the per-frame posed vertices/camera/pixels to sample.
+
+        ``camera`` + ``clip`` (M2-8b) let the backend sample the subject's real broadcast pixels;
+        without them it returns geometry only (``frames=[]``, every vertex ``measured=0``, R-6).
+        """
         ...
 
 
@@ -293,8 +305,11 @@ class TexturedSmplxAvatarBuilder(AvatarBuilder):
         subject: Subject,
         ref_crops: Sequence[CropRef],
         synth_views: Sequence[SynthViewRef] | None = None,
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> RenderAssetRef:
-        obs = self._backend().observe(subject, ref_crops)
+        obs = self._backend().observe(subject, ref_crops, camera=camera, clip=clip)
         n = obs.canonical_vertices.shape[0]
         colors_per_frame: list[np.ndarray] = []
         observed_per_frame: list[np.ndarray] = []
@@ -331,37 +346,103 @@ class TexturedSmplxAvatarBuilder(AvatarBuilder):
         return self.backend or SmplxTextureBackend(device=self.device)
 
 
+def _even_subset(values: np.ndarray, k: int) -> np.ndarray:
+    """Up to ``k`` evenly-spaced elements of sorted ``values`` (all of them if ``len <= k``).
+
+    Spreading the reference frames across the track gives the texturer more *distinct* viewing
+    angles per decode than a contiguous burst would — better measured coverage for the same cost.
+    """
+    if k <= 0:
+        return values[:0]
+    if values.size <= k:
+        return values
+    idx = np.unique(np.linspace(0, values.size - 1, k).round().astype(int))
+    return values[idx]
+
+
 @dataclass
 class SmplxTextureBackend:
-    """Real SMPL-X meshing (M2-8a geometry wired) + frame sampling (M2-8b, pending).
+    """Real SMPL-X meshing (geometry, M2-8a) + measured pixel texturing (M2-8b).
 
-    :meth:`observe` shapes the subject's resolved ``betas`` into the canonical mesh with the
-    pure-numpy SMPL-X forward (no torch/GPU) and returns it geometry-only — the render pass poses
-    the limbs per frame. Texture sampling needs the decoded source frames + the scene camera
-    threaded in (M2-8b), so no reference frames are returned yet (every vertex ``measured=0``, R-6).
-    The model ``.npz`` is loaded lazily on first :meth:`observe`, located like every gated asset.
+    :meth:`observe` shapes the subject's ``betas`` into the canonical mesh with the pure-numpy
+    SMPL-X forward (no torch/GPU). When the scene ``camera`` + source ``clip`` are supplied it also
+    poses the subject at its **measured** (proposal) pose for a capped, evenly-spread set of
+    reference frames, decodes those frames, and returns them so the pure texturer projects + samples
+    the player's real pixels (M2-8b). Without a real source (no camera/clip, or a synthetic URI with
+    no pixels) it returns geometry-only — every vertex ``measured=0`` (honest R-6, never faked). The
+    model ``.npz`` is loaded lazily, located like every gated asset.
+
+    Attributes:
+        device: Inference device (provenance only; the forward is numpy).
+        max_ref_frames: Cap on reference frames decoded per subject (cost vs. coverage lever).
     """
 
     device: str = "cuda"
+    max_ref_frames: int = 8
     _model: SmplxModel | None = None
 
     def observe(
-        self, subject: Subject, ref_crops: Sequence[CropRef]
+        self,
+        subject: Subject,
+        ref_crops: Sequence[CropRef],
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> AvatarMeshObservations:
-        """Canonical SMPL-X mesh for the subject's resolved shape — geometry-only (M2-8a).
+        """Canonical SMPL-X mesh + measured reference frames for the subject (M2-8a + M2-8b).
 
-        The subject's ``betas`` are turned into the rest/canonical mesh with the pure-numpy SMPL-X
-        forward (no torch/GPU); the render pass poses it per frame for the limbs. No reference
-        frames are sampled here, so every vertex is left ``measured=0`` (honest R-6 grey) until
-        M2-8b threads the scene camera + decoded pixels into texturing. The model is the gated
-        asset — its absence raises an actionable error rather than fabricating geometry.
+        The subject's ``betas`` give the rest/canonical mesh (the render pass re-poses it per frame
+        for display). When ``camera`` + ``clip`` resolve to real pixels, the subject's measured pose
+        is projected into a handful of decoded frames so the pure texturer samples its real
+        appearance; otherwise no frames are returned (every vertex ``measured=0``, honest R-6). The
+        model is the gated asset — its absence raises an actionable error, never a fabricated mesh.
         """
         model = self._smplx_model()
         return AvatarMeshObservations(
             canonical_vertices=model.shaped(subject.proposal.shape.betas),
             faces=model.faces,
-            frames=[],
+            frames=self._sample_frames(subject, model, camera, clip),
         )
+
+    def _sample_frames(
+        self,
+        subject: Subject,
+        model: SmplxModel,
+        camera: CameraTrack | None,
+        clip: ClipRef | None,
+    ) -> list[FrameObservation]:
+        """Decode a capped set of reference frames with the subject posed into each (M2-8b).
+
+        Returns ``[]`` (geometry-only, R-6) when there is nothing measured to sample: no camera or
+        clip, no real source pixels behind the clip URI, or no frame common to pose/camera/clip.
+        The pose used is the **measured** (proposal) pose so vertices land on the pixels the player
+        was actually seen in; the resulting per-vertex colour is pose-invariant (canonical ids).
+        """
+        if camera is None or clip is None:
+            return []
+        if not os.path.exists(resolve_source_path(clip.uri)):
+            return []
+        pose = subject.proposal.pose
+        common = np.intersect1d(np.intersect1d(pose.frames, camera.frames), clip.frames)
+        picks = _even_subset(common, self.max_ref_frames)
+        if picks.size == 0:
+            return []
+        row_of = {int(f): i for i, f in enumerate(pose.frames.tolist())}
+        rows = [row_of[int(f)] for f in picks]
+        posed = model.pose_sequence(
+            subject.proposal.shape.betas,
+            pose.global_orient[rows],
+            pose.body_pose[rows],
+            pose.transl[rows],
+        )
+        images = dict(iter_clip_frames(clip.uri, [int(f) for f in picks]))
+        frames: list[FrameObservation] = []
+        for i, f in enumerate(picks):
+            rgb = np.ascontiguousarray(images[int(f)][:, :, :3][:, :, ::-1])  # cv2 BGR -> RGB
+            frames.append(
+                FrameObservation(frame=int(f), vertices_world=posed[i], camera=camera, image=rgb)
+            )
+        return frames
 
     def _smplx_model(self) -> SmplxModel:
         """Load (and cache) the pure-numpy SMPL-X model, or raise an actionable locate error."""
@@ -392,7 +473,12 @@ class SyntheticAvatarMeshBackend:
     """
 
     def observe(
-        self, subject: Subject, ref_crops: Sequence[CropRef]
+        self,
+        subject: Subject,
+        ref_crops: Sequence[CropRef],
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> AvatarMeshObservations:
         intr = CameraIntrinsics(fx=50.0, fy=50.0, cx=32.0, cy=24.0, width=64, height=48)
         camera = CameraTrack.identity(intr, 1)

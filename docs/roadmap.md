@@ -114,7 +114,7 @@ per M2-0). The numpy vertex-splat pass (M2-3) is debug-grade scaffolding, not th
 | **M2-5 ViewSynthesizer seam A** — `render_orbit` as a `RenderPass` for limited orbits | `adapters/viewsynth`, `adapters/render` |
 | M2-6 Render preview (fast low-q) for both paths | `adapters/render` |
 | **M2-7 Real photoreal renderer ✅ (2026-06-25)** — `CyclesRenderPass`: Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import), the photoreal path alongside the no-dep splat debug viz. Rigid-root placement (LBS=M2-8), neutral ground (material=M2-9), R-6 tint intact | `adapters/render`, `adapters/blender` |
-| **M2-8 Posed, textured avatar** — **8a ✅ (2026-06-27): per-frame SMPL-X LBS** (geometry follows the edited pose, incl. limbs), pure-numpy (no torch/GPU), posed through Cycles; **8b: surface texture/material** from the measured pixel-projection (extend M2-2 #1 per-vertex → texture; R-6 marks unmeasured) | `adapters/models`, `adapters/render`, `adapters/blender` |
+| **M2-8 Posed, textured avatar** — **8a ✅ (2026-06-27): per-frame SMPL-X LBS** (geometry follows the edited pose, incl. limbs), pure-numpy (no torch/GPU), posed through Cycles; **8b ✅ (2026-06-27): measured surface texture** — the scene camera + decoded source frames thread into `observe`, the subject is posed at its *measured* pose into a capped, evenly-spread set of reference frames, and the pure projection/z-buffer sampler paints per-vertex colour from real pixels (R-6 marks unmeasured grey) | `adapters/models`, `adapters/render`, `adapters/blender` |
 | **M2-9 Measured env materials + lighting** — grass PBR for the measured pitch + scene lighting/HDRI; stadium stays gated/marked (R-8 → M3) | `adapters/models`, `adapters/blender` |
 | **M2-10 Edit↔render sync + photoreal `observe`** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no manual redo (AC-4 proper); `observe` returns photoreal multi-view (A-8); seam-A orbit becomes a re-render of the 3D scene at orbit cameras, no generative (A-9) | `app`, `adapters/render`, `adapters/viewsynth` |
 
@@ -256,18 +256,22 @@ pass is deliberately left full-res (it is the reprojection inspector, not a TZ r
 camera at ¼ the pixels); `--render orbit` re-shoots the orbit at 640×360 with the 6-frame count
 preserved and `is_video=True`. Honest scope (R-6): the lever changes *resolution only* — final-grade
 fidelity (texture, AA, real generative steps) still rides the heavy backends, which stay gated.
-**Honest status (re-assessed 2026-06-25): the M2 GOAL — a photoreal render of textured, LBS-posed
+**Honest status (re-assessed 2026-06-27): the M2 GOAL — a photoreal render of textured, LBS-posed
 avatars on grass — is NOT met.** M2-0…M2-6 delivered the render-pass *architecture* (seam, edit↔render
 sync on the rigid root, content-addressed cache, preview-downscale, measured pitch-env, seam-A
 contract) plus a measured **vertex-splat** visualization — debug-grade, pure-numpy, *not* a photoreal
-renderer. **M2-7 wired a real Blender/Cycles renderer and M2-8a now LBS-poses the avatars through it** (below) —
-root *and* per-joint limbs follow the resolved pose, so a bent elbow renders bent. But the meshes are
-still **untextured** (per-vertex colour only; all-grey R-6 until the measured texture of **M2-8b**),
-the ground is a **neutral plane** (grass/line materials are **M2-9**), and the seam-A "video" is still
-a fake re-shoot. So the photoreal output does **not** yet exist — that needs **M2-8b…M2-10** (measured
-avatar texture + grass/line env materials + edit↔render/observe through Cycles). **M2 stays 🟡 because
-the photoreal output does not exist — not because the generative backends are gated.** Measured
-ceiling: textured mannequins on grass; broadcast-convincing fidelity is M3. Next within M2: **M2-8b**.
+renderer. **M2-7 wired a real Blender/Cycles renderer, M2-8a LBS-poses the avatars through it, and
+M2-8b paints them from measured pixels** (below) — root *and* per-joint limbs follow the resolved pose
+(a bent elbow renders bent), and front-facing, in-frustum verts take the player's real broadcast
+colour (unseen verts stay honest R-6 grey). But the **ground is still a neutral plane** (grass/line
+materials are **M2-9**), edit↔render/observe through Cycles is **M2-10**, and the seam-A "video" is
+still a fake re-shoot. Texture quality is also only as good as the *pose alignment*: on the **fake**
+pose pipeline the synthetic bodies don't sit on the real players, so measured coverage is sparse
+(~1%, real-clip E2E) — genuine coverage waits on the still-gated GVHMR pose. So the photoreal output
+does **not** yet exist — that needs **M2-9…M2-10** (grass/line env materials + edit↔render/observe
+through Cycles) on top of real pose. **M2 stays 🟡 because the photoreal output does not exist — not
+because the generative backends are gated.** Measured ceiling: textured avatars on grass;
+broadcast-convincing fidelity is M3. Next within M2: **M2-9**.
 
 **Progress — M2-7 `CyclesRenderPass` wired E2E (2026-06-25):** the first *real* renderer — a
 Blender/Cycles `RenderPass` over the **resolved** scene, the photoreal path alongside the no-dep
@@ -318,6 +322,30 @@ dry-run builds a **real 10475-vert SMPL-X avatar** (coverage 0.00 — all R-6 gr
 the geometry follows the pose, but the surface is **untextured** (R-6 grey) until **M2-8b** threads
 the scene camera + decoded frames into `observe`, and the ground is neutral (grass is **M2-9**). So
 this delivers the *posed* half of M2-8, not the *textured* half — **M2 stays 🟡. Next: M2-8b.**
+
+**Progress — M2-8b measured texture wired E2E (2026-06-27):** the avatars now take their **real
+broadcast colour**. The plumbing keeps the hexagon intact — core holds only *references*, so the scene
+`camera` (`CameraTrack`, already a core type) and source `clip` (`ClipRef`) thread through
+`AvatarBuilder.build` → `AvatarMeshBackend.observe` as keyword-only optionals; pixel decoding stays on
+the adapter side. A shared `adapters/io/frames.py` decoder (`iter_clip_frames` — directory or video
+seek, `file://` strip; reused by the detector) hands frames to `SmplxTextureBackend._sample_frames`,
+which poses the subject at its **measured** (proposal) pose into a **capped, evenly-spread** set of
+reference frames (`max_ref_frames=8`, `_even_subset` for distinct viewing angles per decode), then the
+existing pure `vertex_normals → sample_vertex_colors (front-facing + in-frustum + z-buffer) →
+aggregate_observations` path paints per-vertex colour. The colour is keyed off **canonical vertex
+ids** so it is pose-invariant; `cv2` BGR is flipped to stored RGB. **R-6 throughout:** no camera/clip,
+a synthetic URI with no pixels behind it, or no frame common to pose∩camera∩clip → geometry-only
+(`frames=[]`, every vertex `measured=0` grey), never a fabricated colour. **E2E proof:** a
+SMPL-X+cv2-gated unit test poses the real 10475-vert body into three solid-colour frames and asserts
+every *measured* vertex carries exactly that colour (BGR→RGB), with genuine partial coverage in
+(0, 1) (the back is never seen); the geometry-only fallback is asserted for a synthetic URI. The real
+`--clip … --avatar textured` dry-run on the Colombia broadcast decodes real frames and samples real
+pixels onto both subjects (coverage ~1%, 140/107 of 10475 verts) — **honest and expected**: the
+*fake* pose places synthetic bodies that don't sit on the real players, so the texturer samples
+mostly background; genuine coverage waits on the wired GVHMR pose, not on the texturer. **Honest scope
+(R-6):** this delivers the *textured* half of M2-8 (measured, not hallucinated), but the ground is
+still neutral (grass/line materials are **M2-9**) and edit↔render/observe through Cycles is **M2-10**,
+so the photoreal *avatar on grass* still does not exist — **M2 stays 🟡. Next: M2-9.**
 
 ---
 

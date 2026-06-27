@@ -73,6 +73,9 @@ class FakeAvatarBuilder(AvatarBuilder):
         subject: Subject,
         ref_crops: Sequence[CropRef],
         synth_views: Sequence[SynthViewRef] | None = None,
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> RenderAssetRef:
         uri = _marker(
             self.out_dir / f"avatar_{subject.track_id}.glb.txt", f"fake avatar {subject.track_id}"

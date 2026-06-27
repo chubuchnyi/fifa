@@ -51,6 +51,15 @@ class AvatarBuilder(ModelProvider):
         subject: Subject,
         ref_crops: Sequence[CropRef],
         synth_views: Sequence[SynthViewRef] | None = None,
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> RenderAssetRef:
-        """Build an avatar render asset for ``subject`` and return a ref."""
+        """Build an avatar render asset for ``subject`` and return a ref.
+
+        ``camera`` + ``clip`` (when supplied) let a measured builder sample the subject's real
+        broadcast pixels (M2-8b): the estimated world→image camera and a reference to the decoded
+        source frames. Both optional — without them the builder is geometry-only (R-6: every vertex
+        ``measured=0``), never a fabricated appearance.
+        """
         raise NotImplementedError

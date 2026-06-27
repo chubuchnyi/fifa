@@ -60,7 +60,13 @@ class ApiAvatarBuilder(AvatarBuilder):
         return ModelInfo(name="Rodin", backend=Backend.API, est_cost_usd=0.0)
 
     def build(
-        self, subject: Subject, ref_crops: Sequence[CropRef], synth_views: Sequence[SynthViewRef] | None = None
+        self,
+        subject: Subject,
+        ref_crops: Sequence[CropRef],
+        synth_views: Sequence[SynthViewRef] | None = None,
+        *,
+        camera: CameraTrack | None = None,
+        clip: ClipRef | None = None,
     ) -> RenderAssetRef:
         raise _todo("generative avatar building")
 

@@ -23,6 +23,7 @@ from pitch3d.adapters.models.avatar import (
     SmplxTextureBackend,
     SyntheticAvatarMeshBackend,
     TexturedSmplxAvatarBuilder,
+    _even_subset,
     aggregate_observations,
     read_vertex_colored_ply,
     sample_vertex_colors,
@@ -30,9 +31,10 @@ from pitch3d.adapters.models.avatar import (
     write_vertex_colored_ply,
 )
 from pitch3d.adapters.models.smplx_lbs import N_SMPLX_VERTS, locate_smplx_model
-from pitch3d.core.ports.io import CropRef
+from pitch3d.core.ports.io import ClipRef, CropRef
 from pitch3d.core.scene.assets import RenderAssetKind
 from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
+from pitch3d.core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from pitch3d.core.scene.subject import Subject
 
 
@@ -158,7 +160,9 @@ class _StubBackend:
 
     observations: AvatarMeshObservations
 
-    def observe(self, subject: Subject, ref_crops) -> AvatarMeshObservations:  # noqa: ANN001
+    def observe(  # noqa: ANN001
+        self, subject: Subject, ref_crops, *, camera=None, clip=None
+    ) -> AvatarMeshObservations:
         return self.observations
 
 
@@ -247,3 +251,87 @@ def test_synthetic_backend_drives_builder_to_measured_ply(tmp_path, make_motion)
     nv, nf, flags = _parse_ply(Path(ref.uri))
     assert (nv, nf) == (3, 1)
     assert sum(flags) == 2
+
+
+# --- _even_subset (reference-frame budget) ------------------------------------
+def test_even_subset_caps_and_spreads():
+    # Picks endpoints-included even spread when over the cap, all of them when under, none at k=0.
+    assert _even_subset(np.arange(10, 21), 3).tolist() == [10, 15, 20]
+    assert _even_subset(np.arange(3), 8).tolist() == [0, 1, 2]
+    assert _even_subset(np.arange(5), 0).tolist() == []
+
+
+# --- SmplxTextureBackend measured path (gated: needs the SMPL-X model .npz) ----
+def _facing_subject(track_id: int, frames, *, transl_z: float = 4.0) -> Subject:
+    """A subject turned 180° about Y and set ``transl_z`` m down the camera's +Z axis.
+
+    With the identity camera at the origin this puts the SMPL-X body in front of the lens facing
+    back toward it, so a healthy *fraction* of its surface verts are front-facing + in-frustum — a
+    genuine R-6 partial, never the whole body from one view (the back stays unmeasured).
+    """
+    frames = np.asarray(frames, dtype=int).reshape(-1)
+    t = frames.shape[0]
+    pose = PoseSequence(
+        frames=frames,
+        global_orient=np.tile([0.0, np.pi, 0.0], (t, 1)),
+        body_pose=np.zeros((t, 21, 3)),
+        transl=np.tile([0.0, 0.0, transl_z], (t, 1)),
+    )
+    motion = SubjectMotion(shape=SmplxShape(betas=np.zeros(10)), pose=pose)
+    return Subject(track_id=track_id, proposal=motion)
+
+
+def _solid_frame_clip(tmp_path, cv2, *, bgr, n: int = 3, w: int = 160, h: int = 120) -> ClipRef:
+    """Write ``n`` solid-colour PNG frames (OpenCV BGR); return a ClipRef over that dir."""
+    d = tmp_path / "frames"
+    d.mkdir()
+    img = np.zeros((h, w, 3), np.uint8)
+    img[:] = bgr
+    for i in range(n):
+        cv2.imwrite(str(d / f"{i:03d}.png"), img)
+    return ClipRef(source_id="t", uri=str(d), frames=np.arange(n), width=w, height=h, fps=25.0)
+
+
+@pytest.mark.skipif(locate_smplx_model() is None, reason="needs the SMPL-X model .npz")
+def test_smplx_backend_samples_measured_pixels_from_broadcast_frames(tmp_path):
+    # The full measured path on a real SMPL-X body: shape -> pose at the measured pose into each of
+    # three decoded broadcast frames -> front-facing/z-buffer sampling -> averaged vertex colour.
+    # The frames are one solid colour, so every *measured* vertex must carry exactly that colour
+    # flipped cv2-BGR -> stored-RGB; the back of the body is never seen (honest partial coverage).
+    cv2 = pytest.importorskip("cv2")
+    w, h = 160, 120
+    intr = CameraIntrinsics(fx=200.0, fy=200.0, cx=w / 2.0, cy=h / 2.0, width=w, height=h)
+    camera = CameraTrack.identity(intr, 3)
+    clip = _solid_frame_clip(tmp_path, cv2, bgr=(30, 200, 10), n=3, w=w, h=h)  # RGB (10,200,30)
+    subject = _facing_subject(5, [0, 1, 2])
+
+    backend = SmplxTextureBackend()
+    obs = backend.observe(subject, [], camera=camera, clip=clip)
+    assert len(obs.frames) == 3
+    assert obs.canonical_vertices.shape == (N_SMPLX_VERTS, 3)
+    fo = obs.frames[0]
+    assert fo.image.shape == (h, w, 3)
+    assert fo.vertices_world.shape == (N_SMPLX_VERTS, 3)
+
+    builder = TexturedSmplxAvatarBuilder(backend=backend, out_dir=tmp_path)
+    ref = builder.build(subject, [], camera=camera, clip=clip)
+    assert ref.extra["frames_used"] == 3
+    assert ref.extra["n_measured"] > 100              # a substantial chunk of the front surface
+    assert 0.0 < ref.extra["coverage"] < 1.0          # genuine partial — the back is never measured
+    _v, _f, colors, measured = read_vertex_colored_ply(Path(ref.uri))
+    # Every measured vertex sampled the one solid colour, proving the cv2-BGR -> RGB flip.
+    np.testing.assert_array_equal(np.unique(colors[measured], axis=0), [[10, 200, 30]])
+
+
+@pytest.mark.skipif(locate_smplx_model() is None, reason="needs the SMPL-X model .npz")
+def test_smplx_backend_geometry_only_when_source_not_real():
+    # Camera present but the clip URI has no pixels behind it (synthetic/dry-run source) → geometry
+    # only: no frames, every vertex measured=0. It must never fabricate appearance.
+    intr = CameraIntrinsics(fx=200.0, fy=200.0, cx=80.0, cy=60.0, width=160, height=120)
+    camera = CameraTrack.identity(intr, 3)
+    clip = ClipRef(
+        source_id="t", uri="memory://demo.mp4", frames=np.arange(3), width=160, height=120, fps=25.0
+    )
+    obs = SmplxTextureBackend().observe(_facing_subject(9, [0, 1, 2]), [], camera=camera, clip=clip)
+    assert obs.frames == []
+    assert obs.canonical_vertices.shape == (N_SMPLX_VERTS, 3)

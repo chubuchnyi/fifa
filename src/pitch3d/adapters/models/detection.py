@@ -25,6 +25,7 @@ import numpy as np
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import Detection, Detections, Detector, FrameDetections
 from ...core.scene.provenance import Backend, ModelInfo
+from ..io.frames import iter_clip_frames
 
 #: roboflow/sports player-detection class ids → the project's detection vocabulary.
 #: Verify against the exact weights in use; override via ``RFDETRDetector(class_map=...)``.
@@ -176,32 +177,6 @@ class RFDETRBackend:
 def _iter_frames(clip: ClipRef):  # pragma: no cover - heavy decode path (needs cv2 + media)
     """Yield ``(frame_index, BGR uint8 image)`` for each requested frame of the clip.
 
-    Lazy cv2. ``clip.uri`` may be a video file (seek per index) or a directory of frames.
+    Thin wrapper over the shared :func:`~pitch3d.adapters.io.frames.iter_clip_frames` decoder.
     """
-    import os
-
-    import cv2
-
-    wanted = [int(f) for f in clip.frames.tolist()]
-    path = clip.uri[len("file://"):] if clip.uri.startswith("file://") else clip.uri
-    if os.path.isdir(path):
-        files = sorted(
-            f for f in os.listdir(path) if f.lower().endswith((".png", ".jpg", ".jpeg"))
-        )
-        for idx in wanted:
-            img = cv2.imread(os.path.join(path, files[idx]))
-            if img is None:
-                raise FileNotFoundError(f"frame {idx} unreadable in {path}")
-            yield idx, img
-        return
-
-    cap = cv2.VideoCapture(path)
-    try:
-        for idx in wanted:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ok, img = cap.read()
-            if not ok:
-                raise RuntimeError(f"could not decode frame {idx} of {clip.uri}")
-            yield idx, img
-    finally:
-        cap.release()
+    return iter_clip_frames(clip.uri, clip.frames.tolist())

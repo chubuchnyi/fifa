@@ -266,12 +266,17 @@ class Application:
         ``--avatar fake``. Each ref is attached to the *stored* scene (replacing any same-id ref) so
         render/export/observe can consume it. ``ref_crops`` maps a subject ``track_id`` to its
         reference crops (the heavy backend's sampling hint); the pipeline does not source crops yet,
-        so an empty list is passed by default.
+        so an empty list is passed by default. The scene camera + clip are passed through so a
+        measured builder can sample the subject's real broadcast pixels (M2-8b).
         """
         resolved = self.resolved(scene_id)
         crops = ref_crops or {}
+        camera = resolved.camera or self._static_camera(resolved)
+        clip = self._scene_clip.get(scene_id)
         refs = [
-            self.ports.avatar.build(subject, crops.get(subject.track_id, []))
+            self.ports.avatar.build(
+                subject, crops.get(subject.track_id, []), camera=camera, clip=clip
+            )
             for subject in resolved.subjects
         ]
         stored = self._scenes[scene_id]
