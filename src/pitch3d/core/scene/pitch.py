@@ -58,12 +58,21 @@ def _box_lines(goal_x: float, inward: float, depth: float, half_w: float, spacin
     ]
 
 
-def pitch_line_xy(dimensions: FieldDimensions | None = None, *, spacing: float = 0.5) -> np.ndarray:
-    """Return ``(N, 2)`` world-XY points sampling the full standard pitch markings.
+# FIFA touch/goal-line width is 12 cm; markings sit a hair above the grass to dodge z-fighting.
+LINE_WIDTH = 0.12
+_LINE_LIFT = 0.01
+
+
+def _pitch_polylines(
+    dimensions: FieldDimensions | None = None, *, spacing: float = 0.5
+) -> list[np.ndarray]:
+    """The standard markings as a list of ``(n, 2)`` polylines (a one-point array = a spot).
 
     Markings: the touchline/goal-line rectangle, halfway line, centre circle + spot, both penalty
     boxes, both goal areas, both penalty spots and both penalty arcs (the "D", only the portion
-    outside its box). ``spacing`` controls sample density along every line.
+    outside its box). ``spacing`` controls sample density along every line. Kept per-polyline (not
+    flattened) so consumers that need *connectivity* — e.g. ribbon geometry — don't bridge a gap
+    between two unrelated markings.
     """
     dims = dimensions or FieldDimensions()
     hl, hw = dims.length / 2.0, dims.width / 2.0
@@ -88,7 +97,17 @@ def pitch_line_xy(dimensions: FieldDimensions | None = None, *, spacing: float =
         # keep only the "D" — the arc portion poking out past the box's inner line toward centre
         keep = circle[:, 0] <= box_inner_x if inward < 0 else circle[:, 0] >= box_inner_x
         parts.append(circle[keep])
-    return np.vstack(parts)
+    return parts
+
+
+def pitch_line_xy(dimensions: FieldDimensions | None = None, *, spacing: float = 0.5) -> np.ndarray:
+    """Return ``(N, 2)`` world-XY points sampling the full standard pitch markings.
+
+    Markings: the touchline/goal-line rectangle, halfway line, centre circle + spot, both penalty
+    boxes, both goal areas, both penalty spots and both penalty arcs (the "D", only the portion
+    outside its box). ``spacing`` controls sample density along every line.
+    """
+    return np.vstack(_pitch_polylines(dimensions, spacing=spacing))
 
 
 def pitch_line_world_points(
@@ -97,3 +116,50 @@ def pitch_line_world_points(
     """Return ``(N, 3)`` world points for the pitch markings on the ``Z = plane_z`` plane."""
     xy = pitch_line_xy(dimensions, spacing=spacing)
     return np.column_stack([xy, np.full(xy.shape[0], float(plane_z))])
+
+
+def pitch_line_ribbons(
+    dimensions: FieldDimensions | None = None,
+    *,
+    plane_z: float = 0.0,
+    spacing: float = 0.5,
+    width: float = LINE_WIDTH,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Flat white-line geometry tracing the measured markings: ``(verts (M, 3), faces (F, 3))``.
+
+    Each measured polyline becomes a strip of ``width``-wide quads (two triangles per segment) on
+    the ``Z = plane_z`` plane, lifted ``_LINE_LIFT`` m so it doesn't z-fight the grass; a one-point
+    marking (penalty / centre spot) becomes a single small square. Quads are wound CCW seen from
+    above (face normal +Z). This is the *measured* pitch geometry the calibration anchors to, just
+    given thickness so Cycles can shade it — nothing fabricated (M2-9).
+    """
+    half = float(width) / 2.0
+    z = float(plane_z) + _LINE_LIFT
+    verts: list[list[float]] = []
+    faces: list[list[int]] = []
+
+    def _quad(corners: list[tuple[float, float]]) -> None:
+        base = len(verts)
+        verts.extend([cx, cy, z] for cx, cy in corners)
+        faces.append([base, base + 1, base + 2])
+        faces.append([base, base + 2, base + 3])
+
+    for poly in _pitch_polylines(dimensions, spacing=spacing):
+        pts = np.asarray(poly, dtype=float)
+        if pts.shape[0] == 1:
+            x, y = float(pts[0, 0]), float(pts[0, 1])
+            _quad([(x - half, y - half), (x + half, y - half), (x + half, y + half),
+                   (x - half, y + half)])
+            continue
+        for a, b in zip(pts[:-1], pts[1:], strict=False):
+            d = b - a
+            length = float(np.hypot(d[0], d[1]))
+            if length < 1e-9:
+                continue
+            nx, ny = -d[1] / length * half, d[0] / length * half
+            _quad([(a[0] - nx, a[1] - ny), (b[0] - nx, b[1] - ny),
+                   (b[0] + nx, b[1] + ny), (a[0] + nx, a[1] + ny)])
+
+    if not verts:
+        return np.zeros((0, 3)), np.zeros((0, 3), dtype=int)
+    return np.asarray(verts, dtype=float), np.asarray(faces, dtype=int)

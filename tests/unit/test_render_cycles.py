@@ -154,6 +154,20 @@ def test_plan_round_trips_posed_mesh_and_vert_index(tmp_path, make_motion, make_
     np.testing.assert_allclose(back.frames[0].placements[0].matrix_world, np.eye(4))
 
 
+def test_plan_carries_pitch_npz_through_json(tmp_path, make_motion, make_scene):
+    # The measured pitch markings ride the plan as a single NPZ ref the script loads (M2-9); the ref
+    # must survive the JSON subprocess boundary, and stays ``None`` when markings are off.
+    subj = Subject(track_id=7, proposal=make_motion([0], transl_z=5.0))
+    scene = make_scene(subjects=[subj])
+    mesh = [CyclesMeshRef("avatar_7", "avatar_7.npz", 7)]
+    plan = build_cycles_plan(scene, _camera(1), meshes=mesh, pitch_npz="pitch.npz")
+    assert plan.pitch_npz == "pitch.npz"
+    assert load_cycles_plan(write_cycles_plan(plan, tmp_path / "p.json")).pitch_npz == "pitch.npz"
+    bare = build_cycles_plan(scene, _camera(1), meshes=mesh)
+    assert bare.pitch_npz is None
+    assert load_cycles_plan(write_cycles_plan(bare, tmp_path / "bare.json")).pitch_npz is None
+
+
 # --- the in-Blender script's arg parser is pure (no bpy) -----------------------
 def test_cycles_script_parses_flags():
     argv = ["blender", "--python", "x.py", "--",
@@ -184,7 +198,9 @@ def test_cycles_render_produces_a_nonempty_frame(tmp_path, make_motion, make_sce
     frame = Path(res.uri) / "frame_00000.png"
     assert res.n_frames == 1 and not res.is_video
     assert frame.is_file() and frame.stat().st_size > 0
-    assert "cycles" in res.note and "avatars=1" in (Path(res.uri) / "manifest.txt").read_text()
+    manifest = (Path(res.uri) / "manifest.txt").read_text()
+    assert "cycles" in res.note and "avatars=1" in manifest
+    assert "env=grass+lines+sky" in manifest  # measured grass + line markings + sky path ran (M2-9)
 
 
 # --- Blender + SMPL-X gated: the limbs actually follow the pose (M2-8a headline) ----

@@ -115,7 +115,7 @@ per M2-0). The numpy vertex-splat pass (M2-3) is debug-grade scaffolding, not th
 | M2-6 Render preview (fast low-q) for both paths | `adapters/render` |
 | **M2-7 Real photoreal renderer ✅ (2026-06-25)** — `CyclesRenderPass`: Blender/Cycles `RenderPass` over the *resolved* scene (ADR-0003 external + import), the photoreal path alongside the no-dep splat debug viz. Rigid-root placement (LBS=M2-8), neutral ground (material=M2-9), R-6 tint intact | `adapters/render`, `adapters/blender` |
 | **M2-8 Posed, textured avatar** — **8a ✅ (2026-06-27): per-frame SMPL-X LBS** (geometry follows the edited pose, incl. limbs), pure-numpy (no torch/GPU), posed through Cycles; **8b ✅ (2026-06-27): measured surface texture** — the scene camera + decoded source frames thread into `observe`, the subject is posed at its *measured* pose into a capped, evenly-spread set of reference frames, and the pure projection/z-buffer sampler paints per-vertex colour from real pixels (R-6 marks unmeasured grey) | `adapters/models`, `adapters/render`, `adapters/blender` |
-| **M2-9 Measured env materials + lighting** — grass PBR for the measured pitch + scene lighting/HDRI; stadium stays gated/marked (R-8 → M3) | `adapters/models`, `adapters/blender` |
+| **M2-9 Measured env materials + lighting ✅ (2026-06-27)** — procedural grass PBR (mowing stripes + bump) for the measured pitch, the standard line markings rendered as flat white ribbons, and a physically-based (multiple-scattering) sky + matched key-light sun; stadium stays gated/marked (R-8 → M3) | `core/scene`, `adapters/render`, `adapters/blender` |
 | **M2-10 Edit↔render sync + photoreal `observe`** — a pose edit (root *and* limbs via LBS) re-projects into the Cycles frame with no manual redo (AC-4 proper); `observe` returns photoreal multi-view (A-8); seam-A orbit becomes a re-render of the 3D scene at orbit cameras, no generative (A-9) | `app`, `adapters/render`, `adapters/viewsynth` |
 
 **Exit criteria (TZ AC-4, AC-5a — measured-photoreal reading, option A):** a *real renderer*
@@ -260,18 +260,20 @@ fidelity (texture, AA, real generative steps) still rides the heavy backends, wh
 avatars on grass — is NOT met.** M2-0…M2-6 delivered the render-pass *architecture* (seam, edit↔render
 sync on the rigid root, content-addressed cache, preview-downscale, measured pitch-env, seam-A
 contract) plus a measured **vertex-splat** visualization — debug-grade, pure-numpy, *not* a photoreal
-renderer. **M2-7 wired a real Blender/Cycles renderer, M2-8a LBS-poses the avatars through it, and
-M2-8b paints them from measured pixels** (below) — root *and* per-joint limbs follow the resolved pose
-(a bent elbow renders bent), and front-facing, in-frustum verts take the player's real broadcast
-colour (unseen verts stay honest R-6 grey). But the **ground is still a neutral plane** (grass/line
-materials are **M2-9**), edit↔render/observe through Cycles is **M2-10**, and the seam-A "video" is
-still a fake re-shoot. Texture quality is also only as good as the *pose alignment*: on the **fake**
-pose pipeline the synthetic bodies don't sit on the real players, so measured coverage is sparse
-(~1%, real-clip E2E) — genuine coverage waits on the still-gated GVHMR pose. So the photoreal output
-does **not** yet exist — that needs **M2-9…M2-10** (grass/line env materials + edit↔render/observe
+renderer. **M2-7 wired a real Blender/Cycles renderer, M2-8a LBS-poses the avatars through it,
+M2-8b paints them from measured pixels, and M2-9 puts them on the measured grass pitch** (below) —
+root *and* per-joint limbs follow the resolved pose (a bent elbow renders bent), front-facing,
+in-frustum verts take the player's real broadcast colour (unseen verts stay honest R-6 grey), and the
+ground is now a **grass-PBR pitch carrying the standard line markings under a physical sky** (not a
+neutral plane). What's left is **M2-10**: edit↔render/observe *through Cycles* (a pose edit
+re-projecting into the Cycles frame with no manual redo, `observe` returning photoreal multi-view) and
+the seam-A "video" is still a fake re-shoot. Texture quality is also only as good as the *pose
+alignment*: on the **fake** pose pipeline the synthetic bodies don't sit on the real players, so
+measured coverage is sparse (~1%, real-clip E2E) — genuine coverage waits on the still-gated GVHMR
+pose. So the photoreal output does **not** yet exist — that needs **M2-10** (edit↔render/observe
 through Cycles) on top of real pose. **M2 stays 🟡 because the photoreal output does not exist — not
 because the generative backends are gated.** Measured ceiling: textured avatars on grass;
-broadcast-convincing fidelity is M3. Next within M2: **M2-9**.
+broadcast-convincing fidelity is M3. Next within M2: **M2-10**.
 
 **Progress — M2-7 `CyclesRenderPass` wired E2E (2026-06-25):** the first *real* renderer — a
 Blender/Cycles `RenderPass` over the **resolved** scene, the photoreal path alongside the no-dep
@@ -346,6 +348,28 @@ mostly background; genuine coverage waits on the wired GVHMR pose, not on the te
 (R-6):** this delivers the *textured* half of M2-8 (measured, not hallucinated), but the ground is
 still neutral (grass/line materials are **M2-9**) and edit↔render/observe through Cycles is **M2-10**,
 so the photoreal *avatar on grass* still does not exist — **M2 stays 🟡. Next: M2-9.**
+
+**Progress — M2-9 measured grass pitch + sky wired E2E (2026-06-27):** the avatars now stand on the
+**measured pitch**, not a neutral plane. Three pieces, R-6 honest throughout. (1) The standard line
+markings become real geometry: a new pure `pitch_line_ribbons` (`core/scene/pitch.py`) turns each
+measured marking polyline (the same FIFA template the calibration anchors to) into width-wide white
+quad ribbons on the pitch plane, lifted 1 cm to dodge z-fighting and wound +Z-up — crisp continuous
+lines with **nothing fabricated** (no texture, no hallucinated stadium). (2) `CyclesPlan` gains a
+`pitch_npz` ref (round-tripped through the JSON subprocess boundary); `CyclesRenderPass` emits the
+ribbons into the mesh tempdir and the manifest reports `env=grass+lines+sky`. (3) `_cycles_script.py`
+swaps the neutral matte ground for a **procedural grass PBR** (banded mowing stripes quantised to two
+greens + a noise bump for blade micro-texture, high roughness), loads the ribbon NPZ as a flat
+matte-white mesh, and replaces the flat-tint world with a **physically-based multiple-scattering sky**
+(Blender 5.x's Nishita successor; sun *disc* off, a matched SUN lamp carries the crisp key light so it
+converges clean at 48 spp). **E2E proof (R-6 honest):** the Blender-gated render test now asserts
+`env=grass+lines+sky` in the manifest; new pure tests pin the ribbon geometry (valid indexed quads,
++Z winding, on the lifted plane, inside the ground bounds) and the `pitch_npz` JSON round-trip. The
+full `--avatar textured --render cycles --env pitch` dry-run renders 2 lit 640×360 frames whose pixels
+are **76% green (grass), 2% near-white (line paint), 0% black** under a bright sky — a measured grass
+pitch with markings, lit. **Honest scope (R-6):** the *environment* is now measured-real, but
+edit↔render/observe *through Cycles* and the seam-A re-render are still **M2-10**, so the full photoreal
+loop (edit a pose → see it re-render; `observe` returns photoreal views) does not yet exist — **M2
+stays 🟡. Next: M2-10.**
 
 ---
 

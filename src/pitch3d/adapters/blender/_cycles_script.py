@@ -4,9 +4,10 @@
 ``blender --background --factory-startup --python _cycles_script.py -- --plan plan.json
 --mesh-dir <dir> --render-dir <dir>``. It reads the JSON
 :class:`~pitch3d.adapters.blender.cycles_plan.CyclesPlan`, builds the *resolved* scene as real
-geometry — each avatar mesh from its NPZ (vertices + triangles + per-vertex colour), a neutral
-ground plane, a sun + sky world — places a physical camera from the plan's lens/shift/sensor, and
-renders every plan frame with **Cycles** to ``frame_{index:05d}.png``. The camera ``matrix_world``
+geometry — each avatar mesh from its NPZ (vertices + triangles + per-vertex colour), a grass-PBR
+ground plane carrying the measured pitch markings, a sun + physical-sky world — places a physical
+camera from the plan's lens/shift/sensor, and renders every plan frame with **Cycles** to
+``frame_{index:05d}.png``. The camera ``matrix_world``
 and each avatar's placement come straight from the plan (all the OpenCV→Blender maths happened on
 the pure side), so this file only *applies* transforms.
 
@@ -17,7 +18,8 @@ Blender's ``__main__`` — importing this file in a normal interpreter never pul
 Avatars render either **rigid** (one canonical ``(V, 3)`` mesh placed by its root ``matrix_world``,
 M2-7) or **posed** (per-frame LBS vertices ``(T, V, 3)`` in the NPZ; the script swaps row
 ``vert_index`` into the mesh each frame so the limbs follow the resolved pose, M2-8). The
-environment is still a single neutral matte ground plane (measured grass/line material is M2-9).
+environment is a procedural grass pitch carrying the measured line markings (the ``pitch_npz``
+ribbons) under a physically-based (multiple-scattering) sky (M2-9).
 """
 
 from __future__ import annotations
@@ -28,8 +30,9 @@ import os
 import sys
 
 _SUCCESS = "PITCH3D_BLENDER_OK"
-_SKY_RGB = (0.55, 0.72, 0.92, 1.0)        # daytime world background
-_GROUND_RGB = (0.15, 0.18, 0.12, 1.0)     # neutral matte pitch plane (NOT measured grass — M2-9)
+_LINE_RGB = (0.9, 0.9, 0.9, 1.0)          # measured pitch markings (painted white on grass, M2-9)
+_SUN_ELEVATION_DEG = 45.0                 # sky + key-light sun share one elevation/azimuth (M2-9)
+_SUN_AZIMUTH_DEG = 30.0
 
 
 def _parse_args(argv):
@@ -60,21 +63,37 @@ def _configure_cycles(bpy, scene, plan):  # pragma: no cover - needs bpy
 
 
 def _build_world(bpy, scene):  # pragma: no cover - needs bpy
+    # Physically-based outdoor lighting: a multiple-scattering atmosphere drives the world
+    # background, so the sky dome (soft fill) is measured-real, not a flat tint. The sun disc is
+    # off here — the crisp key comes from a matched SUN lamp, which converges cleaner at 48 spp.
     world = bpy.data.worlds.new("sky")
-    world.use_nodes = True
-    bg = world.node_tree.nodes.get("Background")
-    if bg is not None:
-        bg.inputs[0].default_value = _SKY_RGB
-        bg.inputs[1].default_value = 1.0
+    nt = world.node_tree  # worlds carry a node tree by default on Blender 5.x (use_nodes is gone)
+    bg = nt.nodes.get("Background") or nt.nodes.new("ShaderNodeBackground")
+    out = nt.nodes.get("World Output") or nt.nodes.new("ShaderNodeOutputWorld")
+    sky = nt.nodes.new("ShaderNodeTexSky")
+    sky.sky_type = "MULTIPLE_SCATTERING"  # Blender 5.x successor to the Nishita physical sky
+    sky.sun_disc = False
+    sky.sun_elevation = math.radians(_SUN_ELEVATION_DEG)
+    sky.sun_rotation = math.radians(_SUN_AZIMUTH_DEG)
+    nt.links.new(sky.outputs["Color"], bg.inputs["Color"])
+    nt.links.new(bg.outputs["Background"], out.inputs["Surface"])
+    bg.inputs["Strength"].default_value = 1.0
     scene.world = world
 
 
 def _add_sun(bpy):  # pragma: no cover - needs bpy
+    # Key light, aimed to match the Nishita sun: elevation tips the lamp up from the horizon (a SUN
+    # points down its local -Z at euler 0), azimuth swings it round. angle≈the real solar disc, so
+    # shadow edges are softly penumbral rather than razor-sharp.
     light = bpy.data.lights.new("sun", type="SUN")
-    light.energy = 4.0
-    light.angle = 0.1
+    light.energy = 3.0
+    light.angle = math.radians(0.53)
     obj = bpy.data.objects.new("sun", light)
-    obj.rotation_euler = (math.radians(50.0), 0.0, math.radians(30.0))
+    obj.rotation_euler = (
+        math.radians(90.0 - _SUN_ELEVATION_DEG),
+        0.0,
+        math.radians(_SUN_AZIMUTH_DEG),
+    )
     bpy.context.collection.objects.link(obj)
 
 
@@ -88,6 +107,40 @@ def _matte_material(bpy, name, rgba, roughness):  # pragma: no cover - needs bpy
     return mat
 
 
+def _grass_material(bpy):  # pragma: no cover - needs bpy
+    # Procedural grass for the measured pitch plane (M2-9): banded mowing stripes (the iconic pitch
+    # look) drive the base colour, a fine noise drives a subtle bump for blade micro-texture, and a
+    # high roughness keeps it matte. Built purely from generator nodes — no image texture to ship.
+    mat = bpy.data.materials.new("grass")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    # Mowing stripes: a banded wave quantised to two greens by a constant-interpolation ramp.
+    wave = nt.nodes.new("ShaderNodeTexWave")
+    wave.wave_type = "BANDS"
+    wave.bands_direction = "X"
+    wave.inputs["Scale"].default_value = 6.0
+    ramp = nt.nodes.new("ShaderNodeValToRGB")
+    ramp.color_ramp.interpolation = "CONSTANT"
+    dark, light = ramp.color_ramp.elements
+    dark.position, dark.color = 0.0, (0.045, 0.20, 0.035, 1.0)
+    light.position, light.color = 0.5, (0.075, 0.28, 0.055, 1.0)
+    nt.links.new(coord.outputs["Object"], wave.inputs["Vector"])
+    nt.links.new(wave.outputs["Fac"], ramp.inputs["Fac"])
+    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+    # Grass micro-texture as a bump only (no extra colour mix → fewer sockets to get wrong).
+    noise = nt.nodes.new("ShaderNodeTexNoise")
+    noise.inputs["Scale"].default_value = 120.0
+    bump = nt.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = 0.15
+    nt.links.new(coord.outputs["Object"], noise.inputs["Vector"])
+    nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
+    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+    bsdf.inputs["Roughness"].default_value = 0.9
+    return mat
+
+
 def _add_ground(bpy, plan):  # pragma: no cover - needs bpy
     bpy.ops.mesh.primitive_plane_add(
         size=float(plan.get("ground_size", 140.0)),
@@ -95,8 +148,32 @@ def _add_ground(bpy, plan):  # pragma: no cover - needs bpy
     )
     ground = bpy.context.active_object
     ground.name = "ground"
-    ground.data.materials.append(_matte_material(bpy, "ground_mat", _GROUND_RGB, 0.9))
+    ground.data.materials.append(_grass_material(bpy))
     return ground
+
+
+def _build_pitch(bpy, mesh_dir, plan):  # pragma: no cover - needs bpy
+    """Build the measured line-marking ribbons (``pitch_npz``) as a flat matte-white mesh, or skip.
+
+    The ribbon geometry is the *measured* pitch template the calibration anchors to (M2-9), already
+    given thickness on the pure side (:func:`~pitch3d.core.scene.pitch.pitch_line_ribbons`); here it
+    just becomes a white-painted mesh sitting a hair above the grass. ``None`` when the plan carries
+    no markings (``draw_pitch=False``) — an honest empty pitch, never a fabricated one.
+    """
+    import numpy as np
+
+    name = plan.get("pitch_npz")
+    if not name:
+        return None
+    data = np.load(os.path.join(mesh_dir, name))
+    verts, faces = data["verts"], data["faces"]
+    me = bpy.data.meshes.new("pitch_lines")
+    me.from_pydata(verts.tolist(), [], faces.tolist())
+    me.update()
+    me.materials.append(_matte_material(bpy, "pitch_lines_mat", _LINE_RGB, 0.6))
+    obj = bpy.data.objects.new("pitch_lines", me)
+    bpy.context.collection.objects.link(obj)
+    return obj
 
 
 def _build_avatar(bpy, mesh_dir, spec):  # pragma: no cover - needs bpy
@@ -189,6 +266,7 @@ def main():  # pragma: no cover - runs only as Blender's __main__
     _build_world(bpy, scene)
     _add_sun(bpy)
     _add_ground(bpy, plan)
+    _build_pitch(bpy, args["mesh_dir"], plan)
 
     avatars = {spec["name"]: _build_avatar(bpy, args["mesh_dir"], spec) for spec in plan["meshes"]}
     cam = _make_camera(bpy, plan)

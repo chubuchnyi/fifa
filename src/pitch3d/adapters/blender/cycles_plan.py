@@ -21,7 +21,8 @@ its resolved root transform — identical to the splat pass. A **posed** mesh (M
 LBS vertices (the resolved root *and* per-joint limb articulation, baked on the pure side via
 :mod:`...models.smplx_lbs`); the plan then carries identity placements + a per-frame ``vert_index``
 and the script swaps the geometry each frame, so the limbs follow the resolved pose. The environment
-is still a single neutral ground plane; the measured grass/line material is M2-9.
+is a grass-PBR ground plane carrying the measured pitch markings (``pitch_npz`` ribbons) under a
+physically-based sky (M2-9).
 """
 
 from __future__ import annotations
@@ -166,6 +167,7 @@ class CyclesPlan:
     ground_z: float = 0.0
     ground_size: float = 140.0  # metres — covers a 105x68 m pitch + margin
     up_axis: str = "Z"
+    pitch_npz: str | None = None  # measured line-marking ribbons under <mesh_dir> (M2-9)
 
 
 def _resolved_roots(scene: Scene, track_ids: set[int]) -> dict[int, Any]:
@@ -189,6 +191,7 @@ def build_cycles_plan(
     ground_z: float = 0.0,
     ground_size: float = 140.0,
     sensor_width_mm: float = _SENSOR_WIDTH_MM,
+    pitch_npz: str | None = None,
 ) -> CyclesPlan:
     """Assemble the Cycles plan from a resolved scene + its estimated camera.
 
@@ -242,6 +245,7 @@ def build_cycles_plan(
         device=device,
         ground_z=ground_z,
         ground_size=ground_size,
+        pitch_npz=pitch_npz,
     )
 
 
@@ -296,6 +300,7 @@ def load_cycles_plan(path: str | Path) -> CyclesPlan:
         ground_z=float(data["ground_z"]),
         ground_size=float(data["ground_size"]),
         up_axis=data.get("up_axis", "Z"),
+        pitch_npz=data.get("pitch_npz"),
     )
 
 
@@ -309,6 +314,7 @@ def _plan_dict(plan: CyclesPlan) -> dict:
         "ground_z": plan.ground_z,
         "ground_size": plan.ground_size,
         "up_axis": plan.up_axis,
+        "pitch_npz": plan.pitch_npz,
         "camera_intrinsics": plan.camera_intrinsics,
         "meshes": [
             {"name": m.name, "npz": m.npz, "track_id": m.track_id, "posed": m.posed}

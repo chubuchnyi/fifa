@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from pitch3d.core.scene.pitch import pitch_line_world_points, pitch_line_xy
+from pitch3d.core.scene.pitch import (
+    _LINE_LIFT,
+    pitch_line_ribbons,
+    pitch_line_world_points,
+    pitch_line_xy,
+)
 from pitch3d.core.scene.units import FieldDimensions
 
 
@@ -69,3 +74,32 @@ def test_penalty_arc_pokes_outside_its_box():
     # points on the right half near y≈0 that sit inside the box line are the arc's "D"
     near_axis = xy[(np.abs(xy[:, 1]) < 9.0) & (xy[:, 0] > 0)]
     assert (near_axis[:, 0] < box_inner_x).any()
+
+
+# --- ribbon geometry: the measured markings given thickness for Cycles (M2-9) ---
+def test_ribbons_are_valid_indexed_quads_on_the_lifted_plane():
+    # Each marking polyline becomes width-wide quads: 4 verts + 2 triangles per quad. So faces == 2
+    # per quad and verts == 4 per quad → faces == verts/2, every index valid, all finite.
+    verts, faces = pitch_line_ribbons(FieldDimensions(), plane_z=0.5)
+    assert verts.ndim == 2 and verts.shape[1] == 3
+    assert faces.ndim == 2 and faces.shape[1] == 3
+    assert verts.shape[0] % 4 == 0 and faces.shape[0] == verts.shape[0] // 2
+    assert 0 <= int(faces.min()) and int(faces.max()) < verts.shape[0]
+    assert np.isfinite(verts).all()
+    # Lifted a hair above the requested plane so the lines don't z-fight the grass.
+    np.testing.assert_allclose(verts[:, 2], 0.5 + _LINE_LIFT)
+
+
+def test_ribbon_quads_wind_face_up():
+    # CCW-from-above winding → +Z face normal, so Cycles shades the painted top, not the underside.
+    verts, faces = pitch_line_ribbons(FieldDimensions(), plane_z=0.0)
+    tri = verts[faces[0]]
+    normal = np.cross(tri[1] - tri[0], tri[2] - tri[0])
+    assert normal[2] > 0.0
+
+
+def test_ribbons_fit_inside_the_ground_plane():
+    # The Cycles ground plane is 140 m; the markings (plus line half-width) must sit well inside it.
+    verts, _ = pitch_line_ribbons(FieldDimensions(length=105.0, width=68.0))
+    assert np.abs(verts[:, 0]).max() < 70.0
+    assert np.abs(verts[:, 1]).max() < 70.0

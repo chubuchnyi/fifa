@@ -12,10 +12,11 @@ in the distinct *unmeasured* tint, never its fabricated placeholder colour.
 
 This is the editable measured-photoreal path. A mesh without the SMPL-X model present, or whose
 topology is not SMPL-X, falls back to rigid-root placement (M2-7) — an honest, explicit limit, not a
-silent fake. The remaining deferred limit: the environment is a single neutral ground plane, not the
-measured grass/line material (M2-9). All the OpenCV→Blender camera maths lives in the pure
+silent fake. The environment is now the *measured* pitch: a procedural-grass ground plane carrying
+the standard line markings (the calibration's anchor geometry, emitted as flat ribbons) under a
+physically-based sky (M2-9). All the OpenCV→Blender camera maths lives in the pure
 :mod:`~pitch3d.adapters.blender.cycles_plan`; this orchestrator just resolves assets, poses the
-geometry, writes the mesh NPZs + plan, and drives the subprocess.
+geometry, writes the mesh NPZs + plan (incl. the pitch ribbons), and drives the subprocess.
 """
 
 from __future__ import annotations
@@ -30,8 +31,10 @@ from ...core.correction.engine import resolve_subject_motion
 from ...core.ports.render import RenderPass, RenderQuality, RenderResult
 from ...core.scene.assets import RenderAssetKind, RenderAssetRef
 from ...core.scene.camera import CameraTrack
+from ...core.scene.pitch import pitch_line_ribbons
 from ...core.scene.scene import Scene
 from ...core.scene.subject import Subject
+from ...core.scene.units import FieldDimensions
 from ..blender.cycles_plan import CyclesMeshRef, build_cycles_plan, write_cycles_plan
 from ..blender.runner import run_cycles_render
 from ..models.avatar import read_vertex_colored_ply
@@ -63,7 +66,9 @@ class CyclesRenderPass(RenderPass):
         blender: Explicit Blender binary; ``None`` resolves via ``$PITCH3D_BLENDER`` / PATH.
         samples: Cycles samples per frame (quality/cost lever).
         device: ``"CPU"`` or ``"GPU"`` for Cycles.
-        ground_z: World Z (metres) of the neutral ground plane (the measured pitch plane).
+        ground_z: World Z (metres) of the grass ground plane (the measured pitch plane).
+        draw_pitch: Render the measured line markings (M2-9) as white ribbons on the grass.
+        field_dimensions: Outer pitch size for the markings template (Laws metrics ride inside it).
         timeout: Per-render Blender subprocess timeout (seconds) — Cycles is CPU-bound.
     """
 
@@ -72,6 +77,8 @@ class CyclesRenderPass(RenderPass):
     samples: int = 48
     device: str = "CPU"
     ground_z: float = 0.0
+    draw_pitch: bool = True
+    field_dimensions: FieldDimensions = field(default_factory=FieldDimensions)
     timeout: float = 600.0
 
     def __post_init__(self) -> None:
@@ -97,6 +104,8 @@ class CyclesRenderPass(RenderPass):
         n_unmeasured = sum(a.n_unmeasured for a in avatars)
         n_posed = sum(1 for a in avatars if a.posed)
         meshes = [CyclesMeshRef(a.name, f"{a.name}.npz", a.track_id, a.posed) for a in avatars]
+        pitch_verts, pitch_faces = pitch_line_ribbons(self.field_dimensions, plane_z=self.ground_z)
+        draw_pitch = self.draw_pitch and pitch_faces.shape[0] > 0
         plan = build_cycles_plan(
             scene,
             camera,
@@ -104,6 +113,7 @@ class CyclesRenderPass(RenderPass):
             samples=self.samples,
             device=self.device,
             ground_z=self.ground_z,
+            pitch_npz="pitch.npz" if draw_pitch else None,
         )
 
         with TemporaryDirectory(prefix="pitch3d-cycles-") as tmp:
@@ -116,6 +126,12 @@ class CyclesRenderPass(RenderPass):
                     faces=avatar.faces.astype(np.int64),
                     rgb=avatar.rgb01.astype(np.float64),
                 )
+            if draw_pitch:
+                np.savez(
+                    mesh_dir / "pitch.npz",
+                    verts=pitch_verts.astype(np.float64),
+                    faces=pitch_faces.astype(np.int64),
+                )
             plan_path = write_cycles_plan(plan, Path(tmp) / "plan.json")
             run_cycles_render(
                 plan_path,
@@ -126,11 +142,12 @@ class CyclesRenderPass(RenderPass):
                 timeout=self.timeout,
             )
 
+        env_tag = "grass+lines+sky" if draw_pitch else "grass+sky"
         (target / "manifest.txt").write_text(
             f"scene={scene.id} renderer=cycles avatars={len(avatars)} posed={n_posed} "
             f"vertices={n_verts} unmeasured={n_unmeasured} samples={self.samples} "
             f"device={self.device} frames={camera.n_frames} size={width}x{height} "
-            f"quality={quality.value}\n",
+            f"quality={quality.value} env={env_tag}\n",
             encoding="utf-8",
         )
         placement = (
@@ -147,7 +164,9 @@ class CyclesRenderPass(RenderPass):
             camera=camera,
             note=f"cycles {width}x{height} ({quality.value}, {self.samples}spp/{self.device}): "
             f"{len(avatars)} avatar(s), {n_unmeasured}/{n_verts} verts unmeasured (R-6 tinted); "
-            f"{placement}, neutral ground (material=M2-9)",
+            f"{placement}; measured grass pitch"
+            + (" + line markings" if draw_pitch else " (markings off)")
+            + " under a physical sky",
         )
 
 
