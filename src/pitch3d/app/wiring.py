@@ -271,12 +271,12 @@ def default_ports(
 
     if export == "fake":
         exp: Exporter = FakeExporter()
-    elif export == "gltf":
+    elif export in ("gltf", "threejs"):
         from ..adapters.export import GltfExporter
 
         exp = GltfExporter()
     else:
-        raise ValueError(f"unknown export {export!r}; expected 'fake' or 'gltf'")
+        raise ValueError(f"unknown export {export!r}; expected 'fake', 'gltf' or 'threejs'")
 
     if observer == "fake":
         obs: SceneObserver = FakeSceneObserver(out_dir=out / "observations")

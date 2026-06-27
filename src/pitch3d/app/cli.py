@@ -280,8 +280,9 @@ def main(argv: list[str] | None = None) -> int:
                              "renders those meshes photoreal via Blender/Cycles (M2-7, needs "
                              "$PITCH3D_BLENDER), 'orbit' is the ViewSynthesizer seam-A "
                              "limited-orbit re-shoot (video, not editable)")
-    parser.add_argument("--export", default="fake", choices=["fake", "gltf"],
-                        help="exporter; 'gltf' is real (SMPL-X npz + JSON now; glTF needs export)")
+    parser.add_argument("--export", default="fake", choices=["fake", "gltf", "threejs"],
+                        help="exporter; 'gltf'/'threejs' are real (npz+JSON+glTF; web viewer is "
+                             "dependency-free, use --format threejs)")
     parser.add_argument("--observer", default="fake", choices=["fake", "blender", "cycles"],
                         help="scene observer; 'blender' renders real proxy SCENE_3D, 'cycles' "
                              "renders photoreal SCENE_3D per viewpoint (M2-10/A-8); both need "

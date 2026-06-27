@@ -27,7 +27,7 @@ from pitch3d.core.scene.motion import BallTrack
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.core.scene.subject import Subject
 
-_UNSUPPORTED = [ExportFormat.USD, ExportFormat.FBX, ExportFormat.ALEMBIC, ExportFormat.THREEJS]
+_UNSUPPORTED = [ExportFormat.USD, ExportFormat.FBX, ExportFormat.ALEMBIC]
 
 
 def _subject(make_motion, transl_z=2.0, track_id=1) -> Subject:
@@ -77,7 +77,13 @@ def test_exporter_port_contract(make_exp, tmp_path, make_scene, make_motion):
 
 def test_gltf_supports_matrix():
     exp = GltfExporter()
-    for fmt in (ExportFormat.JSON, ExportFormat.SMPLX_NPZ, ExportFormat.GLTF, ExportFormat.GLB):
+    for fmt in (
+        ExportFormat.JSON,
+        ExportFormat.SMPLX_NPZ,
+        ExportFormat.GLTF,
+        ExportFormat.GLB,
+        ExportFormat.THREEJS,
+    ):
         assert exp.supports(fmt) is True
     for fmt in _UNSUPPORTED:
         assert exp.supports(fmt) is False

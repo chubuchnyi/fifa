@@ -439,7 +439,7 @@ in sync, so M2 is 🟢. Next: M3.**
 
 ---
 
-## M3 — Quality & polish ⬜  (+ ViewSynthesizer **seam B**)
+## M3 — Quality & polish 🟡  (+ ViewSynthesizer **seam B**)
 
 **Goal (TZ M3):** raise reconstruction quality and operator efficiency.
 
@@ -467,6 +467,21 @@ fallback only. None replaces the HMR backend (B2 pick stays SMPLest-X + SMART); 
 `smoothing`/`refit` port (ADR-0006) as an isolated swap. Open before adopting: licences (NVIDIA-
 research; HTD-Refine / StableMotion code pending), **SMPL-X** in/out compatibility, and football-
 motion coverage. Tracked as research, off the M1 critical path.
+
+**Progress — M3-7 web viewer (three.js) wired E2E (2026-06-27):** M3 opens with the cleanest
+fully-shippable win (real today, no GPU, no generative gating). `ExportFormat.THREEJS` — already on
+the port — is now implemented dependency-free: `GltfExporter` (also `--export threejs`) emits a
+self-contained bundle (`index.html` + `scene.json`) via `adapters/export/web.py`. The viewer shows
+the **resolved** subject roots + ball as animated, team-coloured markers on a metric pitch, **reusing
+`build_gltf_scene`'s Z-up→Y-up conversion** so the web view inherits the glTF export's exact
+axis/scale — it can't drift (**AC-6**, "without scale/coord loss", pinned by a parity test against
+the glTF tracks). The data is **embedded** in the page (opens off the filesystem, no server); three.js
+is pinned from a CDN at view time (the only view-time dep). **E2E proof:** `--export threejs --format
+threejs` ran the golden path → `scene.json` (up=Y, pitch 105×68, 6 nodes = 5 subjects + ball, 8
+samples each); the generated viewer JS passes `node --check`. **Tests:** 6 new (`test_export_web.py`)
++ the supports-matrix updated; suite **486 passed / 5 skipped**. **Honest scope (R-6):** markers, not
+SMPL-X meshes — the full textured-mesh web viewer rides the gated `.glb` path (`export` extra) in a
+later increment; the WebGL render itself isn't headlessly testable here (open `index.html` to view).
 
 ---
 

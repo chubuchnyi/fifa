@@ -6,8 +6,10 @@ the canonical scene JSON (delegates to the core serializer), the SMPL-X ``.npz``
 Z-up→Y-up axis conversion plus per-track translation samples (:func:`build_gltf_scene`), which is
 pure numpy and fully unit-tested. **Gated heavy half:** turning that scene graph into a real
 ``.gltf``/``.glb`` needs :mod:`pygltflib`, so :meth:`GltfExporter._write_gltf` lazy-imports it and
-raises an actionable error pointing at ``pip install 'pitch3d[export]'``. USD/FBX/Alembic and the
-three.js bundle stay unsupported here (roadmap M3); the export adapter is the only place axis/scale
+raises an actionable error pointing at ``pip install 'pitch3d[export]'``. The dependency-free
+**three.js web viewer** (``index.html`` + ``scene.json``, M3-7) is delegated to
+:mod:`pitch3d.adapters.export.web` and reuses :func:`build_gltf_scene` for the same Y-up tracks;
+USD/FBX/Alembic stay unsupported here (roadmap M3). The export adapter is the only place axis/scale
 conversion happens (never the core).
 """
 
@@ -25,7 +27,13 @@ from ...core.scene.serialization import save_scene
 
 #: Formats this exporter actually writes; everything else → ``supports()`` is False (honest scope).
 _SUPPORTED_FORMATS = frozenset(
-    {ExportFormat.JSON, ExportFormat.SMPLX_NPZ, ExportFormat.GLTF, ExportFormat.GLB}
+    {
+        ExportFormat.JSON,
+        ExportFormat.SMPLX_NPZ,
+        ExportFormat.GLTF,
+        ExportFormat.GLB,
+        ExportFormat.THREEJS,
+    }
 )
 
 #: Z-up (world) → Y-up (glTF) basis: ``(x, y, z) → (x, z, -y)`` (a −90° turn about X).
@@ -123,8 +131,16 @@ class GltfExporter(Exporter):
             return ExportResult(
                 fmt=fmt, paths=[str(path)], note=f"{len(gscene.nodes)} node {fmt.value}"
             )
+        if fmt is ExportFormat.THREEJS:
+            from .web import write_web_bundle  # lazy: web.py imports build_gltf_scene from here
+
+            paths = write_web_bundle(scene, path, fps=self.fps)
+            return ExportResult(
+                fmt=fmt, paths=paths, note=f"three.js viewer ({len(scene.subjects)} subjects)"
+            )
         raise ValueError(
-            f"{fmt.value} export is unsupported by GltfExporter (handles json/smplx_npz/gltf/glb)"
+            f"{fmt.value} export is unsupported by GltfExporter "
+            "(handles json/smplx_npz/gltf/glb/threejs)"
         )
 
     def _write_gltf(  # pragma: no cover - needs the export extra (pygltflib)
