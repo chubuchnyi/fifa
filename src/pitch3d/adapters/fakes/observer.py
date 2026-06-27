@@ -62,6 +62,8 @@ class FakeSceneObserver(SceneObserver):
     height: int = 36
     radar_width: int = 96
     radar_height: int = 64
+    ui_width: int = 192
+    ui_height: int = 160
 
     def __post_init__(self) -> None:
         self.out_dir = Path(self.out_dir)
@@ -104,8 +106,21 @@ class FakeSceneObserver(SceneObserver):
         )
 
     def capture_ui(self, scene: Scene | None = None) -> ObservationImage | None:
-        sid = scene.id if scene is not None else "none"
-        return self._write(f"{sid}_ui.png", (30, 30, 30), ObservationKind.UI)
+        """Real 'needs attention' panel + confidence map (pure numpy + stdlib PNG), UX-4/FR-17.
+
+        Headless with no scene ⇒ the flat placeholder; with a scene ⇒ the ranked attention bars over
+        the per-subject confidence heatmap, so the LLM/operator literally sees what to fix (M3-5).
+        """
+        if scene is None:
+            return self._write("none_ui.png", (30, 30, 30), ObservationKind.UI)
+        from pitch3d.adapters.render.attention import render_attention_ui
+
+        path = self.out_dir / f"{scene.id}_ui.png"
+        path.write_bytes(render_attention_ui(scene, width=self.ui_width, height=self.ui_height))
+        return ObservationImage(
+            kind=ObservationKind.UI, uri=str(path), width=self.ui_width, height=self.ui_height,
+            note="needs-attention panel + confidence map",
+        )
 
     def capture_radar(self, scene: Scene, frame: int = 0) -> ObservationImage | None:
         """Real top-down minimap (pure numpy + stdlib PNG) — no renderer dependency."""

@@ -449,7 +449,7 @@ in sync, so M2 is 🟢. Next: M3.**
 | M3-2 Constraint-guided re-fit hardened (PromptHMR-class); **cluster-occlusion robustness** option — amodal occlusion completion (**Diffusion-VAS**) + pixel-level identity (**SAM-3** masklets) gated to occluded segments, validated against the homography anchor (from the brief) | `adapters/models` (`PoseEstimator.refit`) |
 | ✅ **M3-3 ViewSynthesizer seam B** — `amplify` (mono → pseudo-multi-view) feeding env/avatar recon | `adapters/viewsynth`, `core/orchestration` |
 | ✅ **M3-4 ViewSynthesizer seam B** — `inpaint_occlusions` for unseen player sides (multi-view human-diffusion candidates: **PSHuman** / **SiTH** / **AniGS**; text-conditioned **TeCH** for kit+number) | `adapters/viewsynth`, `adapters/models` |
-| M3-5 Confidence map + "needs attention" prioritization UI | `adapters/blender`, `core/scene` |
+| ✅ **M3-5 Confidence map + "needs attention" prioritization UI** | `adapters/render`, `core/scene` |
 | M3-6 Versioning / named snapshots / rollback | `core/scene`, `app` |
 | M3-7 Web export (three.js / R3F) | `adapters/export` |
 | **M3-8 Learned motion-prior smoothing (option)** — a learned denoiser/motion-prior as an alternative to moving-average, behind the existing `smoothing`/`refit` Correction seam. Leading candidates: **HTD-Refine**, **StableMotion** (purpose-built denoisers); MotionBricks = generative fallback | `adapters/models` ↔ `core/correction` |
@@ -504,6 +504,25 @@ gracefully and reconstruction proceeds on the mono view. **E2E proof:** `--ampli
 (`test_viewsynth_seamb.py`) — amplify cardinality/overlap, cache hit + param-distinct entries,
 inpaint per-subject routing, the AC-5b "consumed-by-reconstruction" assertions, and the R-8 gate;
 suite **503 passed / 12 skipped**, no GPU/diffusion (**AC-7**).
+
+**Progress — M3-5 confidence map + "needs attention" UI wired E2E (2026-06-27):** closes the
+**visual half of UX-4/FR-17**. The *ranking* (`core.scene.review.attention_list`) and the per-marker
+`confidence_to_color` ramp already existed; what was missing was **the picture the operator/LLM
+reads**. New `adapters/render/attention.py` (pure numpy + the stdlib PNG encoder — **no
+GPU/Blender, no font engine**) renders two panels: a dense **per-subject × per-frame confidence
+heatmap** (each row the team colour pulled toward warning-red as confidence drops; a ball-height
+row) and a ranked **"needs attention" bar chart** (most-urgent on top, bar length ∝ severity, hue ∝
+reason — red = low confidence, orange = high reprojection, gold = ball height). `render_attention_ui`
+composites both into the PNG the `SceneObserver` returns as the `UI` observation, so the agent
+*literally sees what to fix* (ADR-0008). **R-6 honesty:** a subject/scene with no measured
+confidence stays flat background — never a falsely-green "all good"; and meaning is carried by rank,
+length and hue, so it is **deterministic and pixel-testable** rather than relying on rendered text.
+`FakeSceneObserver.capture_ui` now writes the real panel (lazy-import, mirroring `capture_radar`);
+headless-with-no-scene still returns the flat placeholder. **E2E proof:** `--frames 6 --subjects 3`
+ran the golden path → the `ui` observation present, "Needs attention (2, highest first)", and a real
+`scene-1_ui.png` artifact written. **Tests:** 8 new (`test_attention_ui.py`) — heatmap red-pull +
+honest-background + ball row, panel rank/colour + all-clear bar, valid-PNG composite, observer
+wiring (bytes match the renderer) + headless placeholder; suite **511 passed / 12 skipped** (**AC-7**).
 
 ---
 
