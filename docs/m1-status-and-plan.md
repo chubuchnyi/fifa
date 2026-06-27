@@ -456,6 +456,28 @@ repo-wide lint sweep as a standalone change (high churn, zero functional value, 
     EXITED`, spend → $0.012/hr volume-only). **Honesty (R-6):** this validates the real single-cam →
     world-SMPL-X *articulation* path end-to-end on the real nets; metric world placement still needs a
     lined clip, and the photoreal avatar/env stay honest fakes (M2 gated).
+  - **Full GPU E2E → multi-angle video (post-M2-10) ✅ pod-validated 2026-06-27.** First video run
+    after pushing M2-10 (HEAD `74df699`): `OUT_LOCAL=out/anim_m210 bash scripts/demo_video.sh --clip
+    samples/video/Colombia-1-0-Congo-DR1080p.mp4 --frames 48 --real-calib`. Pod `zueopp6nzozxb7`
+    (RTX PRO 4500 Blackwell) resumed, ran **~21.5 min** (06:27→06:48 UTC ≈ **$0.27**), **auto-stopped**
+    (`EXITED`). Pipeline E2E: `ingested 1920×1080 @ 29.970fps, 48 frame(s)` → `reconstructed scene-1:
+    20 subject(s), ball=yes` → continuity `24→20 tracklets` → coherence `bridged 23 gap(s) / extended
+    85 edge frame(s) across 6/20 / +20 smoothing` → `corr-1` committed → seam-A orbit `overlap=0.85
+    editable=False` → export json; avatar/env are the honest M2 fakes. **Render genuinely on GPU:**
+    `device: cuda` + `BLENDER_ANIM_GPU OPTIX` → `BLENDER_ANIM_OK frames=48
+    cams=[broadcast,sideline,top,goal] 1280×720 32spp fps=25`, the one-time ~6 min OptiX kernel
+    compile on frame 1, all `frame_0047` saved per camera → **4 mp4 pulled → `out/anim_m210/video/`**
+    (broadcast verified 1280×720, 25fps, 48f, 1.92s). Eyeballed broadcast+top frames: ~20 colour-coded
+    SMPL-X bodies spread in 3D + ball; **no pitch line markings** (the `blender_animate` video path
+    uses a plain grass plane, *not* the M2-9 ribbon adapter). **Honesty (R-6):** reconstruction
+    **`done in 6s` = a content-addressed cache hit (ADR-0004)** — the perception nets (RF-DETR/
+    ByteTrack/SMPLest-X-H/WASB/PnLCalib) did **not** re-execute this run (continuity/coherence numbers
+    are identical to the 2026-06-24/25 runs); cached outputs on the pod volume were reused, so what
+    this run validates fresh is the **GPU OptiX video-render path**, not a new perception pass. `calib
+    confidence mean=0.95` here is the 48-frame in-sample self-score (the `0.61` in #103 was an 8-frame
+    subset — different sample, not GT accuracy); `ball height_confidence mean=0.25 min=0.00` with 8
+    `low_ball_height` attention items (R-6 marked). The M2-10 photoreal **adapter** (observe / seam-A
+    re-render / edit↔Cycles) is covered by unit+gated tests, not by this legacy `blender_animate` video.
 - Finish **Bug2** mypy debt; tighten the seams.
 - **B4** real Blender SCENE_3D observer (M2); progress toward the LLM-over-MCP north-star (ADR-0008).
 
