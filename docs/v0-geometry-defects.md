@@ -125,9 +125,27 @@ cameras, pitch lines). See `feedback_results_over_process` / `project_goal_defin
   (both penalty boxes, 6-yard boxes, centre circle + spot, penalty arcs, halfway line, touchlines) plus
   goal frames on the goal lines. The "specks on bare grass" defect is gone. #205 CLOSED.
 
+## D5 — Ball lands outside the pitch  (task #206, surfaced during v0 validation)
+- **Symptom:** the reconstructed ball sits **off the field** — well beyond the touchline and near/behind
+  the goal line, ~30 m away from the player cluster.
+- **Evidence (pod 48f run, `out/val/export/scene.json` → `BallTrack`):** `positions_3d` span
+  **Y −39.4 → −37.8 m** (touchline is ±34), **X −53.6 → −37.9** (goal line −52.5), **Z 0.0 → 3.0**;
+  player centroid (−33, −8) vs ball mean (−46, −38). `height_confidence` mean **0.25** (0.00 for many
+  frames = the `low_ball_height` warnings in the run log); `on_ground` **2/48**; `track_2d` v≈450–525 of
+  1080 (upper band of the frame), u sweeps 443→1650.
+- **Hypothesis (root):** monocular height ambiguity — an airborne (or false/edge) 2D ball detection is
+  un-projected onto the ground plane (z=0) via the homography, so it "shoots" past the real position to
+  beyond the pitch edge. The system flags this honestly (low `height_confidence`), rather than fabricating
+  a height. Code: `core/scene/field.py image_to_world` (ground-plane un-projection) + the ball lift in the
+  ball backend / `assemble`.
+- **Candidate fixes (diagnose locally first — `/tmp/val_scene.json`, no pod):** (a) pin ball to ground
+  (z = ball radius) when `height_confidence` is low; (b) gate/clamp detections that un-project outside
+  ±52.5 × ±34; (c) bias the ball toward the player cluster when 2D is ambiguous. Validate: ball positions
+  land inside the pitch and near the action.
+
 ---
 
-## Status / next — ALL FOUR CLOSED (v0 geometry ACHIEVED 2026-06-27)
+## Status / next — v0 PLAYER/PITCH geometry ACHIEVED 2026-06-27 (#202–#205); ball #206 OPEN
 - **#202 / D1 — CLOSED:** body count = **20** (`out/val/export/scene.json`), no swarm.
 - **#203 / D3 — CLOSED:** root spread **34 m (length) × 40 m (width)**, pelvis 0.69–1.01 m; real PnLCalib
   default; the fake-calib 22×7 m collapse is gone.

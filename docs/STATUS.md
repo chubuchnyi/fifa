@@ -58,11 +58,14 @@ cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body
 | #203 | Depth collapse / wrong world scale (players not spread across pitch) | **VALIDATED on pod ✓ (34×40 m spread)** | done | NOT the identity fallback: the default render used `--calibrator fake` = `FakeFieldCalibrator` (`adapters/fakes/perception.py:125`), a 30 m **top-down orthographic toy** `H` with NO perspective. Numeric proof: whole frame → 30×17 m world box; realistic feet → 22.7×7.3 m; the ~7 m y-axis is the "thin horizon" blob. Real PnLCalib was wired (`adapters/models/pnlcalib_backend.py`) but opt-in & OFF. | DONE + VALIDATED 2026-06-27: real PnLCalib is now the **default** render calib (`pod_real_e2e.sh` defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`; run echoed `calibration: REAL PnLCalib`). **Pod 48f scene.json root spread: X (length) 34.1 m, Y (width) 40.0 m, Z (pelvis) 0.69–1.01 m** — i.e. real-scale spread within the touchlines, NOT the fake-calib 22×7 m collapse; the ~7 m "thin horizon" is gone. Players cluster in one half (localized broadcast action), as expected. **Deepest root — also fixes #204.** |
 | #204 | Virtual cameras don't frame the action (players tiny at horizon) | **VALIDATED on pod ✓ (broadcast frames the pitch)** | done | the VIDEO render (`blender_animate.py`) derives its OWN cameras from `ctr`/`span` of the loaded geometry — NOT `viewpoints.py`/`controller.py` (those drive the *in-pipeline* render, a different path). With #203's collapsed 22×7 m blob + a bare plane, the cams framed empty grass. | DONE + VALIDATED 2026-06-27: #205 folds the FULL pitch bounds into `ctr`/`span` + #203 puts bodies on the field. **Pod render eye-check (`out/val/video/{broadcast,top}.mp4`): broadcast camera frames the whole pitch at a realistic oblique angle (players fill the action third, not a horizon speck); top camera frames the full 105×68 m.** No per-frame tracking camera needed for v0. |
 | #205 | Bare pitch (no lines / no goals) | **VALIDATED on pod ✓ (lines + goals render)** | done | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE + VALIDATED 2026-06-27: measured `goal_frame_geometry()` + `pitch_line_ribbons()` in pure core; `anim_export.py` writes `pitch.npz`, `blender_animate.py` builds `pitch_lines` + `goals`. **Pod 48f run: `anim_export` logged `pitch: 2848 line-tris + 72 goal-tris (105x68 m)`; render eye-check confirms full markings (boxes, circle, arcs, halfway) + goal frames on both views.** |
+| #206 | Ball lands OUTSIDE the pitch (surfaced during v0 validation) | **OPEN — newly found** | likely no (local diag) | monocular height ambiguity: an airborne ball un-projected on the ground plane (z=0) via the homography gets pushed beyond the pitch; possibly a false/edge WASB 2D detection. `field.py image_to_world` + ball lift in the ball backend / assemble. | Pod 48f `scene.json` ball: `positions_3d` Y≈−38 m (touchline ±34), X up to −53.6 (goal line −52.5), ~30 m from the player centroid (−33,−8); `height_confidence` mean 0.25 (0.00 for many = `low_ball_height`); `on_ground` 2/48; `track_2d` v≈450–525/1080. Candidate fixes: pin ball to ground (z=radius) when height-conf low; gate/clamp out-of-pitch detections; constrain near the player cluster. Diagnose locally on `/tmp/val_scene.json` first (no pod). |
 
-**Validation — DONE 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run, `out/val/`):** all four v0 defects
-validated end-to-end. #202 body count = **20** (scene.json); #203 root spread = **34×40 m** real-scale;
-#204 broadcast/top cameras frame the action; #205 pitch lines + goals render. Numbers from `scene.json`,
-eye-judged from `out/val/video/{broadcast,top}.mp4`. Pod STOPPED. **v0 = correct GEOMETRY: ACHIEVED.**
+**Validation — DONE 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run, `out/val/`):** the four v0 *player/
+pitch* defects validated end-to-end. #202 body count = **20** (scene.json); #203 root spread = **34×40 m**
+real-scale; #204 broadcast/top cameras frame the action; #205 pitch lines + goals render. Numbers from
+`scene.json`, eye-judged from `out/val/video/{broadcast,top}.mp4`. Pod STOPPED. **v0 player geometry:
+ACHIEVED.** ⚠️ Validation also **surfaced #206** — the ball lands outside the pitch (separate defect,
+diagnosable locally from `/tmp/val_scene.json`).
 
 ---
 
@@ -140,7 +143,11 @@ fabricate or silently hide.
   full markings + goal frames — CLOSED. Eye-judged from `out/val/video/{broadcast,top}.mp4` (local:
   `/tmp/val_video/`, scene `/tmp/val_scene.json`). Pod STOPPED ($0.012/hr storage only). All four v0
   tasks #202–#205 complete. **NEXT BAR → v1 (recognizability):** kit colours (teams already A/B), shirt
-  numbers, simple stadium.
+  numbers, simple stadium. ⚠️ Validation **surfaced #206**: the ball's `positions_3d` land OUTSIDE the
+  pitch (Y≈−38 m vs touchline ±34; X up to −53.6 vs goal line −52.5; ~30 m from players), with
+  `height_confidence` mean 0.25 / `on_ground` 2/48 — monocular height ambiguity (ground-plane
+  un-projection of an airborne/edge detection). Diagnosable locally from `/tmp/val_scene.json`; new task
+  #206.
 - **2026-06-27** — **#203 root found locally + fix landed (no pod needed for diagnosis).** Traced the
   depth collapse to the *calibrator*, not a degenerate homography: the default render path uses
   `--calibrator fake` (`cli.py` default) = `FakeFieldCalibrator`, a **top-down orthographic toy** with
