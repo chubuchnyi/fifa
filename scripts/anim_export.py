@@ -27,10 +27,12 @@ import numpy as np
 import smplx
 import torch
 
+from pitch3d.adapters.io.frames import resolve_source_path
 from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
+from pitch3d.core.scene.stadium import fill_holes_by_copy, stadium_bowl_geometry
 from pitch3d.env import load_env
 
 load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, never hard-coded
@@ -56,7 +58,8 @@ os.makedirs(OUT, exist_ok=True)
 # globbed by blender_animate.py — rendering a phantom body this scene never had. Purge the
 # per-subject + ball artifacts up front so the mesh dir reflects EXACTLY this scene.
 for _stale in glob.glob(os.path.join(OUT, "anim_subject_*.npz")) + [
-    os.path.join(OUT, "ball.npz"), os.path.join(OUT, "pitch.npz")
+    os.path.join(OUT, "ball.npz"), os.path.join(OUT, "pitch.npz"),
+    os.path.join(OUT, "stadium.npz")
 ]:
     if os.path.exists(_stale):
         os.remove(_stale)
@@ -185,5 +188,30 @@ print(
     f"pitch: {_pf.shape[0]} line-tris + {_gf.shape[0]} goal-tris "
     f"({_dims.length:g}x{_dims.width:g} m) -> {os.path.basename(pdst)}"
 )
+
+# Hybrid stadium backdrop (M2 stadium): a procedural seating bowl around the pitch given REAL
+# appearance by projecting THIS clip onto it through the solved camera, then copy-filling the stands
+# the camera never saw (its own near side). Gated on PITCH3D_STADIUM_VIDEO (the source clip) — with
+# no clip we cannot measure crowd colour, so the renderer omits the bowl rather than inventing one.
+STADIUM_VIDEO = os.environ.get("PITCH3D_STADIUM_VIDEO", "")
+if STADIUM_VIDEO and os.path.exists(resolve_source_path(STADIUM_VIDEO)):
+    from pitch3d.adapters.render.stadium_backdrop import bake_backdrop_colors
+
+    _sv, _sf, _sp = stadium_bowl_geometry(_dims)
+    _scolors, _scov = bake_backdrop_colors(scene.camera, _sv, STADIUM_VIDEO)
+    _sfilled, _ = fill_holes_by_copy(_sv, _scolors, _scov)
+    sdst = os.path.join(OUT, "stadium.npz")
+    np.savez(
+        sdst,
+        verts=_sv.astype(np.float32),
+        faces=_sf.astype(np.int32),
+        colors=_sfilled.astype(np.float32),
+    )
+    print(
+        f"stadium: {_sv.shape[0]} verts {_sf.shape[0]} tris; covered "
+        f"{int(_scov.sum())}/{_scov.size} ({_scov.mean() * 100:.0f}%) -> {os.path.basename(sdst)}"
+    )
+else:
+    print("stadium: PITCH3D_STADIUM_VIDEO unset/missing (skipping stadium.npz)")
 
 print(f"ANIM_EXPORT_OK ({len(scene.subjects)} subjects -> {OUT})")

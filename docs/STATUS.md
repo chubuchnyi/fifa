@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-06-27 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-06-28 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -19,8 +19,8 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v1 (recognizability)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). **Shirt numbers DONE** (plate-on-back; 4/20 read, rest honestly blank). Remaining v1: simple stadium.
-- **NEXT ACTION:** **v1 step 2 DONE — shirt numbers as a plate on the back** (validated locally, no pod). Generic easyocr yields ≈0 on this clip's ~20-30px back digits (measured), so numbers were read manually from upscaled back-crops and only the **high-confidence** ones assigned: #10 (t1) + #25 (t5) Colombia/yellow, #20 (t8) + #12 (t17) Congo/blue; the other 16 backs were illegible in this 48-frame window → left `None` (R-6: mark, don't fabricate). Render path: `anim_export.py` bakes a per-frame upper-back anchor + posterior normal + contrast colour into each npz; `blender_animate.py` places a centred FONT plate per frame (dark-on-yellow / white-on-blue) and an "action" camera that frames just the players. Eye-checked via close-ups `/tmp/num_closeup/closeup_t{1,8}.png` (10/20 upright, unmirrored, proud of the back). **UV-texture jersey deferred to v2.** **NEXT v1 sub-task → simple stadium** — scope with the user before starting.
+- **Current focus:** **v1 (recognizability) COMPLETE (2026-06-28)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). **Shirt numbers DONE** (plate-on-back; 4/20 read, rest honestly blank). **Stadium DONE** (hybrid procedural bowl + measured crowd projection + copy-filled holes). **Next stage: v2 (photoreal).**
+- **NEXT ACTION:** **v1 COMPLETE — stadium step DONE** (validated locally, no pod). Hybrid: a procedural seating **bowl** ringing the pitch wears crowd colour **measured** by projecting the clip onto it through the solved camera; stands the camera never saw are **copy-filled** from their mirror. Core `core/scene/stadium.py` (geometry + fill, 8 tests), adapter `adapters/render/stadium_backdrop.py` (median bake), wired through `anim_export.py` (`stadium.npz`, gated on `PITCH3D_STADIUM_VIDEO`) → `blender_animate.py` (emission vertex-coloured bowl). **KEY FINDING:** the solved broadcast camera is **rolled 180° vs the raw video** (whole reconstruction consistent in that rolled frame; bake auto-detects & rotates the frame before sampling — see §6). E2E rendered broadcast/goal/sideline/action — reads as the Colombia crowd around the pitch (`/tmp/val_frames_stadium/*`). **NEXT STAGE → v2 (photoreal): textured/Gaussian avatars + photoreal stadium + view-synth — scope with the user before starting.**
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -42,7 +42,8 @@ the stadium is realistic and the same as the source. **Judged by eye.**
 - [ ] **v1 — recognizability (CURRENT FOCUS).** [x] Team **kit colours** — measured from torso pixels;
   split repaired 19/1 → **10/10**; A=yellow, B=light-blue (validated 2026-06-27, see §6). [x] shirt
   **numbers** — plate-on-back; 4/20 read (OCR≈0 at this resolution → manual high-conf read), rest
-  honestly blank (validated 2026-06-28, see §6). [ ] simple stadium backdrop.
+  honestly blank (validated 2026-06-28, see §6). [x] **stadium backdrop** — hybrid procedural bowl +
+  measured crowd projection + copy-filled holes (validated 2026-06-28, see §6). **v1 COMPLETE.**
 - [ ] **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
   `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
 
@@ -130,10 +131,53 @@ fabricate or silently hide.
 - **Render / pitch / goals (#205):** `src/pitch3d/adapters/blender/_cycles_script.py` (`_add_ground`,
   `_build_pitch`), `src/pitch3d/adapters/render/cycles.py` (`draw_pitch`), `src/pitch3d/core/scene/pitch.py`
   (markings). Goals: add a `_build_goals()` mesh (absent today).
+- **Hybrid stadium backdrop (v1 step 3):** `src/pitch3d/core/scene/stadium.py` (`stadium_bowl_geometry`,
+  `fill_holes_by_copy`, `_rounded_rect_loop` — pure numpy), `src/pitch3d/adapters/render/stadium_backdrop.py`
+  (`bake_backdrop_colors` — projective median bake; auto-rotates each frame 180° to match the solved
+  camera's rolled pixel convention), `tests/unit/test_stadium_geometry.py` (8 tests). Wired through
+  `scripts/anim_export.py` (`PITCH3D_STADIUM_VIDEO` → `stadium.npz`) and `scripts/blender_animate.py`
+  (`_add_vertex_colored_mesh` — emission-driven vertex colours so the crowd renders at clip brightness).
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v1 step 3 LANDED: hybrid stadium backdrop (procedural bowl + measured crowd).**
+  Third/last v1 sub-task → **v1 recognizability COMPLETE.** Approach (agreed w/ user): "гибрид A + B,
+  дыры дорисовываем копируя с имеющегося" = a procedural seating **bowl** ringing the pitch, given
+  REAL appearance by projecting THIS clip onto its vertices through the solved camera, then
+  **copy-filling** the stands the camera never saw (its own near side) from their long-axis mirror.
+  **Mechanism:** pure-core `core/scene/stadium.py` — `stadium_bowl_geometry` (rounded-rect footprint
+  `apron` m outside the touchlines, swept up+out through raked tiers; each vertex carries
+  `(angle_frac, height_frac)`) + `fill_holes_by_copy` (uncovered vertex ← covered vertex nearest its
+  `(x,−y,z)` mirror, fallback nearest covered). Adapter `adapters/render/stadium_backdrop.py` —
+  `bake_backdrop_colors` projects every bowl vertex per frame and takes the per-vertex **median**
+  RGB over the frames it was visible (median rejects a player/ball crossing a low vertex).
+  `anim_export.py` builds+bakes+fills and writes `stadium.npz {verts,faces,colors}` (gated on
+  `PITCH3D_STADIUM_VIDEO`); `blender_animate.py` loads it as a **vertex-coloured, emission** bowl
+  (crowd renders at its measured brightness, lighting-independent) deliberately **excluded from the
+  camera-framing bbox** (else it zooms every cam out until players are specks).
+  **KEY FINDING (R-6, non-obvious): the solved broadcast camera is rolled 180° relative to the RAW
+  decoded video.** The pitch model, the SMPL-X bodies AND the bowl all project onto the frame turned
+  **upside down**, not as decoded — verified three ways: (a) overlaying projected pitch lines, (b)
+  body root positions, and (c) bowl far-stand all land on the real features only in the rot-180 frame;
+  (d) far +Y stand sampled **100 % green (pitch)** from the upright frame but **6 % green (94 % crowd)**
+  from rot-180. The camera's image axes read `+u=world−X`, `+v=world+up` (image-up · world-up < 0).
+  The whole reconstruction is **internally consistent** in that rolled frame, so nothing else needs
+  changing — but the bake is the one place that samples raw video, so `bake_backdrop_colors`
+  **auto-detects** the roll (`−R[1][2] < 0`) and rotates each decoded frame 180° before sampling.
+  Any FUTURE raw-video consumer (validation overlays, jersey texturing) must do the same.
+  **Validation:** 8 geometry unit tests pass (`tests/unit/test_stadium_geometry.py`); bake on the clip
+  = **48 % covered** (far +Y sideline + ends seen, near −Y side the predicted hole → mirror-filled, 0
+  black left); E2E rendered (`anim_export → stadium.npz → blender_animate`) from broadcast / goal /
+  sideline / action cams — the bowl reads clearly as the **Colombia (yellow/red) crowd** wrapping the
+  pitch, players composed in front (`/tmp/val_frames_stadium/*`, `/tmp/val_frames_action/*`). **Known
+  v1 limitation:** the lowest far-stand rows sample the LED ad boards + grass margin (a light band at
+  the foot of the stand) — that is genuinely what the camera saw there; clipping the bottom rows or a
+  taller/steeper bowl is v1-polish/v2. Changed: `core/scene/stadium.py` (NEW), `tests/unit/
+  test_stadium_geometry.py` (NEW), `adapters/render/stadium_backdrop.py` (NEW), `scripts/anim_export.py`,
+  `scripts/blender_animate.py`. ruff+mypy clean on the new core/adapter; scripts ruff-clean (pre-existing
+  blender_animate I001/E501 + anim_export numbers-block mypy left untouched). **v1 DONE → next is v2.**
 
 - **2026-06-28** — **v1 step 2 LANDED: shirt numbers as a plate on the back.** Second v1 sub-task.
   **OCR reality (measured, R-6):** generic `easyocr` yields ≈0 on this clip's back-of-jersey digits

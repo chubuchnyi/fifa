@@ -213,6 +213,42 @@ def _add_static_mesh(name, verts, faces, rgb, roughness):
     return ob
 
 
+def _add_vertex_colored_mesh(name, verts, faces, colors, *, emission_strength=1.0):
+    """Build a static mesh whose appearance is a per-vertex colour attribute — the measured stadium
+    bowl. The colour drives *emission* (base colour black) so the crowd renders at the brightness it
+    had in the clip, independent of the novel-view key light: a far backdrop should not pick up our
+    one sun's direction. Falls back to a lit base colour on pre-4.x Blenders with no emission input.
+    """
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(
+        np.asarray(verts, dtype=float).tolist(), [], np.asarray(faces, dtype=int).tolist()
+    )
+    me.update()
+    for poly in me.polygons:
+        poly.use_smooth = True
+    col = np.asarray(colors, dtype=np.float32).reshape(-1, 3)
+    rgba = np.concatenate([col, np.ones((col.shape[0], 1), np.float32)], axis=1)
+    attr = me.color_attributes.new(name="Col", type="FLOAT_COLOR", domain="POINT")
+    attr.data.foreach_set("color", rgba.ravel())
+    ob = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(ob)
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    bsdf.inputs["Roughness"].default_value = 1.0
+    vc = nt.nodes.new("ShaderNodeVertexColor")
+    vc.layer_name = "Col"
+    if "Emission Color" in bsdf.inputs:
+        bsdf.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+        nt.links.new(vc.outputs["Color"], bsdf.inputs["Emission Color"])
+        bsdf.inputs["Emission Strength"].default_value = emission_strength
+    else:
+        nt.links.new(vc.outputs["Color"], bsdf.inputs["Base Color"])
+    me.materials.append(mat)
+    return ob
+
+
 # Measured pitch lines (white) + goal frames (off-white) — the geometric reference that makes
 # placement judgeable by eye (#205). Nothing drawn if anim_export wrote no pitch.npz (older runs).
 if pitch_npz is not None:
@@ -222,6 +258,14 @@ if pitch_npz is not None:
     if np.asarray(pitch_npz["goal_faces"]).size:
         _add_static_mesh("goals", pitch_npz["goal_verts"], pitch_npz["goal_faces"],
                          (0.95, 0.95, 0.95), 0.35)
+
+# Hybrid stadium bowl (M2 stadium): a procedural seating bowl wearing crowd colour measured from the
+# clip (anim_export.py's stadium.npz). Deliberately NOT folded into the lo/hi framing above — it rings
+# the pitch, so letting it drive ctr/span would zoom every camera out until the players were specks.
+stadium_path = os.path.join(IN, "stadium.npz")
+if os.path.exists(stadium_path):
+    sd = np.load(stadium_path)
+    _add_vertex_colored_mesh("stadium", sd["verts"], sd["faces"], sd["colors"])
 
 bpy.ops.object.light_add(type="SUN", location=(ctr[0] + 8, ctr[1] - 8, 30))
 bpy.context.active_object.data.energy = 4.0
