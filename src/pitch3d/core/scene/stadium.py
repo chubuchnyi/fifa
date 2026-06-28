@@ -132,6 +132,42 @@ def stadium_bowl_geometry(
     return verts, np.asarray(faces, dtype=int), param
 
 
+def bowl_tile_loop_uvs(
+    faces: np.ndarray, param: np.ndarray, *, repeat_around: float, repeat_up: float
+) -> np.ndarray:
+    """Per-loop UVs that tile a crowd patch over the bowl: ``(3F, 2)`` float, a row per face-corner.
+
+    The mosaic backdrop wears a small measured crowd image repeated over the stands rather than one
+    stretched pixel per vertex, so the bowl needs UVs. The ``(angle_frac, height_frac)`` param is
+    already a clean unwrap — ``u`` walks the loop, ``v`` runs base to top — we just scale it by how
+    many tile copies to lay down: ``u`` in ``[0, repeat_around]``, ``v`` in ``[0, repeat_up]``.
+
+    UVs are emitted **per loop** (in the exact corner order of ``faces``, so a renderer can
+    ``foreach_set`` them directly) to fix the wrap seam: the one face-column bridging ``angle_frac``
+    1 back to 0 would otherwise run the texture backwards. We detect those faces (corner columns
+    span >1 step) and lift the low column by a full turn so ``u`` stays monotonic across them.
+    Tile counts (``repeat_*``) derive back to the integer grid from ``param`` alone, so this never
+    drifts from :func:`stadium_bowl_geometry`.
+    """
+    faces = np.asarray(faces, dtype=int)
+    param = np.asarray(param, dtype=float)
+    n_around = int(np.unique(param[:, 0]).size)  # angle_frac = i / n_around: one value per column
+    rows = int(np.unique(param[:, 1]).size) - 1  # height_frac = r / rows: nrows = rows + 1 values
+    cols = np.rint(param[:, 0] * n_around).astype(int)  # per-vertex column index 0..n_around-1
+    rws = np.rint(param[:, 1] * rows).astype(int)        # per-vertex row index 0..rows
+
+    fcols = cols[faces]  # (F, 3) corner columns
+    frws = rws[faces]    # (F, 3) corner rows
+    mins = fcols.min(axis=1, keepdims=True)
+    wrap = (fcols.max(axis=1, keepdims=True) - mins) > 1  # a face straddling the angle wrap seam
+    eff = fcols.astype(float)
+    eff[(fcols == mins) & wrap] += n_around  # lift the low column a full turn so u stays monotonic
+
+    u = eff / n_around * repeat_around
+    v = frws.astype(float) / rows * repeat_up
+    return np.stack([u, v], axis=-1).reshape(-1, 2).astype(np.float32)
+
+
 def fill_holes_by_copy(
     verts: np.ndarray, colors: np.ndarray, covered: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:

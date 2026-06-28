@@ -131,16 +131,40 @@ fabricate or silently hide.
 - **Render / pitch / goals (#205):** `src/pitch3d/adapters/blender/_cycles_script.py` (`_add_ground`,
   `_build_pitch`), `src/pitch3d/adapters/render/cycles.py` (`draw_pitch`), `src/pitch3d/core/scene/pitch.py`
   (markings). Goals: add a `_build_goals()` mesh (absent today).
-- **Hybrid stadium backdrop (v1 step 3):** `src/pitch3d/core/scene/stadium.py` (`stadium_bowl_geometry`,
-  `fill_holes_by_copy`, `_rounded_rect_loop` — pure numpy), `src/pitch3d/adapters/render/stadium_backdrop.py`
-  (`bake_backdrop_colors` — projective median bake; auto-rotates each frame 180° to match the solved
-  camera's rolled pixel convention), `tests/unit/test_stadium_geometry.py` (8 tests). Wired through
-  `scripts/anim_export.py` (`PITCH3D_STADIUM_VIDEO` → `stadium.npz`) and `scripts/blender_animate.py`
-  (`_add_vertex_colored_mesh` — emission-driven vertex colours so the crowd renders at clip brightness).
+- **Hybrid stadium backdrop (v1 step 3) + tinted mosaic (v1 polish):** `src/pitch3d/core/scene/stadium.py`
+  (`stadium_bowl_geometry`, `fill_holes_by_copy`, `bowl_tile_loop_uvs` — per-loop wrap-safe tile UVs,
+  `_rounded_rect_loop` — pure numpy), `src/pitch3d/adapters/render/stadium_backdrop.py` (`bake_backdrop_colors`
+  — projective median bake = the per-vertex **tint**; `extract_crowd_tile` + `_busiest_window` — cut one clean
+  crowd patch by edge-**density**; both auto-rotate each frame 180° to match the solved camera's rolled pixel
+  convention), `tests/unit/test_stadium_geometry.py` (9 tests). Wired through `scripts/anim_export.py`
+  (`PITCH3D_STADIUM_VIDEO` → `stadium.npz {verts,faces,colors,uv,tile}`) and `scripts/blender_animate.py`
+  (`_add_stadium_mesh` — unit-mean tile image × vertex-colour tint → emission, mirror-tiled, so the crowd
+  renders as repeated real spectators tinted by the measured regional colour).
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v1 polish: tinted crowd MOSAIC (replaces the stretched per-vertex bake).** User ask:
+  «вырезать именно трибуны и выстелать мозаикой, а не растягивать» → «тонированную мозаику». The median bake
+  stretched ONE pixel per vertex, so the crowd read blurry. Now the bowl wears a **real crowd tile** repeated
+  over it (high-frequency detail) **multiplied by** the per-vertex measured median (low-frequency regional
+  **tint**) — each stand keeps its true colour but gains real spectator texture.
+  **Mechanism:** (core) `bowl_tile_loop_uvs` turns the bowl's own `(angle_frac, height_frac)` param into
+  per-loop tile UVs (× `repeat_around` / `repeat_up`), with a wrap-seam fix that lifts the one face-column
+  bridging angle 1→0 so u never runs backwards. (adapter) `extract_crowd_tile` cuts one clean patch: pick the
+  frame seeing the most mid-band covered verts, crop a robust percentile bbox, then `_busiest_window` shrinks
+  to the most edge-**DENSE** sub-rect — crowd is uniformly busy (thousands of small edges) while the LED /
+  FIFA signage / scoreboard panels are flat with only sparse high-energy text, so density (not energy) drops
+  the signage. (blender) `_add_stadium_mesh` normalises the tile to **unit mean** (a neutral detail map) and
+  multiplies it by the vertex-colour tint into Emission, `extension="MIRROR"` to hide repeat seams.
+  **Validation:** 9 geometry tests pass (added `test_tile_uvs_are_per_loop_and_seam_free`); extracted tile =
+  packed Colombia crowd, dominant **yellow** = real fan colours, **no signage** (`/tmp/crowd_tile_a.png`);
+  E2E re-export `stadium.npz {verts,faces,colors,uv,tile}` (tile 429×144, 48 % covered) → broadcast + goal
+  rendered: the bowl now reads as **textured spectators** wrapping the pitch, clearly sharper than the blur
+  (`/tmp/val_frames_mosaic/*`). No tuning needed (repeat_around=40, repeat_up=4). Changed: `core/scene/stadium.py`,
+  `tests/unit/test_stadium_geometry.py`, `adapters/render/stadium_backdrop.py`, `scripts/anim_export.py`,
+  `scripts/blender_animate.py`. ruff+mypy clean on new core/adapter; scripts ruff-clean (pre-existing items left).
 
 - **2026-06-28** — **v1 step 3 LANDED: hybrid stadium backdrop (procedural bowl + measured crowd).**
   Third/last v1 sub-task → **v1 recognizability COMPLETE.** Approach (agreed w/ user): "гибрид A + B,

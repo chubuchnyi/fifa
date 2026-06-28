@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from pitch3d.core.scene.stadium import fill_holes_by_copy, stadium_bowl_geometry
+from pitch3d.core.scene.stadium import (
+    bowl_tile_loop_uvs,
+    fill_holes_by_copy,
+    stadium_bowl_geometry,
+)
 from pitch3d.core.scene.units import FieldDimensions
 
 
@@ -88,6 +92,23 @@ def test_hole_fill_is_noop_when_all_or_none_covered():
         filled, src = fill_holes_by_copy(verts, colors, covered)
         np.testing.assert_array_equal(filled, colors)
         np.testing.assert_array_equal(src, np.arange(verts.shape[0]))
+
+
+def test_tile_uvs_are_per_loop_and_seam_free():
+    n_around, rows = 240, 20
+    verts, faces, param = stadium_bowl_geometry(n_around=n_around, rows=rows)
+    repeat_around, repeat_up = 40.0, 2.0
+    uv = bowl_tile_loop_uvs(faces, param, repeat_around=repeat_around, repeat_up=repeat_up)
+    # One UV per face-corner, in face order, ready for a renderer's per-loop foreach_set.
+    assert uv.shape == (faces.shape[0] * 3, 2)
+    # u spans a full lap of tiles, v the rake; both stay within the requested repeat counts.
+    np.testing.assert_allclose([uv[:, 0].min(), uv[:, 0].max()], [0.0, repeat_around], atol=1e-5)
+    np.testing.assert_allclose([uv[:, 1].min(), uv[:, 1].max()], [0.0, repeat_up], atol=1e-5)
+    # No face runs the texture backwards: within every triangle u jumps at most one tile-step, so
+    # the wrap column (angle_frac 1 back to 0) was lifted a full turn, not snapped back to zero.
+    per_face_u = uv[:, 0].reshape(-1, 3)
+    step = repeat_around / n_around
+    assert float((per_face_u.max(axis=1) - per_face_u.min(axis=1)).max()) <= step + 1e-5
 
 
 def test_bowl_is_four_fold_symmetric():

@@ -213,11 +213,16 @@ def _add_static_mesh(name, verts, faces, rgb, roughness):
     return ob
 
 
-def _add_vertex_colored_mesh(name, verts, faces, colors, *, emission_strength=1.0):
-    """Build a static mesh whose appearance is a per-vertex colour attribute — the measured stadium
-    bowl. The colour drives *emission* (base colour black) so the crowd renders at the brightness it
-    had in the clip, independent of the novel-view key light: a far backdrop should not pick up our
-    one sun's direction. Falls back to a lit base colour on pre-4.x Blenders with no emission input.
+def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, emission_strength=1.0):
+    """Build the stadium bowl as a *tinted mosaic*: a crowd image (``tile``) tiled over the bowl by
+    per-loop ``uv`` and modulated by the per-vertex measured colour (``tint``). Their product drives
+    *emission* (base colour black) so the crowd renders at its clip brightness, not lit by the
+    novel-view sun — a far backdrop shouldn't pick up our one key light's direction.
+
+    The tile is normalised to unit mean, turning it into a pure detail map, so ``tint`` sets each
+    stand's real colour (its regional yellow/red) while the tile only carries crowd texture; that
+    keeps the multiply from double-darkening or distorting hue. Falls back to flat vertex colour if
+    no tile/uv is given (older exports) or the Blender build predates the emission input.
     """
     me = bpy.data.meshes.new(name)
     me.from_pydata(
@@ -226,10 +231,16 @@ def _add_vertex_colored_mesh(name, verts, faces, colors, *, emission_strength=1.
     me.update()
     for poly in me.polygons:
         poly.use_smooth = True
-    col = np.asarray(colors, dtype=np.float32).reshape(-1, 3)
-    rgba = np.concatenate([col, np.ones((col.shape[0], 1), np.float32)], axis=1)
+    tcol = np.asarray(tint, dtype=np.float32).reshape(-1, 3)
+    rgba = np.concatenate([tcol, np.ones((tcol.shape[0], 1), np.float32)], axis=1)
     attr = me.color_attributes.new(name="Col", type="FLOAT_COLOR", domain="POINT")
     attr.data.foreach_set("color", rgba.ravel())
+
+    have_tex = uv is not None and tile is not None
+    if have_tex:
+        uvw = np.asarray(uv, dtype=np.float32).reshape(-1, 2)
+        me.uv_layers.new(name="UVMap").data.foreach_set("uv", uvw.ravel())
+
     ob = bpy.data.objects.new(name, me)
     bpy.context.collection.objects.link(ob)
     mat = bpy.data.materials.new(name)
@@ -239,10 +250,34 @@ def _add_vertex_colored_mesh(name, verts, faces, colors, *, emission_strength=1.
     bsdf.inputs["Roughness"].default_value = 1.0
     vc = nt.nodes.new("ShaderNodeVertexColor")
     vc.layer_name = "Col"
-    if "Emission Color" in bsdf.inputs:
+    emissive = "Emission Color" in bsdf.inputs
+    if emissive:
         bsdf.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
-        nt.links.new(vc.outputs["Color"], bsdf.inputs["Emission Color"])
         bsdf.inputs["Emission Strength"].default_value = emission_strength
+
+    if have_tex and emissive:
+        til = np.asarray(tile, dtype=np.float32)
+        mean = np.clip(til.reshape(-1, 3).mean(axis=0), 1e-3, None)
+        norm = (til / mean)[::-1]  # unit-mean detail map; flip to Blender's bottom-left origin
+        hh, ww = norm.shape[:2]
+        img = bpy.data.images.new(name + "_tile", width=ww, height=hh, float_buffer=True)
+        img.colorspace_settings.name = "Non-Color"  # raw values, matching the linear vertex tint
+        alpha = np.ones((hh, ww, 1), np.float32)
+        img.pixels.foreach_set(np.concatenate([norm, alpha], axis=2).ravel())
+        img.pack()
+        uvmap = nt.nodes.new("ShaderNodeUVMap")
+        uvmap.uv_map = "UVMap"
+        tex = nt.nodes.new("ShaderNodeTexImage")
+        tex.image = img
+        tex.extension = "MIRROR"  # reflect at tile edges so the repeat seams disappear
+        nt.links.new(uvmap.outputs["UV"], tex.inputs["Vector"])
+        mul = nt.nodes.new("ShaderNodeVectorMath")
+        mul.operation = "MULTIPLY"
+        nt.links.new(tex.outputs["Color"], mul.inputs[0])
+        nt.links.new(vc.outputs["Color"], mul.inputs[1])
+        nt.links.new(mul.outputs["Vector"], bsdf.inputs["Emission Color"])
+    elif emissive:
+        nt.links.new(vc.outputs["Color"], bsdf.inputs["Emission Color"])
     else:
         nt.links.new(vc.outputs["Color"], bsdf.inputs["Base Color"])
     me.materials.append(mat)
@@ -259,13 +294,17 @@ if pitch_npz is not None:
         _add_static_mesh("goals", pitch_npz["goal_verts"], pitch_npz["goal_faces"],
                          (0.95, 0.95, 0.95), 0.35)
 
-# Hybrid stadium bowl (M2 stadium): a procedural seating bowl wearing crowd colour measured from the
-# clip (anim_export.py's stadium.npz). Deliberately NOT folded into the lo/hi framing above — it rings
-# the pitch, so letting it drive ctr/span would zoom every camera out until the players were specks.
+# Hybrid stadium bowl (M2 stadium): a procedural seating bowl wearing a tinted crowd mosaic measured
+# from the clip (anim_export.py's stadium.npz). Deliberately NOT folded into the lo/hi framing:
+# it rings the pitch, so driving ctr/span off it would zoom every camera out until players are dots.
 stadium_path = os.path.join(IN, "stadium.npz")
 if os.path.exists(stadium_path):
     sd = np.load(stadium_path)
-    _add_vertex_colored_mesh("stadium", sd["verts"], sd["faces"], sd["colors"])
+    _add_stadium_mesh(
+        "stadium", sd["verts"], sd["faces"], sd["colors"],
+        uv=sd["uv"] if "uv" in sd.files else None,
+        tile=sd["tile"] if "tile" in sd.files else None,
+    )
 
 bpy.ops.object.light_add(type="SUN", location=(ctr[0] + 8, ctr[1] - 8, 30))
 bpy.context.active_object.data.energy = 4.0

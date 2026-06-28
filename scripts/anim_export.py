@@ -32,7 +32,11 @@ from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
-from pitch3d.core.scene.stadium import fill_holes_by_copy, stadium_bowl_geometry
+from pitch3d.core.scene.stadium import (
+    bowl_tile_loop_uvs,
+    fill_holes_by_copy,
+    stadium_bowl_geometry,
+)
 from pitch3d.env import load_env
 
 load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, never hard-coded
@@ -190,26 +194,37 @@ print(
 )
 
 # Hybrid stadium backdrop (M2 stadium): a procedural seating bowl around the pitch given REAL
-# appearance by projecting THIS clip onto it through the solved camera, then copy-filling the stands
-# the camera never saw (its own near side). Gated on PITCH3D_STADIUM_VIDEO (the source clip) — with
-# no clip we cannot measure crowd colour, so the renderer omits the bowl rather than inventing one.
+# appearance from THIS clip — a *tinted mosaic*. A clean crowd patch cut from the broadcast tiles
+# over the bowl (so spectators stay crisp instead of one stretched pixel per vertex), modulated by
+# the per-vertex median colour the camera measured (so each stand keeps its real tint and the near
+# side it never saw is copy-filled from its mirror). Gated on PITCH3D_STADIUM_VIDEO (the source
+# clip): with no clip we cannot measure crowd colour, so the renderer omits the bowl, not invent it.
+STADIUM_REPEAT_AROUND = 40.0  # crowd-tile copies laid around the loop (mirror-tiled in Blender)
+STADIUM_REPEAT_UP = 4.0       # copies up the rake; broadcast crowd band is short, so tile upward
 STADIUM_VIDEO = os.environ.get("PITCH3D_STADIUM_VIDEO", "")
 if STADIUM_VIDEO and os.path.exists(resolve_source_path(STADIUM_VIDEO)):
-    from pitch3d.adapters.render.stadium_backdrop import bake_backdrop_colors
+    from pitch3d.adapters.render.stadium_backdrop import bake_backdrop_colors, extract_crowd_tile
 
     _sv, _sf, _sp = stadium_bowl_geometry(_dims)
     _scolors, _scov = bake_backdrop_colors(scene.camera, _sv, STADIUM_VIDEO)
     _sfilled, _ = fill_holes_by_copy(_sv, _scolors, _scov)
+    _stile = extract_crowd_tile(scene.camera, _sv, _sp, _scov, STADIUM_VIDEO)
+    _suv = bowl_tile_loop_uvs(
+        _sf, _sp, repeat_around=STADIUM_REPEAT_AROUND, repeat_up=STADIUM_REPEAT_UP
+    )
     sdst = os.path.join(OUT, "stadium.npz")
     np.savez(
         sdst,
         verts=_sv.astype(np.float32),
         faces=_sf.astype(np.int32),
         colors=_sfilled.astype(np.float32),
+        uv=_suv.astype(np.float32),
+        tile=_stile.astype(np.float32),
     )
     print(
         f"stadium: {_sv.shape[0]} verts {_sf.shape[0]} tris; covered "
-        f"{int(_scov.sum())}/{_scov.size} ({_scov.mean() * 100:.0f}%) -> {os.path.basename(sdst)}"
+        f"{int(_scov.sum())}/{_scov.size} ({_scov.mean() * 100:.0f}%); "
+        f"tile {_stile.shape[1]}x{_stile.shape[0]} -> {os.path.basename(sdst)}"
     )
 else:
     print("stadium: PITCH3D_STADIUM_VIDEO unset/missing (skipping stadium.npz)")
