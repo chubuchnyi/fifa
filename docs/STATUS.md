@@ -19,14 +19,14 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Lever 1 (measured per-vertex body texture) DONE** — validated by eye (readable "10" on cream Colombia kit, blue Congo, no black artifacts). **Levers 2 (grass-PBR, the "B" refactor) + 3 (sun-from-clip) pending.**
-- **NEXT ACTION:** **v2 lever 2 — grass PBR via a shared `adapters/blender/scene_builders.py`** (the "B"
-  refactor). Extract the pure-Blender grass node-graph (mowing stripes + bump, from `_cycles_script.py`
-  `_grass_material`) into ONE pitch3d-free module both Blender scripts import via a `sys.path` shim; replace
-  the flat green plane in `blender_animate.py`; keep `_cycles_script.py`'s gated render passing; E2E
-  re-render + eye-check; STATUS + commit (standing-authorized, NO push). Then lever 3 (sun-from-clip).
-  **Lever 1 (measured body texture) DONE & validated** — see §6 top. **180°-roll** still bites any raw-pixel
-  consumer (auto-detect `-rot[1][2]<0` + rotate before sampling).
+- **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture) + 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) DONE & eye-validated. Lever 3 (sun-from-clip) pending.**
+- **NEXT ACTION:** **v2 lever 3 — sun-from-clip.** Estimate the sun azimuth/elevation/colour from the source
+  clip **upstream** (a pitch3d adapter under the venv — e.g. from shadow direction / sky-vs-grass white
+  balance), pass via data (plan/npz), and build a matched **sky + sun** in BOTH render scripts from shared
+  builders added to `adapters/blender/scene_builders.py` (port `_cycles_script`'s `_build_world` Nishita sky +
+  `_add_sun`). E2E re-render + eye-check the lighting matches the clip; STATUS + commit (standing-authorized,
+  NO push). **Levers 1 (body texture) + 2 (grass PBR, the "B" refactor) DONE & validated** — see §6 top.
+  **180°-roll** still bites any raw-pixel consumer (auto-detect `-rot[1][2]<0` + rotate before sampling).
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -53,10 +53,11 @@ the stadium is realistic and the same as the source. **Judged by eye.**
 - [ ] **v2 — photoreal (CURRENT FOCUS, started 2026-06-28).** Plan «A через B, 1→2→3, свет из клипа»:
   port the photoreal levers into the *deliverable video* path, sharing the two self-contained Blender
   scripts at the **data/contract layer**. [x] **Lever 1 — measured per-vertex body texture** (real broadcast
-  pixels → posed SMPL-X → vertex colour; unseen → kit colour; validated, see §6). [ ] **Lever 2 — grass PBR**
-  via a shared pitch3d-free `adapters/blender/scene_builders.py` (the "B" refactor lands here). [ ] **Lever 3
-  — sun-from-clip** (estimate azimuth/elevation/colour upstream, build sky+sun in both scripts from the shared
-  builder). Generative finishing (C) RULED OUT as primary (M2-0 spike) — possible M3 backstop only.
+  pixels → posed SMPL-X → vertex colour; unseen → kit colour; validated, see §6). [x] **Lever 2 — grass PBR**
+  via a shared pitch3d-free `adapters/blender/scene_builders.py` (the "B" refactor — one mowing-stripe
+  node-graph, both render paths; ~5 m bands; validated, see §6). [ ] **Lever 3 — sun-from-clip** (estimate
+  azimuth/elevation/colour upstream, build sky+sun in both scripts from the shared builder). Generative
+  finishing (C) RULED OUT as primary (M2-0 spike) — possible M3 backstop only.
 
 ---
 
@@ -157,10 +158,33 @@ fabricate or silently hide.
   sampler), `tests/unit/test_avatar_textured.py`. Wired through `scripts/anim_export.py` (`SOURCE_OK` gate →
   `vcolor,measured` in `anim_subject_*.npz`, unseen verts filled with kit colour) → `scripts/blender_animate.py`
   (BYTE_COLOR "Col" → `ShaderNodeVertexColor` → Principled Base Color, lit; flat-colour fallback).
+- **Shared Blender node-graphs / grass PBR (v2 lever 2, the "B" layer):** `src/pitch3d/adapters/blender/
+  scene_builders.py` (`build_grass_material` — mowing stripes + bump, pitch3d-free; `stripe_scale=0.1` ≈ 5 m
+  bands). Imported by file (sys.path shim) from BOTH `scripts/blender_animate.py` (replaces the flat plane)
+  and `src/pitch3d/adapters/blender/_cycles_script.py` (`_grass_material` delegates via `_scene_builders()`).
+  Lever 3 (sky+sun-from-clip) will add its builders to this same module.
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v2 lever 2 DONE: grass PBR in the deliverable video path, via the shared
+  `scene_builders.py` (the "B" refactor).** The two self-contained Blender scripts now share ONE
+  procedural grass node-graph: extracted `_cycles_script._grass_material` into a new **pitch3d-free**
+  `src/pitch3d/adapters/blender/scene_builders.py` (`build_grass_material(bpy, stripe_scale=…)` — only
+  `bpy`+stdlib, `bpy` received as an arg, never imported). **Import mechanism (the contract):** Blender's
+  `--python` under `--factory-startup` does NOT put the script's dir on `sys.path`, so each consumer adds
+  the module dir and `import scene_builders` **by file** — `blender_animate.py` via a top-of-file shim
+  (`<repo>/src/pitch3d/adapters/blender`), `_cycles_script.py` via a lazy `_scene_builders()` shim (its own
+  dir). One definition, two consumers → the paths can't drift; `_cycles_script._grass_material` now just
+  delegates. **Tuning finding:** the verbatim M2-9 wave **Scale 6** averages to **flat green** on the full
+  105 m pitch (sub-0.2 m stripes wash out under AA/denoise — why the old plane looked flat); **stripe_scale
+  0.1** gives **≈5 m mowing bands** that read at broadcast distance (top view ≈22 stripes across 105 m).
+  **VALIDATED:** Blender-gated `test_cycles_render_produces_a_nonempty_frame` (manifest `env=grass+lines+sky`)
+  still passes through the shared builder — formal path intact; E2E video re-render (`/tmp/val_grass3/{top,
+  broadcast}`) shows clear mowing stripes on the pitch + grass surround vs the old flat plane.
+  **Lever 3 (sun-from-clip) still pending.** Files: `src/pitch3d/adapters/blender/scene_builders.py` (new),
+  `src/pitch3d/adapters/blender/_cycles_script.py`, `scripts/blender_animate.py`.
 
 - **2026-06-28** — **v2 STARTED · lever 1 DONE: measured per-vertex BODY texture in the deliverable video
   path.** Scope agreed with user: «A через B, 1→2→3, свет из клипа» — port the photoreal levers into the

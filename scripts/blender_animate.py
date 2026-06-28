@@ -26,6 +26,14 @@ import numpy as np
 import bpy
 import mathutils
 
+# Shared pitch3d-free Blender node-graphs (grass/sky/sun), the "B" data layer — imported by file so
+# this script stays self-contained (--factory-startup, no pitch3d). It lives next to _cycles_script.
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "src", "pitch3d", "adapters", "blender",
+))
+import scene_builders  # noqa: E402
+
 _argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
 
 
@@ -202,11 +210,10 @@ if os.path.exists(ball_path):
     ball_ob.data.materials.append(bmat)
 
 # ── pitch, light, sky ────────────────────────────────────────────────────────
+# Grass PBR (v2 lever 2): the procedural mowing-stripe + bump material shared with the formal Cycles
+# path via scene_builders, so the deliverable pitch is no longer a flat green plane.
 bpy.ops.mesh.primitive_plane_add(size=max(120.0, span * 3), location=(ctr[0], ctr[1], 0.0))
-gmat = bpy.data.materials.new("grass")
-gmat.use_nodes = True
-gmat.node_tree.nodes.get("Principled BSDF").inputs["Base Color"].default_value = (0.06, 0.3, 0.09, 1)
-bpy.context.active_object.data.materials.append(gmat)
+bpy.context.active_object.data.materials.append(scene_builders.build_grass_material(bpy))
 
 
 def _add_static_mesh(name, verts, faces, rgb, roughness):

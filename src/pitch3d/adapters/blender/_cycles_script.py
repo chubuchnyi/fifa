@@ -107,38 +107,21 @@ def _matte_material(bpy, name, rgba, roughness):  # pragma: no cover - needs bpy
     return mat
 
 
+def _scene_builders():  # pragma: no cover - needs bpy
+    # The shared pitch3d-free node-graph module (grass/sky/sun) sits next to this script, but
+    # Blender's --python does not put that dir on sys.path, so add it once, then import by file.
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import scene_builders
+
+    return scene_builders
+
+
 def _grass_material(bpy):  # pragma: no cover - needs bpy
-    # Procedural grass for the measured pitch plane (M2-9): banded mowing stripes (the iconic pitch
-    # look) drive the base colour, a fine noise drives a subtle bump for blade micro-texture, and a
-    # high roughness keeps it matte. Built purely from generator nodes — no image texture to ship.
-    mat = bpy.data.materials.new("grass")
-    mat.use_nodes = True
-    nt = mat.node_tree
-    bsdf = nt.nodes.get("Principled BSDF")
-    coord = nt.nodes.new("ShaderNodeTexCoord")
-    # Mowing stripes: a banded wave quantised to two greens by a constant-interpolation ramp.
-    wave = nt.nodes.new("ShaderNodeTexWave")
-    wave.wave_type = "BANDS"
-    wave.bands_direction = "X"
-    wave.inputs["Scale"].default_value = 6.0
-    ramp = nt.nodes.new("ShaderNodeValToRGB")
-    ramp.color_ramp.interpolation = "CONSTANT"
-    dark, light = ramp.color_ramp.elements
-    dark.position, dark.color = 0.0, (0.045, 0.20, 0.035, 1.0)
-    light.position, light.color = 0.5, (0.075, 0.28, 0.055, 1.0)
-    nt.links.new(coord.outputs["Object"], wave.inputs["Vector"])
-    nt.links.new(wave.outputs["Fac"], ramp.inputs["Fac"])
-    nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
-    # Grass micro-texture as a bump only (no extra colour mix → fewer sockets to get wrong).
-    noise = nt.nodes.new("ShaderNodeTexNoise")
-    noise.inputs["Scale"].default_value = 120.0
-    bump = nt.nodes.new("ShaderNodeBump")
-    bump.inputs["Strength"].default_value = 0.15
-    nt.links.new(coord.outputs["Object"], noise.inputs["Vector"])
-    nt.links.new(noise.outputs["Fac"], bump.inputs["Height"])
-    nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
-    bsdf.inputs["Roughness"].default_value = 0.9
-    return mat
+    # Procedural grass for the measured pitch plane (M2-9), shared with the video path via
+    # scene_builders (the "B" data layer) so the two render scripts cannot drift.
+    return _scene_builders().build_grass_material(bpy)
 
 
 def _add_ground(bpy, plan):  # pragma: no cover - needs bpy
