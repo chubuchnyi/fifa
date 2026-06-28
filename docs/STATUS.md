@@ -19,8 +19,14 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v1 (recognizability) COMPLETE (2026-06-28)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). **Shirt numbers DONE** (plate-on-back; 4/20 read, rest honestly blank). **Stadium DONE** (hybrid procedural bowl + measured crowd projection + copy-filled holes). **Next stage: v2 (photoreal).**
-- **NEXT ACTION:** **v1 COMPLETE — stadium step DONE** (validated locally, no pod). Hybrid: a procedural seating **bowl** ringing the pitch wears crowd colour **measured** by projecting the clip onto it through the solved camera; stands the camera never saw are **copy-filled** from their mirror. Core `core/scene/stadium.py` (geometry + fill, 8 tests), adapter `adapters/render/stadium_backdrop.py` (median bake), wired through `anim_export.py` (`stadium.npz`, gated on `PITCH3D_STADIUM_VIDEO`) → `blender_animate.py` (emission vertex-coloured bowl). **KEY FINDING:** the solved broadcast camera is **rolled 180° vs the raw video** (whole reconstruction consistent in that rolled frame; bake auto-detects & rotates the frame before sampling — see §6). E2E rendered broadcast/goal/sideline/action — reads as the Colombia crowd around the pitch (`/tmp/val_frames_stadium/*`). **NEXT STAGE → v2 (photoreal): textured/Gaussian avatars + photoreal stadium + view-synth — scope with the user before starting.**
+- **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Lever 1 (measured per-vertex body texture) DONE** — validated by eye (readable "10" on cream Colombia kit, blue Congo, no black artifacts). **Levers 2 (grass-PBR, the "B" refactor) + 3 (sun-from-clip) pending.**
+- **NEXT ACTION:** **v2 lever 2 — grass PBR via a shared `adapters/blender/scene_builders.py`** (the "B"
+  refactor). Extract the pure-Blender grass node-graph (mowing stripes + bump, from `_cycles_script.py`
+  `_grass_material`) into ONE pitch3d-free module both Blender scripts import via a `sys.path` shim; replace
+  the flat green plane in `blender_animate.py`; keep `_cycles_script.py`'s gated render passing; E2E
+  re-render + eye-check; STATUS + commit (standing-authorized, NO push). Then lever 3 (sun-from-clip).
+  **Lever 1 (measured body texture) DONE & validated** — see §6 top. **180°-roll** still bites any raw-pixel
+  consumer (auto-detect `-rot[1][2]<0` + rotate before sampling).
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -44,8 +50,13 @@ the stadium is realistic and the same as the source. **Judged by eye.**
   **numbers** — plate-on-back; 4/20 read (OCR≈0 at this resolution → manual high-conf read), rest
   honestly blank (validated 2026-06-28, see §6). [x] **stadium backdrop** — hybrid procedural bowl +
   measured crowd projection + copy-filled holes (validated 2026-06-28, see §6). **v1 COMPLETE.**
-- [ ] **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
-  `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
+- [ ] **v2 — photoreal (CURRENT FOCUS, started 2026-06-28).** Plan «A через B, 1→2→3, свет из клипа»:
+  port the photoreal levers into the *deliverable video* path, sharing the two self-contained Blender
+  scripts at the **data/contract layer**. [x] **Lever 1 — measured per-vertex body texture** (real broadcast
+  pixels → posed SMPL-X → vertex colour; unseen → kit colour; validated, see §6). [ ] **Lever 2 — grass PBR**
+  via a shared pitch3d-free `adapters/blender/scene_builders.py` (the "B" refactor lands here). [ ] **Lever 3
+  — sun-from-clip** (estimate azimuth/elevation/colour upstream, build sky+sun in both scripts from the shared
+  builder). Generative finishing (C) RULED OUT as primary (M2-0 spike) — possible M3 backstop only.
 
 ---
 
@@ -140,10 +151,41 @@ fabricate or silently hide.
   (`PITCH3D_STADIUM_VIDEO` → `stadium.npz {verts,faces,colors,uv,tile}`) and `scripts/blender_animate.py`
   (`_add_stadium_mesh` — unit-mean tile image × vertex-colour tint → emission, mirror-tiled, so the crowd
   renders as repeated real spectators tinted by the measured regional colour).
+- **Measured body texture (v2 lever 1):** `src/pitch3d/adapters/models/avatar.py` (`bake_body_vertex_texture`
+  — image-level core, unit-testable; `measured_texture_from_clip` — clip wrapper: `_even_subset` frame pick,
+  decode+resize+rotate180, delegate; both built on the existing `measured_vertex_texture` projective z-buffer
+  sampler), `tests/unit/test_avatar_textured.py`. Wired through `scripts/anim_export.py` (`SOURCE_OK` gate →
+  `vcolor,measured` in `anim_subject_*.npz`, unseen verts filled with kit colour) → `scripts/blender_animate.py`
+  (BYTE_COLOR "Col" → `ShaderNodeVertexColor` → Principled Base Color, lit; flat-colour fallback).
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v2 STARTED · lever 1 DONE: measured per-vertex BODY texture in the deliverable video
+  path.** Scope agreed with user: «A через B, 1→2→3, свет из клипа» — port the photoreal levers into the
+  *video* export path (the actual deliverable), order **1 body-texture → 2 grass-PBR → 3 sun-from-clip**,
+  sharing the two self-contained Blender scripts **at the DATA/contract layer** (both stay pitch3d-free /
+  `--factory-startup`; the upstream compute lives in `anim_export.py` under the venv). Generative finishing
+  (option C) stays RULED OUT as primary (M2-0 spike: hallucinates unmeasured detail) — kept only as a possible
+  M3 last-mile backstop. **Lever 1 needed NO B-refactor — it is a pure data contract.**
+  **Mechanism:** (adapter) `avatar.bake_body_vertex_texture` (image-level core, unit-tested) +
+  `measured_texture_from_clip` (clip wrapper) project each subject's real broadcast pixels onto its **posed
+  SMPL-X mesh** through the solved camera — front-facing + in-frustum + nearest-at-pixel (z-buffer), averaged
+  over ≤12 evenly-spread reference frames; unseen verts stay `measured=False`. (Same **180° camera-roll**
+  auto-detect+rotate as the stadium bake — `camera_pose`, `-rot[1][2]<0`.) `anim_export.py` fills the
+  unmeasured verts with the flat **kit colour** (R-6: never black/fabricated) and carries `vcolor,measured`
+  in each `anim_subject_*.npz`; `blender_animate.py` attaches them as a **BYTE_COLOR "Col"** attribute →
+  `ShaderNodeVertexColor` → Principled **Base Color** (LIT by the scene sun, unlike the emission crowd), with
+  a clean fallback to the flat colour when the keys are absent (older exports / no source clip).
+  **VALIDATED (local, no pod):** E2E export of the Colombia clip baked **tex 6–11 %/subject** (front torso —
+  the recognizability-critical region); Blender re-render of **broadcast + action** (`/tmp/val_frames_hi/*`,
+  1920×1080) eye-check — Colombia reads cream with a **readable "10"** on the back, Congo reads blue, bodies
+  show torso/shorts/leg tonal structure + contact shadows, **zero black artifacts**. Low coverage is fine:
+  the fallback IS the correct kit colour, so no greyness — `max_frames` left at 12. **Levers 2 (grass-PBR via
+  the shared `adapters/blender/scene_builders.py` — this is where "B" lands) and 3 (sun-from-clip) still
+  pending.** Files: `src/pitch3d/adapters/models/avatar.py`, `tests/unit/test_avatar_textured.py` (+1 test,
+  17 green), `scripts/anim_export.py`, `scripts/blender_animate.py`.
 
 - **2026-06-28** — **v1 polish: tinted crowd MOSAIC (replaces the stretched per-vertex bake).** User ask:
   «вырезать именно трибуны и выстелать мозаикой, а не растягивать» → «тонированную мозаику». The median bake

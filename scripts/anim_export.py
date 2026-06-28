@@ -28,6 +28,7 @@ import smplx
 import torch
 
 from pitch3d.adapters.io.frames import resolve_source_path
+from pitch3d.adapters.models.avatar import measured_texture_from_clip
 from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
@@ -47,6 +48,12 @@ OUT = os.environ.get("PITCH3D_ANIM_OUT", "out/anim/mesh")
 # Entry/exit opacity fade (#98/#100): bake a per-frame alpha into each subject npz so the Blender
 # render can ramp a body in/out at GENUINE entries/exits instead of popping it. 0 disables (opaque).
 FADE_FRAMES = int(os.environ.get("PITCH3D_FADE_FRAMES", "4"))
+# The broadcast source clip drives every MEASURED appearance: the per-vertex body texture (in the
+# subject loop) and the stadium crowd (further down). PITCH3D_STADIUM_VIDEO names it for historical
+# reasons (it first fed only the stadium); bodies sample the SAME clip through the solved camera.
+# Unset/missing -> bodies keep their flat kit colour (R-6: never fabricate pixels we can't measure).
+SOURCE_VIDEO = os.environ.get("PITCH3D_STADIUM_VIDEO", "")
+SOURCE_OK = bool(SOURCE_VIDEO) and os.path.exists(resolve_source_path(SOURCE_VIDEO))
 
 # Same orientation gotcha as smplx_export_meshes.py: real SMPLest-X output is camera-frame
 # (y-down) → map to z-up world with new = [x, z, -y]; a fake/canonical export needs the plain
@@ -113,6 +120,19 @@ for i, subj in enumerate(scene.subjects):
     color = np.asarray(team_color.get(subj.team_id, palette[i % 10]), dtype=np.float32)
     alpha = appearance_alpha(frames, clip_first, clip_last, FADE_FRAMES)  # (T,) in [0,1]
 
+    # Measured per-vertex body texture (M2-8b carried into the video path): sample each player's
+    # real broadcast pixels onto its posed mesh through the solved camera, averaged over an even
+    # spread of the frames it appears in. Vertices never seen front-facing (the far/occluded
+    # surface) fall back to the flat kit colour; the measured flag, also written, is the honest R-6
+    # channel. No clip -> vcolor stays None and the body keeps its flat kit colour as before.
+    vcolor = None
+    measured = None
+    if SOURCE_OK:
+        vcolor, measured = measured_texture_from_clip(
+            verts, model.faces, scene.camera, frames, SOURCE_VIDEO
+        )
+        vcolor[~measured] = color
+
     # Shirt number plate (#numbers, v1): when the subject carries a jersey number, bake a per-frame
     # upper-back anchor + outward "back" direction so the renderer can place a number on the shirt
     # without any SMPL-X knowledge. Anchor = spine3↔neck blend pushed out along the back normal; the
@@ -141,6 +161,9 @@ for i, subj in enumerate(scene.subjects):
             number_rgb=num_rgb,
         )
 
+    tex_extra: dict[str, np.ndarray] = {}
+    if vcolor is not None and measured is not None:
+        tex_extra = dict(vcolor=vcolor.astype(np.float32), measured=measured.astype(np.uint8))
     dst = os.path.join(OUT, f"anim_subject_{subj.track_id}.npz")
     np.savez(
         dst,
@@ -150,15 +173,17 @@ for i, subj in enumerate(scene.subjects):
         frames=frames.astype(np.int64),
         alpha=alpha.astype(np.float32),
         **num_extra,
+        **tex_extra,
     )
     span = float(np.linalg.norm(transl.max(0) - transl.min(0)))
     num_msg = ""
     if num_extra:
         bz = float(np.abs(num_extra["back_dir"][:, 2]).mean())  # ~0 ⇒ horizontal (sane)
         num_msg = f" number={int(num_extra['jersey_number'])} back_dir|z|~{bz:.2f}"
+    tex_msg = f" tex={measured.mean() * 100:.0f}%" if measured is not None else ""
     print(
         f"subject_{subj.track_id}: team={subj.team_id} frames={n_frames} "
-        f"transl_span={span:.2f}m{num_msg} -> {os.path.basename(dst)}"
+        f"transl_span={span:.2f}m{num_msg}{tex_msg} -> {os.path.basename(dst)}"
     )
 
 if scene.ball is not None:
@@ -201,14 +226,13 @@ print(
 # clip): with no clip we cannot measure crowd colour, so the renderer omits the bowl, not invent it.
 STADIUM_REPEAT_AROUND = 40.0  # crowd-tile copies laid around the loop (mirror-tiled in Blender)
 STADIUM_REPEAT_UP = 4.0       # copies up the rake; broadcast crowd band is short, so tile upward
-STADIUM_VIDEO = os.environ.get("PITCH3D_STADIUM_VIDEO", "")
-if STADIUM_VIDEO and os.path.exists(resolve_source_path(STADIUM_VIDEO)):
+if SOURCE_OK:
     from pitch3d.adapters.render.stadium_backdrop import bake_backdrop_colors, extract_crowd_tile
 
     _sv, _sf, _sp = stadium_bowl_geometry(_dims)
-    _scolors, _scov = bake_backdrop_colors(scene.camera, _sv, STADIUM_VIDEO)
+    _scolors, _scov = bake_backdrop_colors(scene.camera, _sv, SOURCE_VIDEO)
     _sfilled, _ = fill_holes_by_copy(_sv, _scolors, _scov)
-    _stile = extract_crowd_tile(scene.camera, _sv, _sp, _scov, STADIUM_VIDEO)
+    _stile = extract_crowd_tile(scene.camera, _sv, _sp, _scov, SOURCE_VIDEO)
     _suv = bowl_tile_loop_uvs(
         _sf, _sp, repeat_around=STADIUM_REPEAT_AROUND, repeat_up=STADIUM_REPEAT_UP
     )

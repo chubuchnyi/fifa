@@ -25,6 +25,7 @@ from pitch3d.adapters.models.avatar import (
     TexturedSmplxAvatarBuilder,
     _even_subset,
     aggregate_observations,
+    bake_body_vertex_texture,
     read_vertex_colored_ply,
     sample_vertex_colors,
     vertex_normals,
@@ -113,6 +114,26 @@ def test_aggregate_averages_seen_and_flags_unseen():
     assert count.tolist() == [2, 0]
     np.testing.assert_array_equal(rgb[0], [15, 15, 15])
     np.testing.assert_array_equal(rgb[1], list(_UNMEASURED_RGB))  # honest placeholder, not faked
+
+
+# --- bake_body_vertex_texture (image-level core of the clip baker) -------------
+def test_bake_body_vertex_texture_measures_seen_verts_and_zeros_unseen():
+    # Same triangle as the builder stub: facing the camera, v0 -> the principal point and v2 -> an
+    # in-frame pixel (both measured), v1 projects off the right edge (never measured). Two identical
+    # reference frames of one solid colour, so every measured vertex carries that colour in [0,1]
+    # while the unseen v1 comes back measured=False with vcolor 0 (R-6), NOT the grey placeholder.
+    verts_world = np.array([[0.0, 0.0, 5.0], [5.0, 0.0, 5.0], [0.0, 0.5, 5.0]])
+    faces = np.array([[0, 2, 1]])  # wound so the face normal points back toward the camera
+    img = np.empty((48, 64, 3), np.uint8)
+    img[:] = (200, 100, 50)
+    verts_per_frame = np.stack([verts_world, verts_world])  # (2 frames, 3 verts, 3)
+    vcolor, measured = bake_body_vertex_texture(
+        verts_per_frame, faces, _camera(2), [0, 1], [img, img]
+    )
+    assert vcolor.shape == (3, 3) and measured.tolist() == [True, False, True]
+    np.testing.assert_allclose(vcolor[0], np.array([200, 100, 50]) / 255.0, atol=1e-6)
+    np.testing.assert_allclose(vcolor[2], np.array([200, 100, 50]) / 255.0, atol=1e-6)
+    np.testing.assert_array_equal(vcolor[1], [0.0, 0.0, 0.0])
 
 
 # --- write_vertex_colored_ply -------------------------------------------------

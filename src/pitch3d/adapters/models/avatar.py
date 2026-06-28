@@ -47,7 +47,11 @@ from ...core.ports.io import ClipRef, CropRef
 from ...core.ports.reconstruction import AvatarBuilder
 from ...core.scene.assets import RenderAssetKind, RenderAssetRef, SynthViewRef
 from ...core.scene.camera import CameraIntrinsics, CameraTrack
-from ...core.scene.projection import camera_center, project_world_points_with_depth
+from ...core.scene.projection import (
+    camera_center,
+    camera_pose,
+    project_world_points_with_depth,
+)
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from ..io.frames import iter_clip_frames, resolve_source_path
@@ -230,6 +234,90 @@ def measured_vertex_texture(obs: AvatarMeshObservations) -> tuple[np.ndarray, np
         colors_per_frame.append(colors)
         observed_per_frame.append(observed)
     return aggregate_observations(colors_per_frame, observed_per_frame, n)
+
+
+def bake_body_vertex_texture(
+    verts_per_frame: np.ndarray,
+    faces: np.ndarray,
+    camera: CameraTrack,
+    frame_indices: Sequence[int],
+    images: Sequence[np.ndarray],
+) -> tuple[np.ndarray, np.ndarray]:
+    """Average a measured per-vertex body colour over (posed verts, frame, image) triples.
+
+    The image-level core of :func:`measured_texture_from_clip` (no video decode, so it unit-tests
+    with a synthetic mesh + frames). ``verts_per_frame (R, V, 3)`` are the subject's world vertices
+    posed at each reference frame, ``frame_indices (R,)`` the matching camera rows, ``images`` the
+    ``R`` decoded ``(H, W, 3)`` uint8 RGB frames already in the camera's pixel convention. Returns
+    ``(vcolor (V, 3) float in [0,1], measured (V,) bool)``; ``vcolor`` is 0 where ``measured`` is
+    False (the vertex was never seen front-facing) so the caller fills it with the kit colour (R-6).
+    """
+    verts_per_frame = np.asarray(verts_per_frame, dtype=float)
+    faces = np.asarray(faces, dtype=int).reshape(-1, 3)
+    canonical = verts_per_frame[0] if verts_per_frame.shape[0] else np.zeros((0, 3))
+    obs = AvatarMeshObservations(
+        canonical_vertices=canonical,
+        faces=faces,
+        frames=[
+            FrameObservation(frame=int(fi), vertices_world=vw, camera=camera, image=img)
+            for fi, vw, img in zip(frame_indices, verts_per_frame, images, strict=True)
+        ],
+    )
+    rgb, count = measured_vertex_texture(obs)
+    measured = count > 0
+    vcolor = rgb.astype(np.float32) / 255.0
+    vcolor[~measured] = 0.0
+    return vcolor, measured
+
+
+def measured_texture_from_clip(
+    verts_per_frame: np.ndarray,
+    faces: np.ndarray,
+    camera: CameraTrack,
+    frames: Sequence[int],
+    video_uri: str,
+    *,
+    max_frames: int = 12,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Bake a measured per-vertex body texture by sampling the source clip at the subject's poses.
+
+    Picks up to ``max_frames`` evenly-spread reference frames from ``frames`` (the per-row source
+    indices of ``verts_per_frame (T, V, 3)``), decodes each — resized to the calibration resolution
+    and rotated 180 deg into the solved camera's rolled pixel convention (the same roll the stadium
+    bake uses, see :mod:`pitch3d.adapters.render.stadium_backdrop`) — and reuses the avatar samplers
+    (front-facing / z-buffer / cross-frame average) to colour each vertex from real pixels. Returns
+    ``(vcolor (V, 3) float in [0,1], measured (V,) bool)``; unseen vertices come back
+    ``measured=False`` with ``vcolor=0`` — the caller fills those with the kit colour (R-6).
+    """
+    import cv2
+
+    verts_per_frame = np.asarray(verts_per_frame, dtype=float)
+    frame_arr = np.asarray(frames, dtype=int)
+    k = camera.intrinsics
+    w, h = int(k.width), int(k.height)
+    v = int(verts_per_frame.shape[1]) if verts_per_frame.ndim == 3 else 0
+    rows = _even_subset(np.arange(verts_per_frame.shape[0]), max_frames)
+    if rows.size == 0:
+        return np.zeros((v, 3), np.float32), np.zeros(v, bool)
+
+    rot0, _ = camera_pose(camera, int(frame_arr[rows[0]]))
+    upside_down = float(-rot0[1, 2]) < 0.0
+    want = {int(frame_arr[r]): int(r) for r in rows}
+
+    sel_verts: list[np.ndarray] = []
+    sel_frames: list[int] = []
+    sel_images: list[np.ndarray] = []
+    for idx, bgr in iter_clip_frames(video_uri, sorted(want.keys())):
+        if bgr.shape[1] != w or bgr.shape[0] != h:
+            bgr = cv2.resize(bgr, (w, h), interpolation=cv2.INTER_AREA)
+        if upside_down:
+            bgr = cv2.rotate(bgr, cv2.ROTATE_180)
+        sel_images.append(np.ascontiguousarray(bgr[:, :, ::-1]))  # BGR -> RGB uint8
+        sel_frames.append(int(idx))
+        sel_verts.append(verts_per_frame[want[int(idx)]])
+    if not sel_images:
+        return np.zeros((v, 3), np.float32), np.zeros(v, bool)
+    return bake_body_vertex_texture(np.asarray(sel_verts), faces, camera, sel_frames, sel_images)
 
 
 def write_vertex_colored_ply(

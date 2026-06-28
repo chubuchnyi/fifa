@@ -119,6 +119,9 @@ for mp in mesh_files:
     verts, faces, col, frames = d["verts"], d["faces"], d["color"], d["frames"]
     # Per-frame opacity baked by anim_export.py (#98/#100); absent in older exports → opaque.
     alpha = d["alpha"] if "alpha" in d.files else np.ones(len(frames), dtype=np.float32)
+    # Measured per-vertex body texture (lever 1): real broadcast pixels projected onto the posed
+    # SMPL-X mesh by anim_export.py. Absent in older exports / no source clip → flat kit colour.
+    vcolor = d["vcolor"] if "vcolor" in d.files else None
     me = bpy.data.meshes.new(os.path.basename(mp))
     me.from_pydata(verts[0].tolist(), [], faces.tolist())
     me.update()
@@ -129,7 +132,18 @@ for mp in mesh_files:
     mat = bpy.data.materials.new("body")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    bsdf.inputs["Base Color"].default_value = (float(col[0]), float(col[1]), float(col[2]), 1.0)
+    if vcolor is not None:
+        # BYTE_COLOR (sRGB) → Base Color, lit by the scene sun. Unmeasured verts were filled
+        # with the flat kit colour upstream (R-6), so the body is opaque-coloured, never black.
+        rgb = np.asarray(vcolor, dtype=np.float32).reshape(-1, 3)
+        rgba = np.concatenate([rgb, np.ones((rgb.shape[0], 1), dtype=np.float32)], axis=1)
+        attr = me.color_attributes.new(name="Col", type="BYTE_COLOR", domain="POINT")
+        attr.data.foreach_set("color", rgba.reshape(-1).tolist())
+        vcol = mat.node_tree.nodes.new("ShaderNodeVertexColor")
+        vcol.layer_name = "Col"
+        mat.node_tree.links.new(vcol.outputs["Color"], bsdf.inputs["Base Color"])
+    else:
+        bsdf.inputs["Base Color"].default_value = (float(col[0]), float(col[1]), float(col[2]), 1.0)
     bsdf.inputs["Roughness"].default_value = 0.6
     me.materials.append(mat)
     frame_row = {int(f): i for i, f in enumerate(frames)}
