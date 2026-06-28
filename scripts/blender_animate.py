@@ -15,6 +15,8 @@ Flags (after `--` when run via the binary):
   --out DIR       root for <camera>/frame_*.png sequences        [default <in>/frames]
   --device cpu|gpu                                               [default cpu]
   --res-x N --res-y N --samples N --fps N --frame-step N --cameras a,b,c
+  --light-rgb r,g,b --light-energy N --sky-strength N           manual lighting overrides; each
+  --sun-count N --sun-elevation N --sun-angle N                 wins over the measured lighting.npz
 """
 
 import glob
@@ -327,16 +329,35 @@ if os.path.exists(stadium_path):
         tile=sd["tile"] if "tile" in sd.files else None,
     )
 
-bpy.ops.object.light_add(type="SUN", location=(ctr[0] + 8, ctr[1] - 8, 30))
-bpy.context.active_object.data.energy = 4.0
-bpy.context.active_object.data.angle = 0.1
-
-world = bpy.data.worlds.new("w")
-bpy.context.scene.world = world
-world.use_nodes = True
-bg = world.node_tree.nodes["Background"]
-bg.inputs[0].default_value = (0.55, 0.72, 0.92, 1.0)
-bg.inputs[1].default_value = 1.0
+# Floodlit-NIGHT lighting (v2 lever 3) with BOTH auto-detect and manual override. AUTO baseline:
+# anim_export.py measured the floodlight colour (+ night-model defaults) into lighting.npz. MANUAL:
+# any --light-* flag wins over that. Fallback when neither exists: the measured night defaults baked
+# into scene_builders. The model itself — a dark world + a ring of soft suns — is the floodlit-night
+# finding (no daytime sun); the formal Cycles path keeps its own separate daytime sky.
+light_kwargs: dict = {}
+_lp = os.path.join(IN, "lighting.npz")
+if os.path.exists(_lp):
+    _ld = np.load(_lp)
+    light_kwargs["light_rgb"] = tuple(float(x) for x in _ld["light_rgb"])
+    for _k in ("key_energy", "sky_strength", "elevation_deg", "sun_angle_deg"):
+        if _k in _ld.files:
+            light_kwargs[_k] = float(_ld[_k])
+    if "sun_count" in _ld.files:
+        light_kwargs["sun_count"] = int(_ld["sun_count"])
+_rgb_arg = _arg("--light-rgb", "")
+if _rgb_arg:
+    light_kwargs["light_rgb"] = tuple(float(x) for x in _rgb_arg.split(","))
+for _flag, _key, _cast in (
+    ("--light-energy", "key_energy", float),
+    ("--sky-strength", "sky_strength", float),
+    ("--sun-count", "sun_count", int),
+    ("--sun-elevation", "elevation_deg", float),
+    ("--sun-angle", "sun_angle_deg", float),
+):
+    _v = _arg(_flag, "")
+    if _v != "":
+        light_kwargs[_key] = _cast(_v)
+scene_builders.build_stadium_lighting(bpy, **light_kwargs)
 
 # ── fixed cameras (static; the players + ball move within frame) ─────────────
 look = (ctr[0], ctr[1], ctr[2] + 0.6)
@@ -375,6 +396,11 @@ sc = bpy.context.scene
 sc.render.engine = "CYCLES"
 sc.cycles.samples = SAMPLES
 sc.cycles.use_denoising = True
+# Broadcast-faithful tone-map: the target clip is standard Rec.709, so render through the "Standard"
+# view transform rather than Blender's default AgX, which desaturated the floodlit grass to grey
+# and lifted the night sky. Keeps the measured colours (kit, grass, floodlight tint) reading as the
+# clip does (v2 lever 3).
+sc.view_settings.view_transform = "Standard"
 sc.render.resolution_x = RES_X
 sc.render.resolution_y = RES_Y
 sc.render.image_settings.file_format = "PNG"

@@ -70,7 +70,7 @@ os.makedirs(OUT, exist_ok=True)
 # per-subject + ball artifacts up front so the mesh dir reflects EXACTLY this scene.
 for _stale in glob.glob(os.path.join(OUT, "anim_subject_*.npz")) + [
     os.path.join(OUT, "ball.npz"), os.path.join(OUT, "pitch.npz"),
-    os.path.join(OUT, "stadium.npz")
+    os.path.join(OUT, "stadium.npz"), os.path.join(OUT, "lighting.npz")
 ]:
     if os.path.exists(_stale):
         os.remove(_stale)
@@ -252,5 +252,23 @@ if SOURCE_OK:
     )
 else:
     print("stadium: PITCH3D_STADIUM_VIDEO unset/missing (skipping stadium.npz)")
+
+# Lighting from the clip (v2 lever 3, AUTO baseline): the target is a floodlit NIGHT match, so
+# "light from the clip" is the floodlights' measured COLOUR (white-patch illuminant off the bright
+# near-neutral surfaces), not a daytime sun. blender_animate.py reads this as the auto baseline and
+# lets --light-* flags override it (the manual half). Gated on the source clip like the stadium.
+if SOURCE_OK:
+    from pitch3d.adapters.render.lighting import estimate_lighting_from_clip
+
+    _light = estimate_lighting_from_clip(SOURCE_VIDEO, scene.camera.frames)
+    ldst = os.path.join(OUT, "lighting.npz")
+    np.savez(ldst, **_light)
+    _lr = _light["light_rgb"]
+    print(
+        f"lighting: floodlight rgb=[{_lr[0]:.3f}, {_lr[1]:.3f}, {_lr[2]:.3f}] "
+        f"(night model: {int(_light['sun_count'])} soft suns) -> {os.path.basename(ldst)}"
+    )
+else:
+    print("lighting: PITCH3D_STADIUM_VIDEO unset/missing (skipping lighting.npz)")
 
 print(f"ANIM_EXPORT_OK ({len(scene.subjects)} subjects -> {OUT})")

@@ -19,13 +19,14 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture) + 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) DONE & eye-validated. Lever 3 (sun-from-clip) pending.**
-- **NEXT ACTION:** **v2 lever 3 — sun-from-clip.** Estimate the sun azimuth/elevation/colour from the source
-  clip **upstream** (a pitch3d adapter under the venv — e.g. from shadow direction / sky-vs-grass white
-  balance), pass via data (plan/npz), and build a matched **sky + sun** in BOTH render scripts from shared
-  builders added to `adapters/blender/scene_builders.py` (port `_cycles_script`'s `_build_world` Nishita sky +
-  `_add_sun`). E2E re-render + eye-check the lighting matches the clip; STATUS + commit (standing-authorized,
-  NO push). **Levers 1 (body texture) + 2 (grass PBR, the "B" refactor) DONE & validated** — see §6 top.
+- **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
+- **NEXT ACTION:** **v2 levers 1–3 DONE — pick the next photoreal gap.** Render the FULL multi-camera deliverable
+  (all 48 f × all 4 cameras, full res) and eye-judge it whole against the clip, then attack the biggest
+  remaining gap. Candidates: body-texture coverage is only ~7–11 % of verts *measured* (rest is flat kit
+  colour — honest R-6 but flat); the grass plane extends visibly *beyond* the finite stadium bowl (you see
+  past the stands); exposure/tone polish. Commit at every checkpoint (standing-authorized, NO push).
+  **Lighting is floodlit-NIGHT, not daytime** — the original "sun azimuth/elevation + Nishita sky" idea was
+  WRONG for this clip (measured: no sky, neutral-cool floodlights, soft even multi-shadows); see §6 top.
   **180°-roll** still bites any raw-pixel consumer (auto-detect `-rot[1][2]<0` + rotate before sampling).
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
@@ -55,8 +56,9 @@ the stadium is realistic and the same as the source. **Judged by eye.**
   scripts at the **data/contract layer**. [x] **Lever 1 — measured per-vertex body texture** (real broadcast
   pixels → posed SMPL-X → vertex colour; unseen → kit colour; validated, see §6). [x] **Lever 2 — grass PBR**
   via a shared pitch3d-free `adapters/blender/scene_builders.py` (the "B" refactor — one mowing-stripe
-  node-graph, both render paths; ~5 m bands; validated, see §6). [ ] **Lever 3 — sun-from-clip** (estimate
-  azimuth/elevation/colour upstream, build sky+sun in both scripts from the shared builder). Generative
+  node-graph, both render paths; ~5 m bands; validated, see §6). [x] **Lever 3 — light-from-clip**
+  (floodlit-NIGHT, **auto-detected** floodlight colour + **manual** CLI override; dark world + ring of soft
+  cool suns → even soft multi-shadows; validated, see §6). **The agreed 1→2→3 plan is complete.** Generative
   finishing (C) RULED OUT as primary (M2-0 spike) — possible M3 backstop only.
 
 ---
@@ -158,15 +160,55 @@ fabricate or silently hide.
   sampler), `tests/unit/test_avatar_textured.py`. Wired through `scripts/anim_export.py` (`SOURCE_OK` gate →
   `vcolor,measured` in `anim_subject_*.npz`, unseen verts filled with kit colour) → `scripts/blender_animate.py`
   (BYTE_COLOR "Col" → `ShaderNodeVertexColor` → Principled Base Color, lit; flat-colour fallback).
-- **Shared Blender node-graphs / grass PBR (v2 lever 2, the "B" layer):** `src/pitch3d/adapters/blender/
-  scene_builders.py` (`build_grass_material` — mowing stripes + bump, pitch3d-free; `stripe_scale=0.1` ≈ 5 m
-  bands). Imported by file (sys.path shim) from BOTH `scripts/blender_animate.py` (replaces the flat plane)
-  and `src/pitch3d/adapters/blender/_cycles_script.py` (`_grass_material` delegates via `_scene_builders()`).
-  Lever 3 (sky+sun-from-clip) will add its builders to this same module.
+- **Shared Blender node-graphs (v2 levers 2+3, the "B" layer):** `src/pitch3d/adapters/blender/
+  scene_builders.py` (`build_grass_material` — mowing stripes + bump, `stripe_scale=0.1` ≈ 5 m bands;
+  `build_stadium_lighting` — floodlit-NIGHT: dark world `light_rgb × sky_strength` + a ring of `sun_count`
+  soft high SUN lamps tinted `light_rgb`; pitch3d-free, `bpy` as arg). Imported by file (sys.path shim) from
+  BOTH `scripts/blender_animate.py` and `_cycles_script.py` (`_grass_material` delegates via `_scene_builders()`;
+  `_cycles` keeps its OWN daytime sky/sun — it does not call `build_stadium_lighting`).
+- **Light-from-clip (v2 lever 3, floodlit-night, auto+manual):** `src/pitch3d/adapters/render/lighting.py`
+  (`estimate_light_color` — white-patch illuminant off bright near-neutral pixels, pure/unit-tested;
+  `estimate_lighting_from_clip` — clip wrapper → the `lighting.npz` model; `NIGHT_*` measured defaults),
+  `tests/unit/test_lighting.py`. AUTO: `scripts/anim_export.py` (`SOURCE_OK` gate → `lighting.npz`). MANUAL:
+  `scripts/blender_animate.py` reads `lighting.npz` then lets `--light-rgb/--light-energy/--sky-strength/
+  --sun-count/--sun-elevation/--sun-angle` override it, calls `build_stadium_lighting`, renders through the
+  **Standard** view transform (broadcast-faithful colour, not AgX).
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v2 lever 3 DONE: light-from-clip — floodlit NIGHT, auto-detected + manual override.
+  The agreed 1→2→3 plan is now complete.** **Premise flip (R-6):** scoping the lever revealed the target
+  clip is a **floodlit NIGHT match, not a sunny day** (measured from raw frames: no sky in frame, near-white
+  pixels ≈ RGB [0.96,0.96,1.0] = neutral floodlights w/ faint cool tint, bright-vs-shadow grass only
+  1.2–1.5× = soft even multi-directional shadows). So the original plan — recover a single sun's
+  azimuth/elevation from a hard shadow + a Nishita blue sky — was **wrong**; there is no single sun and no
+  blue sky. Reshaped to a **floodlit-night model**. **What shipped — both auto & manual (user ask: «нужна
+  опция автоопределения и задания вручную освещения»):** (1) **AUTO** `estimate_light_color` (new
+  `adapters/render/lighting.py`) — a **white-patch illuminant** estimate: keep the bright, *low-saturation*
+  pixels (white kit / lines / bright grass — not the green grass or a red shirt, not the near-black sky),
+  take a high per-channel percentile, peak-normalise → the floodlight colour. On the clip it measured
+  **[0.969, 0.953, 1.000]** — independently reproducing the hand-measured WB (neutral, blue-peak cool).
+  `anim_export.py` writes it (+ the night-model defaults) to **`lighting.npz`** under the `SOURCE_OK` gate.
+  (2) **MANUAL** `blender_animate.py` reads `lighting.npz` as the baseline, then any `--light-rgb /
+  --light-energy / --sky-strength / --sun-count / --sun-elevation / --sun-angle` flag overrides it (fallback
+  = measured defaults baked into `scene_builders`). (3) **Model** new `build_stadium_lighting` in the shared
+  `scene_builders.py` — a **dark world** (`light_rgb × sky_strength`) + a **ring of 4 soft, high SUN lamps**
+  (wide 9° angle, elevation 65°, tinted `light_rgb`) → even low-contrast fill with faint *multi-directional*
+  shadows. `_cycles_script` is untouched (keeps its own daytime sky — it's a separate formal demo, not the
+  deliverable). **Tone-map finding:** Blender's default **AgX** view transform desaturated the floodlit grass
+  to grey-green (render blue ≈0.43 vs clip 0.20) and lifted the sky; the clip is standard **Rec.709**, so
+  `blender_animate` now renders through the **Standard** view transform → broadcast-faithful saturated colour
+  (mowing stripes, crisp white lines, crowd bowl all pop). **Tuning:** `sky_strength` 0.06→**0.03** so the
+  night sky (≈0.19 display) matches the clip's dark upper region (≈0.17), not a flat grey. **VALIDATED E2E:**
+  re-export prints the measured colour → `lighting.npz`; AUTO render (`/tmp/val_frames_final/{broadcast,top}`)
+  shows an evenly floodlit night pitch; MANUAL render (`--sky-strength 0.03 --light-rgb …`) confirmed both
+  override paths; gated `test_cycles_render_produces_a_nonempty_frame` still passes (daytime path intact);
+  4 new `test_lighting.py` + full unit suite green; ruff/mypy clean (only the 2 pre-existing
+  `blender_animate.py` lints remain). Files: `src/pitch3d/adapters/render/lighting.py` (new),
+  `tests/unit/test_lighting.py` (new), `src/pitch3d/adapters/blender/scene_builders.py`,
+  `scripts/anim_export.py`, `scripts/blender_animate.py`.
 
 - **2026-06-28** — **v2 lever 2 DONE: grass PBR in the deliverable video path, via the shared
   `scene_builders.py` (the "B" refactor).** The two self-contained Blender scripts now share ONE
