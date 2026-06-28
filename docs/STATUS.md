@@ -20,8 +20,10 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **v2 levers 1–3 DONE — pick the next photoreal gap.** Render the FULL multi-camera deliverable
-  (all 48 f × all 4 cameras, full res) and eye-judge it whole against the clip, then attack the biggest
+- **NEXT ACTION:** **v2 levers 1–3 DONE + FULL deliverable RENDERED (2026-06-28) — eye-judge it, then pick the
+  next photoreal gap.** The full multi-camera deliverable (48 f × 4 cameras @ 1920×1080 s64) is rendered and
+  stitched to **`out/deliverable_video/{broadcast,sideline,top,goal}.mp4`** (GPU pod, ~4 min after the
+  GPU-util fix; see §6 top). **Eye-judge the 4 mp4s whole against the clip**, then attack the biggest
   remaining gap. Candidates: body-texture coverage is only ~7–11 % of verts *measured* (rest is flat kit
   colour — honest R-6 but flat); the grass plane extends visibly *beyond* the finite stadium bowl (you see
   past the stands); exposure/tone polish. Commit at every checkpoint (standing-authorized, NO push).
@@ -177,6 +179,26 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **FULL DELIVERABLE RENDERED on the GPU pod + the "100 % CPU / 0 % GPU" bug found & fixed.**
+  Rendered the whole deliverable — **48 frames × 4 cameras** (broadcast, sideline, top, goal) @ **1920×1080,
+  64 samples, 25 fps** — on the RTX PRO 4500 (Blackwell) pod, stitched one mp4 per camera, pulled all 4 to
+  **`out/deliverable_video/{broadcast,sideline,top,goal}.mp4`** (gitignored). 192/192 PNGs (48/cam),
+  `BLENDER_ANIM_OK`. **GPU-utilisation bug (user: «под 40 минут молотит на 100% cpu и 0% gpu — найди ошибку»)
+  had 3 causes in `blender_animate.py`, fixed:** (1) **hybrid device — the main one:** the device loop enabled
+  BOTH the GPU and the CPU (`dev.use = … in (chosen,"CPU")`) → Cycles path-traced on all 28 CPU cores
+  alongside the GPU (the pegged-CPU symptom). Now **GPU-only** (`== chosen`). (2) **scene re-uploaded every
+  render:** without `use_persistent_data` each `render.render()` tore down + re-uploaded the whole Cycles
+  scene (BVH for ~16–20 deforming bodies) — VRAM collapsed to ~8 MiB between renders, GPU idled on CPU
+  re-sync. Added **`sc.render.use_persistent_data = True`** → scene stays resident. (3) **CPU denoise:**
+  default OpenImageDenoise ran on CPU per render; set **`sc.cycles.denoiser = "OPTIX"`** → denoise on GPU.
+  Plus a per-frame **`bpy.context.view_layer.update()`** so persistent data re-syncs each frame's re-posed
+  meshes (else it could reuse the prior pose). **Measured before→after:** GPU util ~0–25 % → **99 %**; VRAM
+  8 MiB → **~2472 MiB resident**; CPU load (1 min) ~75 → **~1.3**; **~52 s → ~1.3 s per camera-render**; full
+  192-frame render in **~4 min**. **Correctness verified** (persistent data isn't reusing stale geometry):
+  md5 broadcast `frame_0000 ≠ 0024 ≠ 0047` (poses animate over time) and broadcast/top/goal `frame_0000` all
+  differ (distinct camera views). Pod **STOPPED** after pull (cost). NEXT: eye-judge the 4 mp4s vs the clip,
+  then attack the biggest remaining photoreal gap. File: `scripts/blender_animate.py` (4 edits).
 
 - **2026-06-28** — **v2 lever 3 DONE: light-from-clip — floodlit NIGHT, auto-detected + manual override.
   The agreed 1→2→3 plan is now complete.** **Premise flip (R-6):** scoping the lever revealed the target

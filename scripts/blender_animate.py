@@ -396,6 +396,11 @@ sc = bpy.context.scene
 sc.render.engine = "CYCLES"
 sc.cycles.samples = SAMPLES
 sc.cycles.use_denoising = True
+# Keep the built scene resident on the device between renders. Without this, every
+# bpy.ops.render.render() call below tears down and re-uploads the whole Cycles scene (BVH for the
+# ~20 deforming bodies, geometry, denoiser), so the GPU idled (~0–25%) waiting on CPU re-sync for
+# each camera; persistent data reuses it across the 4 cameras and rebuilds only changed geometry.
+sc.render.use_persistent_data = True
 # Broadcast-faithful tone-map: the target clip is standard Rec.709, so render through the "Standard"
 # view transform rather than Blender's default AgX, which desaturated the floodlit grass to grey
 # and lifted the night sky. Keeps the measured colours (kit, grass, floodlight tint) reading as the
@@ -417,8 +422,12 @@ if DEVICE == "gpu":
                 break
         if chosen:
             for dev in prefs.devices:
-                dev.use = getattr(dev, "type", "") in (chosen, "CPU")
+                # GPU-only (exclude CPU): enabling CPU too makes Cycles render in hybrid mode, pegging
+                # all CPU cores path-tracing alongside the GPU — the high-CPU / low-GPU-util symptom.
+                dev.use = getattr(dev, "type", "") == chosen
             sc.cycles.device = "GPU"
+            if chosen == "OPTIX":
+                sc.cycles.denoiser = "OPTIX"  # denoise on the GPU, not the CPU OpenImageDenoiser
             print(f"BLENDER_ANIM_GPU {chosen}")
         else:
             print("BLENDER_ANIM_GPU none-found -> CPU")
@@ -461,6 +470,9 @@ for gf in gframes:
         ball_ob.hide_render = brow is None
         if brow is not None:
             ball_ob.location = tuple(float(x) for x in ball_pos[brow])
+    # Persistent data reuses device geometry between renders, so force a depsgraph re-eval here to
+    # push this frame's re-posed meshes to Cycles (else it could reuse the previous frame's pose).
+    bpy.context.view_layer.update()
     for name, cam in cameras:
         sc.camera = cam
         sc.render.filepath = os.path.join(OUT, name, f"frame_{gf:04d}.png")
