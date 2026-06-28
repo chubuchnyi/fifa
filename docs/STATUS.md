@@ -19,8 +19,8 @@
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
-- **Current focus:** **v1 (recognizability)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). Remaining v1: shirt numbers, simple stadium.
-- **NEXT ACTION:** **v1 step 1 DONE — measured kit colours + fixed the 19/1 team split → 10/10** (validated locally, no pod). Team A = **yellow** (Colombia) RGB (0.689,0.651,0.275); Team B = **light-blue** (Congo DR) RGB (0.302,0.524,0.647). Root: euclidean k-means on raw circular hue + `Team.color_rgb` never set; fix = hue-aware chroma clustering + measured `color_rgb` (pure core) + robust torso sampling (backend). Eye-checked in `/tmp/val_frames_v1` + zoomed `/tmp/v1_zoom_{9,15}.png`; 555 passed/10 skipped, ruff+mypy clean; committed. **NEXT v1 sub-task → shirt numbers** (OCR where readable, else roster), then simple stadium backdrop — scope with the user before starting.
+- **Current focus:** **v1 (recognizability)** — v0 geometry DONE (2026-06-27). **Kit colours DONE** (measured, 10/10 split). **Shirt numbers DONE** (plate-on-back; 4/20 read, rest honestly blank). Remaining v1: simple stadium.
+- **NEXT ACTION:** **v1 step 2 DONE — shirt numbers as a plate on the back** (validated locally, no pod). Generic easyocr yields ≈0 on this clip's ~20-30px back digits (measured), so numbers were read manually from upscaled back-crops and only the **high-confidence** ones assigned: #10 (t1) + #25 (t5) Colombia/yellow, #20 (t8) + #12 (t17) Congo/blue; the other 16 backs were illegible in this 48-frame window → left `None` (R-6: mark, don't fabricate). Render path: `anim_export.py` bakes a per-frame upper-back anchor + posterior normal + contrast colour into each npz; `blender_animate.py` places a centred FONT plate per frame (dark-on-yellow / white-on-blue) and an "action" camera that frames just the players. Eye-checked via close-ups `/tmp/num_closeup/closeup_t{1,8}.png` (10/20 upright, unmirrored, proud of the back). **UV-texture jersey deferred to v2.** **NEXT v1 sub-task → simple stadium** — scope with the user before starting.
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -40,8 +40,9 @@ the stadium is realistic and the same as the source. **Judged by eye.**
   world placement/scale (root spread **34×40 m**), poses, virtual cameras that frame the action, pitch
   with lines + goals. Validated end-to-end on the pod (`out/val/`); see §6. First "good" result.
 - [ ] **v1 — recognizability (CURRENT FOCUS).** [x] Team **kit colours** — measured from torso pixels;
-  split repaired 19/1 → **10/10**; A=yellow, B=light-blue (validated 2026-06-27, see §6). [ ] shirt numbers
-  (OCR where readable, else roster). [ ] simple stadium backdrop.
+  split repaired 19/1 → **10/10**; A=yellow, B=light-blue (validated 2026-06-27, see §6). [x] shirt
+  **numbers** — plate-on-back; 4/20 read (OCR≈0 at this resolution → manual high-conf read), rest
+  honestly blank (validated 2026-06-28, see §6). [ ] simple stadium backdrop.
 - [ ] **v2 — photoreal.** Textured/Gaussian avatars + photoreal stadium + view-synth (the gated
   `avatars`/`viewsynth` heavy halves). The full stated goal; a long research stage.
 
@@ -133,6 +134,27 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-06-28** — **v1 step 2 LANDED: shirt numbers as a plate on the back.** Second v1 sub-task.
+  **OCR reality (measured, R-6):** generic `easyocr` yields ≈0 on this clip's back-of-jersey digits
+  (~20-30 px at 1080p), so I read them manually from upscaled, reprojected back-crops and assigned
+  **only the high-confidence** ones: **#10** (track 1) & **#25** (track 5) Colombia/yellow, **#20**
+  (track 8) & **#12** (track 17) Congo/blue. The other 16 backs were illegible in this 48-frame
+  window → `jersey_number=None` (no fabrication). A real per-frame OCR/jersey model is deferred to
+  v2/pod. **Render mechanism:** `anim_export.py` bakes, per numbered subject, a per-frame upper-back
+  anchor (`0.62·spine3 + 0.38·neck + 0.19·back`, pushed proud so it floats on the curved skin), the
+  posterior horizontal normal `back_dir`, and a luminance-picked contrast colour (dark on yellow,
+  white on blue) into the npz. `blender_animate.py` builds a centred FONT plate per number and
+  orients it each frame so its face points along `back_dir`; an **"action" camera** frames just the
+  player cluster (the broadcast cam frames the whole 105×68 m pitch → players tiny). **Two bugs
+  caught by eye-check** (close-ups `/tmp/num_closeup/closeup_t{1,8}.png`): the plate basis used
+  `x = n×up`, which rolled the text 180° (upside-down **and** mirrored) — fixed to `x = up×n` so
+  text-up = +world-Z; and a 0.12 m offset buried the plate in the mesh (only fragments poked through)
+  — raised to 0.19 m. After the fix, **10 / 20 read upright, unmirrored, clearly on the right backs.**
+  At the action-cam framing (~40 m span, all 20 players) digits are still small in the wide shot —
+  per-frame legibility at distance is a v1-polish/v2 (UV jersey) concern, not a plate bug. UV-texture
+  jersey explicitly **deferred to v2**. Changed: `scripts/anim_export.py`, `scripts/blender_animate.py`;
+  `anim_export` ruff-clean, full path re-rendered without error. **NEXT v1 sub-task → simple stadium.**
 
 - **2026-06-27** — **v1 step 1 LANDED: measured kit colours + repaired the 19/1 team split → 10/10.**
   First v1 (recognizability) sub-task. Two coupled bugs found while validating the real-clip teams: (1) the

@@ -52,6 +52,55 @@ def _look_at(cam, target):
     ).to_track_quat("-Z", "Y").to_euler()
 
 
+def _make_number_plate(num, rgb):
+    """A centred FONT object carrying the shirt number; slightly emissive so it stays legible in
+    shadow. Placed/oriented per frame from the body's baked back-anchor (#numbers, v1)."""
+    tc = bpy.data.curves.new(f"num{num}", type="FONT")
+    tc.body = str(int(num))
+    tc.align_x = "CENTER"
+    tc.align_y = "CENTER"
+    tc.size = 0.30        # ~0.3 m cap height — a real shirt number
+    tc.extrude = 0.004    # tiny depth so it is not a zero-thickness sliver
+    ob = bpy.data.objects.new(f"plate{num}", tc)
+    bpy.context.collection.objects.link(ob)
+    mat = bpy.data.materials.new(f"num{num}")
+    mat.use_nodes = True
+    b = mat.node_tree.nodes.get("Principled BSDF")
+    b.inputs["Base Color"].default_value = (float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0)
+    b.inputs["Roughness"].default_value = 0.5
+    if "Emission Color" in b.inputs:  # Blender 4+/5 naming
+        b.inputs["Emission Color"].default_value = (
+            float(rgb[0]), float(rgb[1]), float(rgb[2]), 1.0
+        )
+        b.inputs["Emission Strength"].default_value = 0.55
+    tc.materials.append(mat)
+    return ob
+
+
+def _orient_plate(ob, anchor, back):
+    """Face the plate's front (+Z) along the body's outward back normal, text-up = world up. Hidden
+    when the back direction is degenerate (facing straight up/down ⇒ no horizontal posterior)."""
+    n = mathutils.Vector((float(back[0]), float(back[1]), float(back[2])))
+    if n.length < 1e-4:
+        ob.hide_render = True
+        return
+    n.normalize()
+    up = mathutils.Vector((0.0, 0.0, 1.0))
+    # reading direction (left→right as seen by a viewer behind the player). MUST be up×n, not n×up:
+    # with up×n the text-up axis y=n×x resolves to +world-Z (upright, unmirrored); the reversed
+    # cross rolls the plate 180° → digits render upside-down AND mirrored.
+    x = up.cross(n)
+    if x.length < 1e-4:
+        x = mathutils.Vector((1.0, 0.0, 0.0))
+    x.normalize()
+    y = n.cross(x)  # text-up, orthonormal; = +world-Z when n is horizontal
+    rot = mathutils.Matrix((x, y, n)).transposed().to_4x4()  # columns = local X,Y,Z in world
+    ob.matrix_world = mathutils.Matrix.Translation(
+        mathutils.Vector((float(anchor[0]), float(anchor[1]), float(anchor[2])))
+    ) @ rot
+    ob.hide_render = False
+
+
 bpy.ops.wm.read_factory_settings(use_empty=True)
 
 # ── load the animation export ────────────────────────────────────────────────
@@ -84,10 +133,23 @@ for mp in mesh_files:
     bsdf.inputs["Roughness"].default_value = 0.6
     me.materials.append(mat)
     frame_row = {int(f): i for i, f in enumerate(frames)}
-    bodies.append((ob, me, verts, frame_row, bsdf, alpha))
+    # Shirt-number plate baked by anim_export.py (#numbers): a back-anchored FONT object oriented
+    # per frame. Absent for subjects with no read number (older exports never carry these keys).
+    plate = None
+    if "jersey_number" in d.files:
+        plate = {
+            "ob": _make_number_plate(int(d["jersey_number"]), d["number_rgb"]),
+            "anchor": np.asarray(d["back_anchor"], dtype=np.float32),
+            "back": np.asarray(d["back_dir"], dtype=np.float32),
+        }
+    bodies.append((ob, me, verts, frame_row, bsdf, alpha, plate))
     all_frames.update(frame_row)
     lo = np.minimum(lo, verts.reshape(-1, 3).min(0))
     hi = np.maximum(hi, verts.reshape(-1, 3).max(0))
+
+# Bodies-only bbox, captured BEFORE the pitch expands lo/hi below — drives an "action" camera that
+# frames just the players (not the whole 105×68 m field), so shirt numbers are big enough to read.
+body_lo, body_hi = lo.copy(), hi.copy()
 
 # Measured pitch markings + goal frames (anim_export.py's pitch.npz, #205). Loaded BEFORE the
 # camera framing so lo/hi — hence ctr/span — span the whole pitch, not just the bodies: that keeps
@@ -174,11 +236,16 @@ bg.inputs[1].default_value = 1.0
 
 # ── fixed cameras (static; the players + ball move within frame) ─────────────
 look = (ctr[0], ctr[1], ctr[2] + 0.6)
+# Players-only centre/extent for the tight "action" framing (numbers must be legible).
+bctr = (body_lo + body_hi) / 2.0
+bspan = float(max((body_hi - body_lo)[0], (body_hi - body_lo)[1], 6.0))
+look_action = (bctr[0], bctr[1], bctr[2] + 0.6)
 cam_specs = {
     "broadcast": (ctr[0] + span * 0.35, ctr[1] - span * 1.5 - 8.0, ctr[2] + span * 0.55 + 6.0),
     "sideline":  (ctr[0], ctr[1] - span * 1.2 - 6.0, ctr[2] + 2.0),
     "top":       (ctr[0], ctr[1], ctr[2] + span * 1.8 + 20.0),
     "goal":      (ctr[0] + span * 1.4 + 10.0, ctr[1], ctr[2] + span * 0.4 + 4.0),
+    "action":    (bctr[0] + bspan * 0.45, bctr[1] - bspan * 1.3 - 6.0, bctr[2] + bspan * 0.8 + 5.0),
 }
 cameras = []
 for name in WANT_CAMS:
@@ -189,7 +256,13 @@ for name in WANT_CAMS:
     cam = bpy.data.objects.new(name, cam_data)
     bpy.context.collection.objects.link(cam)
     cam.location = loc
-    _look_at(cam, (look[0], look[1], 0.6) if name == "top" else look)
+    if name == "action":
+        target = look_action
+    elif name == "top":
+        target = (look[0], look[1], 0.6)
+    else:
+        target = look
+    _look_at(cam, target)
     cameras.append((name, cam))
 assert cameras, f"no known cameras among {WANT_CAMS} (try broadcast,sideline,top,goal)"
 
@@ -237,10 +310,12 @@ assert gframes, "no frames to render (empty export?)"
 rendered = 0
 for gf in gframes:
     visible = 0
-    for ob, me, verts, frame_row, bsdf, alpha in bodies:
+    for ob, me, verts, frame_row, bsdf, alpha, plate in bodies:
         row = frame_row.get(gf)
         if row is None:
             ob.hide_render = True
+            if plate is not None:
+                plate["ob"].hide_render = True
             continue
         ob.hide_render = False
         visible += 1
@@ -249,6 +324,8 @@ for gf in gframes:
         bsdf.inputs["Alpha"].default_value = float(alpha[row])
         me.vertices.foreach_set("co", np.ascontiguousarray(verts[row], dtype=np.float32).ravel())
         me.update()
+        if plate is not None:
+            _orient_plate(plate["ob"], plate["anchor"][row], plate["back"][row])
     if ball_ob is not None:
         brow = ball_row.get(gf)
         ball_ob.hide_render = brow is None

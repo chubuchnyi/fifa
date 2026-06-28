@@ -105,6 +105,35 @@ for i, subj in enumerate(scene.subjects):
     verts = out.vertices.numpy() @ R_SMPLX_TO_OURS.T + transl[:, None, :]  # (T,V,3)
     color = np.asarray(team_color.get(subj.team_id, palette[i % 10]), dtype=np.float32)
     alpha = appearance_alpha(frames, clip_first, clip_last, FADE_FRAMES)  # (T,) in [0,1]
+
+    # Shirt number plate (#numbers, v1): when the subject carries a jersey number, bake a per-frame
+    # upper-back anchor + outward "back" direction so the renderer can place a number on the shirt
+    # without any SMPL-X knowledge. Anchor = spine3↔neck blend pushed out along the back normal; the
+    # back normal is the *posterior* horizontal direction, derived as -(facing), facing = eyes−head
+    # (SMPL-X joints 23/24 are the eyeballs, in front of the head joint 15).
+    num_extra: dict[str, np.ndarray] = {}
+    if subj.jersey_number is not None:
+        joints = out.joints.numpy() @ R_SMPLX_TO_OURS.T + transl[:, None, :]  # (T, J, 3) z-up world
+        spine3, neck, head = joints[:, 9], joints[:, 12], joints[:, 15]
+        facing = 0.5 * (joints[:, 23] + joints[:, 24]) - head
+        facing[:, 2] = 0.0
+        fn = np.linalg.norm(facing, axis=1, keepdims=True)
+        facing = np.divide(facing, fn, out=np.zeros_like(facing), where=fn > 1e-6)
+        back = -facing  # (T,3) unit posterior horizontal; zero rows where facing was degenerate
+        # Mid-upper-back height (spine3-weighted so it sits between the shoulder blades, not on the
+        # neck) pushed ~0.19 m out along the posterior normal. The spine joints sit at the torso
+        # centre, so a smaller offset leaves the plate buried in the mesh (only fragments poke
+        # through); 0.19 floats it a few cm proud of the curved back skin so the digits read clean.
+        anchor = 0.62 * spine3 + 0.38 * neck + 0.19 * back
+        lum = float(0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2])
+        num_rgb = np.array([0.04, 0.04, 0.07] if lum > 0.5 else [0.97, 0.97, 0.97], np.float32)
+        num_extra = dict(
+            jersey_number=np.int64(int(subj.jersey_number)),
+            back_anchor=anchor.astype(np.float32),
+            back_dir=back.astype(np.float32),
+            number_rgb=num_rgb,
+        )
+
     dst = os.path.join(OUT, f"anim_subject_{subj.track_id}.npz")
     np.savez(
         dst,
@@ -113,11 +142,16 @@ for i, subj in enumerate(scene.subjects):
         color=color,
         frames=frames.astype(np.int64),
         alpha=alpha.astype(np.float32),
+        **num_extra,
     )
     span = float(np.linalg.norm(transl.max(0) - transl.min(0)))
+    num_msg = ""
+    if num_extra:
+        bz = float(np.abs(num_extra["back_dir"][:, 2]).mean())  # ~0 ⇒ horizontal (sane)
+        num_msg = f" number={int(num_extra['jersey_number'])} back_dir|z|~{bz:.2f}"
     print(
         f"subject_{subj.track_id}: team={subj.team_id} frames={n_frames} "
-        f"transl_span={span:.2f}m -> {os.path.basename(dst)}"
+        f"transl_span={span:.2f}m{num_msg} -> {os.path.basename(dst)}"
     )
 
 if scene.ball is not None:
