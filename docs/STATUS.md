@@ -65,7 +65,9 @@ the stadium is realistic and the same as the source. **Judged by eye.**
   node-graph, both render paths; ~5 m bands; validated, see §6). [x] **Lever 3 — light-from-clip**
   (floodlit-NIGHT, **auto-detected** floodlight colour + **manual** CLI override; dark world + ring of soft
   cool suns → even soft multi-shadows; validated, see §6). **The agreed 1→2→3 plan is complete.** Generative
-  finishing (C) RULED OUT as primary (M2-0 spike) — possible M3 backstop only.
+  finishing (C) RULED OUT as *primary* (M2-0 spike); **2026-07-03 research reframes it as the recommended
+  post-v2 lever** — structure-locked (depth+pose) v2v over our render, geometry stays the source of truth
+  (see §6 top + [`research/2026-07-generative-render-landscape.md`](research/2026-07-generative-render-landscape.md)).
 
 ---
 
@@ -195,6 +197,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **RESEARCH: mid-2026 generative-model landscape vs. this task («как бы делали с нуля»)**
+  → [`research/2026-07-generative-render-landscape.md`](research/2026-07-generative-render-landscape.md)
+  (3 parallel web passes: char-swap/pose-driven video; re-camera+4D; HMR/avatars/env/finishing). **All three
+  converge on reconstruct-then-condition — i.e. the existing measured core is the right architecture; the
+  *CG-photoreal finish* is the replaceable part.** Facts: direct re-camera of broadcast tops out at ±10–30°,
+  sub-HD, 81–121 f (monocular depth fails on telephoto/small players/grass/crowd); char-swap ceiling = 7
+  large-in-frame subjects (22×~100 px is OOD for everything); BUT Vista4D (open, Netflix Eyeline) / GEN3C
+  (NVIDIA) take an **explicit point cloud as conditioning** → we can feed OUR reconstruction; Wan 2.2
+  Fun-Control/VACE (open) does depth+pose-locked v2v restyle = "generative renderer" over Cycles output;
+  SAM 3D Body (Meta, open, promptable) fits the PoseEstimator port; LHM++/IDOL = one-shot SMPL-X-driven
+  splat doubles from crops (stunt-double grade, not face-grade); SeedVR2/FlashVSR ≈ Topaz; night-relighting
+  off-the-shelf. **Strategic reframe:** the Blender render's product becomes the *conditioning stack*
+  (RGB+depth+normal+semantic AOVs) for a structure-locked finishing pass (ADR-0007 seam B — now buildable
+  with open weights); photoreal levers stay as a better base plate, not the ceiling. Priority when v2
+  re-render is judged: (1) Wan 2.2 Fun-Control v2v + SeedVR2 over existing frames (no contract change),
+  (2) AOV passes in the export contract, (3) SAM 3D Body behind the port, (4) splat doubles, (5) Vista4D
+  with our point cloud. Dead ends: end-to-end swap of the raw clip, pure T2V regen (violates R-6).
 
 - **2026-07-03** — **EYE-VERDICT: the 2026-06-28 deliverable is UNWATCHABLE as broadcast → deliverable-path
   refactor (ADR-0011), E2E-verified locally.** Eye-judgement of the 4 mp4s vs the source clip (the pending
