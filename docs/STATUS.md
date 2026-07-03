@@ -20,12 +20,13 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **ADR-0011 pod re-run PASSED the framing eye-judgement (2026-07-03, §6) — the virtual
-  operator fixed the 06-28 failure. Next: research priority 1 — structure-locked generative finishing
-  (Wan 2.2 Fun-Control/VACE v2v + SeedVR2) over the rendered frames (`out/anim_adr11` on the pod volume,
-  mp4s local in `out/pod_adr11_check/`), with the source clip as the night-look reference; it should also
-  close the biggest measured-base gap (day-bright TONE vs dark floodlit source — floodlight COLOUR is
-  measured+applied, exposure/contrast is not night).** Historical context — the 2026-06-28
+- **NEXT ACTION:** **v2v finishing spike CONFIRMED the reconstruct-then-condition bet (2026-07-03, §6):
+  depth-locked Wan VACE over our render closes night tone + crowd + grass in one pass, structure/motion
+  stay ours — but depth-only control does NOT lock per-player KIT COLOURS (teams drift to the prompt).
+  Next: research priority 2 — colour/semantic conditioning (start with `--control rgb|gray` A/B in
+  `scripts/pod_v2v.sh`, then AOV passes in the export contract) to pin team identity; after that 720p +
+  SeedVR2.** Spike artifacts local: `out/pod_adr11_check/v2v/` (broadcast+sideline mp4 + judged stills);
+  weights + genfinish venv persist on the pod volume. Historical context — the 2026-06-28
   deliverable FAILED the eye-judgement (see §6 top): players = 5–10 px specks because the renderer's static
   bbox cameras framed the whole bowl from OUTSIDE; sideline = crowd wall; plus two wiring holes (COHERENCE
   unset→0 on direct pod runs, `PITCH3D_STADIUM_VIDEO` never wired officially). Fixed: exporter is now
@@ -201,6 +202,22 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **PRIORITY-1 SPIKE: structure-locked generative finishing WORKS — depth-locked Wan VACE
+  turns the CG deliverable into night-broadcast footage.** New `scripts/pod_v2v_finish.py` +
+  `scripts/pod_v2v.sh` (separate `genfinish` venv — torch 2.11 **cu128**, Blackwell sm_120 needs it;
+  Wan2.1-VACE-1.3B-diffusers weights ~17 GB cached in `/workspace/hf`, both survive pod stop). Two runs
+  (broadcast + sideline), 57 f 832×480 @ 30 steps, control = Depth-Anything-V2 over OUR rendered frames,
+  reference = source-clip frame 0, ~5 min generation each on the PRO 4500. **Eye-verdict vs the render
+  input: the three measured-base gaps close in one pass — day-bright tone → floodlit NIGHT bowl,
+  kaleidoscope crowd → plausible dark crowd with yellow patches, flat grass → floodlit grass; LED ad
+  boards appear; large sideline players stay coherent humans (no melted bodies / extra limbs in stills);
+  camera, formation and motion are OURS (R-6 held).** Costs found: (1) **kit-identity drift: depth carries
+  no colour, so per-player team colours come from prompt/ref and are NOT locked — sideline went mostly
+  yellow, the cyan team nearly vanished** (exactly what research priority 2, AOV semantic/RGB conditioning,
+  is for); (2) heavier edge vignette than the source; (3) hallucinated ad-board text; (4) 480p spike res —
+  far-cam players blobby (SeedVR2 step still pending). Spike outputs local:
+  `out/pod_adr11_check/v2v/{broadcast,sideline}_vace.mp4` + judged stills.
 
 - **2026-07-03** — **POD RE-RUN attempt 2 (correct clip): `POD_MAKE_VIDEO_OK` — EYE-VERDICT: framing FIXED,
   the ADR-0011 virtual operator passes Gate 1.** Timing: recon 284 s (23 subjects + ball, continuity 25→23,
