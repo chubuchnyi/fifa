@@ -24,10 +24,12 @@
   (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
   pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
   final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
-  drift 244.2°→184.9°, auto target), physics continuous around the old teleport zone. FINAL:
-  `out/anim_finish/sideline_rgbnight_720p_pinned.mp4` (local). Next: user eye-judgement of the
-  final vs the GOAL + pick the next photoreal lever (player crispness at distance is the top
-  candidate by eye).** Historical context of the recipe: kit-boost at source +
+  drift 244.2°→184.9°, auto target), physics continuous around the old teleport zone. **Player
+  crispness FIXED same day (§6): v2v now runs at 1280×720 by default — 480p latents were
+  repainting distant players as mush; A/B shows separated limbs/readable poses, no regressions.
+  Best FINAL: `out/anim_finish/sideline_rgbnight_hi720_720p_pinned.mp4`** (local). Next: user
+  eye-judgement of the final vs the GOAL + pick the next photoreal lever.** Historical context
+  of the recipe: kit-boost at source +
   night-graded rgb control = team identity AND floodlit-night tone survive Wan-VACE in one pass**
   (yellow team locks hard, cyan reads as the second team with a cyan→blue hue drift; night look kept
   end-to-end — first variant ever). Chain of evidence: depth spike (restyle ✓, kits ✗) → rgb|gray A/B
@@ -231,6 +233,21 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-03** — **PLAYER-CRISPNESS LEVER LANDED: v2v at 1280×720 is the new default.**
+  Diagnosis (`out/anim_finish/crisp_zoom_*_f30.png`, stage-by-stage crops of the same distant
+  players): crisp in the 720p beauty render → MUSH after Wan-VACE at 832×480 (a 15–25 px player
+  is 2–3 latent px after the VAE's 8× compression — the model cannot represent him and repaints
+  a blob) → SeedVR2 only sharpens the mush. A/B (`scripts/pod_v2v_hires_ab.sh`, same night
+  frames/seed/steps, ONLY resolution changed, SeedVR2 1:1 restore + pin on top): **720p resolves
+  separated limbs and readable poses where 480p had merged blobs; a hallucinated crowd smear in
+  the 480p cell is gone; foreground players also crisper; night look, quilt and pinned kits all
+  hold — no structure breakdown from the 1.3B model at 720p.** Bonus datum: kit-hue drift shrinks
+  at 720p (235.8° vs 244.2° before pin) — the prior repaints less. Cost: ~19.3 s/it × 30 steps
+  ≈ 10 min vs ~3 min at 480p (fits 32 GB with cpu-offload, no OOM). PROMOTED: `pod_finish_batch.sh`
+  now defaults `V2V_WIDTH=1280 V2V_HEIGHT=720 V2V_FLOW=5.0` (env knobs = manual override, old
+  480p reachable). Artifacts local: `out/anim_finish/sideline_rgbnight_hi720_720p_pinned.mp4`
+  (best-yet FINAL), `ab_hires_{far,mid,full}_f30.png` (judged). Pod session ~35 min ≈ $0.4,
+  **pod STOPPED**.
 - **2026-07-03** — **FULL FINISHING CHAIN E2E ON THE POD — all three levers land in one run.**
   `pod_finish_batch.sh` executed on a FRESH reconstruction (PHYSICS=1, DEMO_EDITS=0, 60 frames,
   sideline): recon 310 s → quilt export → GPU render 60/60 → grade3 → Wan-VACE (57 f) → SeedVR2

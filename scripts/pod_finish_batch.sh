@@ -12,6 +12,7 @@
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TARGET_HUE=  DILATE=15
+#      V2V_WIDTH=1280 V2V_HEIGHT=720 V2V_FLOW=5.0  (832x480/3.0 = the old fast-draft cell)
 set -euo pipefail
 cd /workspace/fifa
 . scripts/video_defaults.sh
@@ -39,8 +40,11 @@ echo "== night grade done: $(ls "$DST" | wc -l) frames =="
 
 # 3) v2v: rgb control over the night-graded frames.
 # V2V must be ABSOLUTE: pod_seedvr2.sh cd's into its own repo before testing INPUTS.
+# 1280x720 default (A/B 2026-07-03): at 832x480 a distant player is 2-3 latent px after the
+# 8x VAE and Wan repaints him as mush; 720p resolves limbs/poses (~10 min vs ~3 min per clip).
 V2V="$(realpath -m "$BATCH_OUT")/v2v/${CAM}_rgbnight.mp4"
-FRAMES="$DST" OUT="$V2V" bash scripts/pod_v2v.sh --control rgb
+FRAMES="$DST" OUT="$V2V" bash scripts/pod_v2v.sh --control rgb \
+  --width "${V2V_WIDTH:-1280}" --height "${V2V_HEIGHT:-720}" --flow-shift "${V2V_FLOW:-5.0}"
 
 # 4) SeedVR2 720p
 INPUTS="$V2V" bash scripts/pod_seedvr2.sh
