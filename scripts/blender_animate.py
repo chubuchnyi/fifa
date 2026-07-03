@@ -1,10 +1,13 @@
 """Render a multi-camera ANIMATION of the reconstructed bodies + ball with Blender Cycles.
 
-Input is scripts/anim_export.py's output: `anim_subject_*.npz` {verts (T,V,3) z-up, faces, color}
-+ optional `ball.npz` {frames, positions_3d (T,3), height_confidence}. For every frame we re-pose
-each body (`foreach_set("co", ...)`) and move the ball, then render the SAME instant from N fixed
-cameras (broadcast / sideline / top-down / goal-end) — so each camera yields a PNG sequence that
-scripts/pod_make_video.sh stitches into one mp4 per angle.
+Input is an anim export directory (pitch3d.app.anim_export), VALIDATED first against its
+`manifest.json` — the versioned contract in `anim_contract.py` — so a stale/partial/drifted
+export fails loudly here instead of by eye in a finished render. For every frame we re-pose
+each body (`foreach_set("co", ...)`) and move the ball, then render the SAME instant from the
+VIRTUAL OPERATOR's cameras (`cameras.npz`: fixed mounts inside the stadium bowl whose look-at
+and fov pan/zoom with the action per frame — broadcast / sideline / top / goal). Each camera
+yields a PNG sequence that scripts/pod_make_video.sh stitches into one mp4 per angle. Exports
+predating the operator fall back to the old bbox-derived static cameras.
 
 Runs either as a Blender-binary script (`blender --background --python ... -- --in DIR`) or as the
 `bpy` pip module (`python scripts/blender_animate.py --in DIR`) — argv parsing handles both. Cycles
@@ -20,6 +23,7 @@ Flags (after `--` when run via the binary):
 """
 
 import glob
+import math
 import os
 import sys
 
@@ -28,12 +32,13 @@ import numpy as np
 import bpy
 import mathutils
 
-# Shared pitch3d-free Blender node-graphs (grass/sky/sun), the "B" data layer — imported by file so
-# this script stays self-contained (--factory-startup, no pitch3d). It lives next to _cycles_script.
+# Shared pitch3d-free Blender modules (scene node-graphs + the export contract) — imported by
+# file so this script stays self-contained (--factory-startup, no pitch3d install needed).
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "src", "pitch3d", "adapters", "blender",
 ))
+import anim_contract  # noqa: E402
 import scene_builders  # noqa: E402
 
 _argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else sys.argv[1:]
@@ -54,6 +59,11 @@ STEP = int(_arg("--frame-step", "1"))
 WANT_CAMS = _arg("--cameras", "broadcast,sideline,top,goal").split(",")
 
 BALL_RADIUS = 0.11  # FIFA size-5 ball ≈ 0.11 m radius
+
+# The export↔render contract (both sides versioned): refuse to build anything from a directory
+# that is not a complete, current anim export. ContractError names exactly what is missing or
+# stale — the drift this catches used to surface only by eye in a finished render.
+anim_contract.load_manifest(IN)
 
 
 def _look_at(cam, target):
@@ -359,7 +369,25 @@ for _flag, _key, _cast in (
         light_kwargs[_key] = _cast(_v)
 scene_builders.build_stadium_lighting(bpy, **light_kwargs)
 
-# ── fixed cameras (static; the players + ball move within frame) ─────────────
+# ── cameras: the virtual operator (cameras.npz), static bbox specs as legacy fallback ─────
+# anim_export plans FIXED mounts inside the stadium bowl with a per-frame look-at + horizontal
+# fov that pan/zoom with the action (core/scene/cameras.py). The old static cameras below were
+# derived from the bbox of everything loaded — with the 105x68 m pitch folded in, every camera
+# framed the whole bowl from outside and the players became specks. They remain only for
+# exports that predate the operator.
+cam_path = os.path.join(IN, "cameras.npz")
+virtual_cams = {}
+cam_row = {}
+if os.path.exists(cam_path):
+    cd = np.load(cam_path)
+    cam_row = {int(f): i for i, f in enumerate(cd["frames"])}
+    for _name in (str(n) for n in cd["names"]):
+        virtual_cams[_name] = {
+            "pos": np.asarray(cd[f"{_name}_pos"], dtype=float),
+            "look": np.asarray(cd[f"{_name}_look"], dtype=float),
+            "fov": np.asarray(cd[f"{_name}_fov_deg"], dtype=float),
+        }
+
 look = (ctr[0], ctr[1], ctr[2] + 0.6)
 # Players-only centre/extent for the tight "action" framing (numbers must be legible).
 bctr = (body_lo + body_hi) / 2.0
@@ -374,22 +402,31 @@ cam_specs = {
 }
 cameras = []
 for name in WANT_CAMS:
-    loc = cam_specs.get(name)
-    if loc is None:
+    vc = virtual_cams.get(name)
+    if vc is None and name not in cam_specs:
         continue
     cam_data = bpy.data.cameras.new(name)
+    cam_data.clip_end = 2000.0  # bowl+pitch reach ~150 m from a mount; the 100 m default clips them
     cam = bpy.data.objects.new(name, cam_data)
     bpy.context.collection.objects.link(cam)
-    cam.location = loc
-    if name == "action":
-        target = look_action
-    elif name == "top":
-        target = (look[0], look[1], 0.6)
+    if vc is not None:
+        cam_data.sensor_fit = "HORIZONTAL"  # planned fov_x_deg IS the horizontal angle
+        cam.location = tuple(float(x) for x in vc["pos"])
+        _look_at(cam, vc["look"][0])
+        cam_data.angle = math.radians(float(vc["fov"][0]))
     else:
-        target = look
-    _look_at(cam, target)
+        cam.location = cam_specs[name]
+        if name == "action":
+            target = look_action
+        elif name == "top":
+            target = (look[0], look[1], 0.6)
+        else:
+            target = look
+        _look_at(cam, target)
     cameras.append((name, cam))
 assert cameras, f"no known cameras among {WANT_CAMS} (try broadcast,sideline,top,goal)"
+print(f"BLENDER_ANIM_CAMS {'virtual-operator' if virtual_cams else 'static-legacy'} "
+      f"{[c for c, _ in cameras]}")
 
 # ── render settings ──────────────────────────────────────────────────────────
 sc = bpy.context.scene
@@ -473,7 +510,13 @@ for gf in gframes:
     # Persistent data reuses device geometry between renders, so force a depsgraph re-eval here to
     # push this frame's re-posed meshes to Cycles (else it could reuse the previous frame's pose).
     bpy.context.view_layer.update()
+    crow = cam_row.get(gf)
     for name, cam in cameras:
+        vc = virtual_cams.get(name)
+        if vc is not None and crow is not None:
+            # The operator pans (aim at the smoothed action) and zooms (fov fits the action).
+            _look_at(cam, vc["look"][crow])
+            cam.data.angle = math.radians(float(vc["fov"][crow]))
         sc.camera = cam
         sc.render.filepath = os.path.join(OUT, name, f"frame_{gf:04d}.png")
         bpy.ops.render.render(write_still=True)
