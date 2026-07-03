@@ -52,7 +52,13 @@ def measure_team_hsv(
     sat_pct: float = 60.0,
     sat_floor: float = 0.10,
 ) -> tuple[float, float, int] | None:
-    """(target hue deg, target sat 0..1, n voting px) from the grade-surviving masked pixels."""
+    """(target hue deg, target sat 0..1, n voting px) from the grade-surviving masked pixels.
+
+    Dominant-mode measurement: histogram peak + circular mean of its ±25° neighbourhood.
+    A plain circular mean is wrong here — grade3 splits team-A yellow into a yellow/olive
+    bimodal (measured 2026-07-03: beauty 60-80° unimodal, night 140-160°+60-70°) and the
+    mean lands in no-man's land between the modes.
+    """
     ch = TEAM_TO_BGR_INDEX[team]
     hs: list[np.ndarray] = []
     ss: list[np.ndarray] = []
@@ -75,10 +81,14 @@ def measure_team_hsv(
     keep = s_all >= thr
     if not keep.any():
         return None
-    ang = np.deg2rad(h_all[keep])
+    h_keep = h_all[keep]
+    hist, edges = np.histogram(h_keep, bins=72, range=(0.0, 360.0))
+    peak = float(edges[int(np.argmax(hist))]) + 2.5
+    near = np.abs(np.mod(h_keep - peak + 180.0, 360.0) - 180.0) <= 25.0
+    ang = np.deg2rad(h_keep[near])
     hue = float(np.rad2deg(np.arctan2(np.sin(ang).mean(), np.cos(ang).mean())) % 360.0)
-    sat = float(np.percentile(s_all[keep], 75.0))
-    return hue, sat, int(keep.sum())
+    sat = float(np.percentile(s_all[keep][near], 75.0))
+    return hue, sat, int(near.sum())
 
 
 def inject_frame(

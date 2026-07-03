@@ -10,6 +10,7 @@
 #
 # Needs a finished pod_finish_batch.sh run on the volume (frames_night + mask + frames).
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  ALPHA=0.8  ERODE=3  CS=1.0  TAG=kitinj
+#      TEAM_A_HSV="65 0.85"  TEAM_B_HSV="185 0.95"  (manual kit targets; empty = auto-measure)
 #      WIDTH=1280 HEIGHT=720 FLOW=5.0 RES=720 BATCH=17  INJECT_ONLY=1 → stop after step 1
 set -euo pipefail
 cd /workspace/fifa
@@ -28,8 +29,11 @@ test -d "$MASKS" || { echo "cluster_ab: missing $MASKS (run pod_finish_batch.sh 
 
 # 1) kit-colour injection into the control frames
 INJ="$BATCH_OUT/mesh/frames_nightkit/$CAM"
+INJ_FLAGS=(--alpha "${ALPHA:-0.8}" --erode "${ERODE:-3}")
+if [ -n "${TEAM_A_HSV:-}" ]; then INJ_FLAGS+=(--team-a-hsv $TEAM_A_HSV); fi
+if [ -n "${TEAM_B_HSV:-}" ]; then INJ_FLAGS+=(--team-b-hsv $TEAM_B_HSV); fi
 "$PY" scripts/control_kit_inject.py --frames "$NIGHT" --masks "$MASKS" --out "$INJ" \
-  --alpha "${ALPHA:-0.8}" --erode "${ERODE:-3}"
+  "${INJ_FLAGS[@]}"
 if [ "${INJECT_ONLY:-0}" = "1" ]; then
   echo "CLUSTER_AB_INJECT_ONLY ok: $INJ"
   exit 0
