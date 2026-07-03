@@ -105,6 +105,17 @@ def _purge_stale(out_dir: str) -> None:
             os.remove(path)
 
 
+def _boost_rgb(rgb, sat: float, val: float) -> np.ndarray:
+    """Saturation/value gain in HSV space, clipped to [0, 1]."""
+    import colorsys
+
+    r, g, b = np.clip(np.asarray(rgb, dtype=np.float64), 0.0, 1.0)
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    return np.asarray(
+        colorsys.hsv_to_rgb(h, min(s * sat, 1.0), min(v * val, 1.0)), dtype=np.float32
+    )
+
+
 def _export_subjects(
     scene,
     *,
@@ -138,6 +149,20 @@ def _export_subjects(
     team_color = {t.id: t.color_rgb for t in scene.teams if t.color_rgb is not None}
     palette = matplotlib.colormaps["tab10"](np.linspace(0, 1, 10))[:, :3]
 
+    # Kit-colour boost (v2, 2026-07-03 §6): team colours are MEASURED off a floodlit-night clip,
+    # so they come out dark/desaturated — and at 7-11 % texture coverage ~90 % of vertices carry
+    # this flat kit colour, which is why bodies read grey in the render AND why v2v conditioning
+    # cannot lock team identity. Boost saturation/value at this presentation layer only (the
+    # measured scene value stays untouched, R-6). Override PITCH3D_KIT_SAT / PITCH3D_KIT_VAL;
+    # 1.0 1.0 disables.
+    kit_sat = float(os.environ.get("PITCH3D_KIT_SAT", "1.6"))
+    kit_val = float(os.environ.get("PITCH3D_KIT_VAL", "1.4"))
+    if kit_sat != 1.0 or kit_val != 1.0:
+        for t_id, rgb in sorted(team_color.items()):
+            print(f"kit boost team {t_id}: {np.round(np.asarray(rgb), 3)} -> "
+                  f"{np.round(_boost_rgb(rgb, kit_sat, kit_val), 3)} "
+                  f"(sat x{kit_sat}, val x{kit_val})")
+
     tracks: list[tuple[np.ndarray, np.ndarray]] = []
     for i, subj in enumerate(scene.subjects):
         motion = resolve_subject_motion(subj.proposal, scene.corrections_for(subj.track_id))
@@ -163,7 +188,9 @@ def _export_subjects(
             )
         transl = np.asarray(motion.pose.transl, dtype=np.float32)  # (T,3) z-up world
         verts = out.vertices.numpy() @ rot.T + transl[:, None, :]  # (T,V,3)
-        color = np.asarray(team_color.get(subj.team_id, palette[i % 10]), dtype=np.float32)
+        color = _boost_rgb(
+            team_color.get(subj.team_id, palette[i % 10]), kit_sat, kit_val
+        )
         alpha = appearance_alpha(frames, clip_first, clip_last, fade_frames)  # (T,) in [0,1]
 
         # Measured per-vertex body texture (M2-8b): sample each player's real broadcast pixels
