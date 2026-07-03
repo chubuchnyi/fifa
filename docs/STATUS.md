@@ -20,11 +20,12 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **Deliverable-path refactor (ADR-0011) DONE & E2E-verified locally (2026-07-03) — pod
-  re-run IN PROGRESS (`out/anim_adr11`, 60 f × 4 cams): first attempt reconstructed the WRONG clip
-  (`/workspace/clip.mp4` default = stale daytime stock video) and crashed in the stadium backdrop;
-  relaunched with `PITCH3D_CLIP=/workspace/Colombia-1-0-Congo-DR1080p.mp4` (§6). Then: copy mp4s local,
-  STOP the pod, eye-judge the framing.** The 2026-06-28
+- **NEXT ACTION:** **ADR-0011 pod re-run PASSED the framing eye-judgement (2026-07-03, §6) — the virtual
+  operator fixed the 06-28 failure. Next: research priority 1 — structure-locked generative finishing
+  (Wan 2.2 Fun-Control/VACE v2v + SeedVR2) over the rendered frames (`out/anim_adr11` on the pod volume,
+  mp4s local in `out/pod_adr11_check/`), with the source clip as the night-look reference; it should also
+  close the biggest measured-base gap (day-bright TONE vs dark floodlit source — floodlight COLOUR is
+  measured+applied, exposure/contrast is not night).** Historical context — the 2026-06-28
   deliverable FAILED the eye-judgement (see §6 top): players = 5–10 px specks because the renderer's static
   bbox cameras framed the whole bowl from OUTSIDE; sideline = crowd wall; plus two wiring holes (COHERENCE
   unset→0 on direct pod runs, `PITCH3D_STADIUM_VIDEO` never wired officially). Fixed: exporter is now
@@ -200,6 +201,22 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **POD RE-RUN attempt 2 (correct clip): `POD_MAKE_VIDEO_OK` — EYE-VERDICT: framing FIXED,
+  the ADR-0011 virtual operator passes Gate 1.** Timing: recon 284 s (23 subjects + ball, continuity 25→23,
+  refit on-anchor 59/60, max residual 0.85 m), export 28 artifacts (schema v1: 23 subjects + ball + cameras +
+  lighting + pitch + stadium), render 240 PNG in ~8 min (OptiX + persistent data, c008241 paid off), 4 mp4s →
+  local `out/pod_adr11_check/`, **pod stopped**. Judged vs source frames (f0/f30/f55 per camera):
+  **broadcast** — elevated in-bowl main-stand cam, action tracked, zoom stable across the clip, players read
+  as figures not 5–10 px specks; **sideline** — low pitchside, players large in frame; **goal** — behind-goal
+  with the goal frame in shot; **top** — whole-pitch schematic with fixed fov **by design** (cameras.py:191),
+  not a zoom bug. Same episode recognizable: formation cluster + drift over 60 f match the source. v2 levers
+  survived the deliverable path: mowing stripes ✓, kit tints (yellow vs cyan distinguishable) ✓, crowd bowl ✓,
+  `lighting.npz` measured & applied ✓. **Remaining visual gaps, in order: (1) night TONE — floodlight colour
+  is measured+applied but frames read day-bright vs the dark floodlit source (exposure/contrast); (2) grey
+  low-texture-coverage bodies on near cams (~7–11 % coverage); (3) crowd-mosaic kaleidoscope.** All three are
+  exactly what the research's priority-1 structure-locked v2v finishing pass (Wan 2.2 Fun-Control/VACE +
+  SeedVR2, source clip as night-look reference) is expected to address without contract changes.
 
 - **2026-07-03** — **POD RE-RUN, attempt 1: crashed on the WRONG CLIP; root-caused & relaunched.** First
   ADR-0011 pod run used `pod_make_video.sh` defaults → `PITCH3D_CLIP=/workspace/clip.mp4`, which turned out
