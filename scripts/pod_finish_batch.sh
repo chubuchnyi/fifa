@@ -37,8 +37,9 @@ for f in "$SRC"/frame_*.png; do
 done
 echo "== night grade done: $(ls "$DST" | wc -l) frames =="
 
-# 3) v2v: rgb control over the night-graded frames
-V2V="$BATCH_OUT/v2v/${CAM}_rgbnight.mp4"
+# 3) v2v: rgb control over the night-graded frames.
+# V2V must be ABSOLUTE: pod_seedvr2.sh cd's into its own repo before testing INPUTS.
+V2V="$(realpath -m "$BATCH_OUT")/v2v/${CAM}_rgbnight.mp4"
 FRAMES="$DST" OUT="$V2V" bash scripts/pod_v2v.sh --control rgb
 
 # 4) SeedVR2 720p
