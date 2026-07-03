@@ -12,12 +12,15 @@ untouched even where the dilated mask spills.
 usage:
   python scripts/hue_pin.py --image IN.png --mask MASK.png --out OUT.png --target-hue 183.5
   python scripts/hue_pin.py --video IN.mp4 --mask-dir DIR --out OUT.mp4 --target-hue 183.5
+  python scripts/hue_pin.py --video IN.mp4 --mask-dir DIR --out OUT.mp4 \
+      --target-from-frames RENDER_FRAMES_DIR   # auto target: the render's own kit hue
       [--channel g] [--dilate 13] [--hue-band 170 290] [--sat-min 0.15]
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 
 import cv2
@@ -82,6 +85,35 @@ def pin_hue(
         hue_out = cv2.cvtColor(out, cv2.COLOR_BGR2HSV_FULL)[..., 0].astype(np.float32)
         after = float(np.median(hue_out[gate] * (360.0 / 255.0)))
     return out, {"n": n, "hue_before": before, "hue_after": after, "delta": delta}
+
+
+def measure_frames_hue(
+    frames_dir: str,
+    mask_dir: str,
+    *,
+    channel: str = "g",
+    dilate: int = 13,
+    hue_band: tuple[float, float] = (170.0, 290.0),
+    sat_min: float = 0.15,
+) -> float:
+    """Median gated kit hue over ``frames_dir/frame_*.png`` — the auto pin target.
+
+    Measured on the beauty render (whose masks in ``mask_dir`` share basenames), so the pin
+    restores exactly the hue the renderer produced for THIS run instead of a hard-coded constant.
+    """
+    ch = CHANNEL_TO_BGR_INDEX[channel]
+    hues: list[np.ndarray] = []
+    for fp in sorted(glob.glob(os.path.join(frames_dir, "frame_*.png"))):
+        img = cv2.imread(fp, cv2.IMREAD_COLOR)
+        mask_img = cv2.imread(os.path.join(mask_dir, os.path.basename(fp)), cv2.IMREAD_COLOR)
+        if img is None or mask_img is None:
+            continue
+        hsv, gate = _gate(img, mask_img[..., ch], dilate, hue_band, sat_min)
+        if gate.any():
+            hues.append(hsv[..., 0][gate] * (360.0 / 255.0))
+    if not hues:
+        raise SystemExit(f"target-from-frames: no gated pixels ({frames_dir} vs {mask_dir})")
+    return float(np.median(np.concatenate(hues)))
 
 
 def pin_video(
@@ -163,13 +195,33 @@ def main() -> int:
     p.add_argument("--mask-dir", help="video mode: dir of frame_%%04d.png team masks")
     p.add_argument("--out", required=True)
     p.add_argument(
-        "--target-hue", type=float, required=True, help="degrees; e.g. the render's kit hue"
+        "--target-hue", type=float, help="manual override, degrees; e.g. the render's kit hue"
+    )
+    p.add_argument(
+        "--target-from-frames",
+        metavar="DIR",
+        help="auto target: median gated kit hue of these render frames (masks from --mask-dir)",
     )
     p.add_argument("--channel", choices=("r", "g", "b"), default="g", help="mask channel: A=r, B=g")
     p.add_argument("--dilate", type=int, default=13)
     p.add_argument("--hue-band", type=float, nargs=2, default=(170.0, 290.0))
     p.add_argument("--sat-min", type=float, default=0.15)
     args = p.parse_args()
+
+    if (args.target_hue is None) == (args.target_from_frames is None):
+        raise SystemExit("exactly one of --target-hue / --target-from-frames")
+    if args.target_from_frames:
+        if not args.mask_dir:
+            raise SystemExit("--target-from-frames needs --mask-dir (shared with the pin)")
+        args.target_hue = measure_frames_hue(
+            args.target_from_frames,
+            args.mask_dir,
+            channel=args.channel,
+            dilate=args.dilate,
+            hue_band=tuple(args.hue_band),
+            sat_min=args.sat_min,
+        )
+        print(f"HUE_PIN_TARGET measured={args.target_hue:.1f} from {args.target_from_frames}")
 
     if args.video:
         if not args.mask_dir:

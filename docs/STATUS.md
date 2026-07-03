@@ -32,10 +32,13 @@
   `--crowd-seed` manual; eye-validated on a local CPU render). **Kit-hue pin BUILT & VIDEO-validated
   2026-07-03 (§6): team-mask AOV pass (`--team-mask 1`) + `scripts/hue_pin.py` (still & video modes)
   undo the measured v2v/SeedVR2 drift — full 57-frame 720p pinned locally, 248.5°→183.5° with ONE
-  clip-wide delta, kits azure again, everything else untouched.** All local levers are now DONE;
-  remaining is ONE pod re-render bundling: quilt through v2v, hue-pin as the post-SeedVR2 step,
-  eye-check the M3-9 physics gate. Artifacts: `out/kitboost/` local (480p+720p mp4s + judged
-  stills), `out/quilt/` local (quilt render, masks, `pin_compare.png`, pinned 720p mp4). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
+  clip-wide delta, kits azure again, everything else untouched.** All local levers are now DONE
+  and the pod session is ONE command: **`bash scripts/pod_finish_batch.sh`** (recon→quilt
+  export→render→night-grade→v2v→SeedVR2→mask pass→hue-pin; pin target auto-measured from THIS
+  run's beauty render via `--target-from-frames`, `TARGET_HUE` env = manual override; validated
+  locally: auto target 184.9° ≈ manual 183.5°). It bundles: quilt through v2v, hue-pin post-step,
+  fresh PHYSICS=1 recon for the M3-9 eye-check. Artifacts: `out/kitboost/` local (480p+720p mp4s
+  + judged stills), `out/quilt/` local (quilt render, masks, `pin_compare.png`, pinned 720p mp4s). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
   (clamp impossible motion via the Correction seam; teleports MARKED not erased, R-6) **+ the root-cause
   coherence fix** (coast velocity capped at 10.5 m/s — a dying track's 43 m/s edge slid a ghost 10.9 m).
   Real-scene probe: speed/accel violations 22/999 → **0/0**, 10 raw teleports → **1 marked region event**
@@ -240,8 +243,11 @@ fabricate or silently hide.
   (per-frame deltas would flicker) then applies it two-pass — on the existing SeedVR2 720p mp4:
   57/57 frames pinned, clip median **248.5°→183.5° (delta −65°)**; eye-check f10/f30/f55
   (`out/quilt/vid_pin_compare_f*.png`): team-B kits azure again across the whole clip, yellow
-  team/grass/crowd untouched, no flicker by construction. The lever is DONE end-to-end; the pod
-  session only needs to run it as a post-step after SeedVR2. **Pod untouched (STOPPED).**
+  team/grass/crowd untouched, no flicker by construction. **Auto target added same day:**
+  `--target-from-frames DIR` measures the pin target from the run's own beauty render (same
+  masks), so a fresh recon needs no hand-carried constant — local check: auto 184.9° vs manual
+  183.5°, pin result identical by eye. **`scripts/pod_finish_batch.sh`** now bundles the whole
+  finishing chain (recon→…→SeedVR2→mask→pin) into one pod command. **Pod untouched (STOPPED).**
 - **2026-07-03** — **CROWD-QUILT VALIDATED: the stands kaleidoscope is dead at source.** Root cause
   was the mosaic scheme itself: ONE small measured crowd tile mirror-repeated 40×4 over the bowl
   (`tex.extension=MIRROR`) — the periodicity reads as a kaleidoscope, crisply since SeedVR2. Fix:
