@@ -29,10 +29,13 @@
   holds, ranking unchanged; `scripts/pod_seedvr2.sh`). **Full finishing chain now: recon → kit-boost
   render → night-grade → rgb-control Wan-VACE → SeedVR2 720p.** **Crowd kaleidoscope FIXED at source
   2026-07-03 (§6): non-repeating crowd QUILT** (`--crowd-mode quilt` auto-default, legacy `tile` +
-  `--crowd-seed` manual; eye-validated on a local CPU render). Remaining fidelity levers: pin the
-  cyan→blue kit drift (per-team semantic hint / AOV masks in the export contract), eye-check the
-  M3-9 physics gate — both land in the same next pod re-render, which picks the quilt up
-  automatically. Artifacts: `out/kitboost/` local (480p+720p mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
+  `--crowd-seed` manual; eye-validated on a local CPU render). **Kit-hue pin BUILT & still-validated
+  2026-07-03 (§6): team-mask AOV pass (`--team-mask 1`) + `scripts/hue_pin.py` undo the measured
+  v2v/SeedVR2 drift (kit 183.5°→251.3° pinned back to 182.1°, matches the render reference).**
+  Remaining for the next pod session (one re-render bundles all three): full-video mask pass + pin
+  wired into the v2v chain, quilt through v2v, eye-check the M3-9 physics gate. Artifacts:
+  `out/kitboost/` local (480p+720p mp4s + judged stills), `out/quilt/` local (quilt render, masks,
+  `pin_compare.png`). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
   (clamp impossible motion via the Correction seam; teleports MARKED not erased, R-6) **+ the root-cause
   coherence fix** (coast velocity capped at 10.5 m/s — a dying track's 43 m/s edge slid a ghost 10.9 m).
   Real-scene probe: speed/accel violations 22/999 → **0/0**, 10 raw teleports → **1 marked region event**
@@ -218,6 +221,22 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-03** — **KIT-HUE DRIFT MEASURED + PIN BUILT & STILL-VALIDATED (local half of the
+  cyan→blue lever).** Measured on team-B kit pixels (mask∩blue-gate, sideline f30): render hue
+  **183.5°** (azure-cyan; clip truth ≈195°, measured team colour [0.367,0.514,0.647] = 208° flat) →
+  after Wan-VACE **224.5°** → after SeedVR2 **251.3°** — the generative prior re-paints azure as
+  deep "football blue", drift is real and AWAY from truth. Pre-compensating −68° would demand a
+  GREEN source kit (grass collision) → rejected; built the AOV-mask design instead. (1) subject npz
+  now carries optional `team` key ("A"/"B"/""); (2) `blender_animate.py --team-mask 1` renders the
+  SAME cameras/frames as flat unlit team codes (A=red, B=green, other=blue; no lights,
+  zero-strength world, stadium skipped, plates skipped, 1 sample) — pixel-aligned AOV masks;
+  (3) new `scripts/hue_pin.py` rotates hue by one per-frame constant inside (dilated mask) ∩
+  (hue-band 170–290 ∩ sat≥0.15), so grass/crowd/team-A stay untouched. Still-validated LOCALLY
+  (no pod): mask f30 rendered on CPU, pin applied to the existing SeedVR2 720p still →
+  **251.3°→182.1° ≈ render target**, eye-check `out/quilt/pin_compare.png` (before/after/render-ref):
+  pinned kit matches the render reference, yellow team and grass unchanged. Remaining half (queued
+  for the next pod session): render masks for all frames + wire the pin into the v2v finishing
+  chain, validate on the full video. **Pod untouched (STOPPED).**
 - **2026-07-03** — **CROWD-QUILT VALIDATED: the stands kaleidoscope is dead at source.** Root cause
   was the mosaic scheme itself: ONE small measured crowd tile mirror-repeated 40×4 over the bowl
   (`tex.extension=MIRROR`) — the periodicity reads as a kaleidoscope, crisply since SeedVR2. Fix:

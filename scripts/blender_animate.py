@@ -57,6 +57,11 @@ SAMPLES = int(_arg("--samples", "32"))
 FPS = int(_arg("--fps", "25"))
 STEP = int(_arg("--frame-step", "1"))
 WANT_CAMS = _arg("--cameras", "broadcast,sideline,top,goal").split(",")
+# Team-mask AOV pass: same cameras/frames/bodies, but every body renders a flat UNLIT team code
+# (A=red, B=green, untracked=blue) on black — no lights, no stadium, no plates, 1 sample. The
+# generative finisher (v2v) is structure-locked, so these render-space masks say WHERE each kit
+# is in ITS output too; scripts/hue_pin.py uses them to undo the v2v/upscaler kit-hue drift.
+TEAM_MASK = _arg("--team-mask", "0") == "1"
 
 BALL_RADIUS = 0.11  # FIFA size-5 ball ≈ 0.11 m radius
 
@@ -152,7 +157,13 @@ for mp in mesh_files:
     mat = bpy.data.materials.new("body")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-    if vcolor is not None:
+    if TEAM_MASK:
+        team = str(d["team"]) if "team" in d.files else ""
+        code = {"A": (1.0, 0.0, 0.0, 1.0), "B": (0.0, 1.0, 0.0, 1.0)}.get(team, (0.0, 0.0, 1.0, 1.0))
+        bsdf.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
+        bsdf.inputs["Emission Color"].default_value = code
+        bsdf.inputs["Emission Strength"].default_value = 1.0
+    elif vcolor is not None:
         # BYTE_COLOR (sRGB) → Base Color, lit by the scene sun. Unmeasured verts were filled
         # with the flat kit colour upstream (R-6), so the body is opaque-coloured, never black.
         rgb = np.asarray(vcolor, dtype=np.float32).reshape(-1, 3)
@@ -170,7 +181,7 @@ for mp in mesh_files:
     # Shirt-number plate baked by anim_export.py (#numbers): a back-anchored FONT object oriented
     # per frame. Absent for subjects with no read number (older exports never carry these keys).
     plate = None
-    if "jersey_number" in d.files:
+    if "jersey_number" in d.files and not TEAM_MASK:
         plate = {
             "ob": _make_number_plate(int(d["jersey_number"]), d["number_rgb"]),
             "anchor": np.asarray(d["back_anchor"], dtype=np.float32),
@@ -336,7 +347,7 @@ if pitch_npz is not None:
 # from the clip (anim_export.py's stadium.npz). Deliberately NOT folded into the lo/hi framing:
 # it rings the pitch, so driving ctr/span off it would zoom every camera out until players are dots.
 stadium_path = os.path.join(IN, "stadium.npz")
-if os.path.exists(stadium_path):
+if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollute the mask
     sd = np.load(stadium_path)
     _add_stadium_mesh(
         "stadium", sd["verts"], sd["faces"], sd["colors"],
@@ -373,7 +384,16 @@ for _flag, _key, _cast in (
     _v = _arg(_flag, "")
     if _v != "":
         light_kwargs[_key] = _cast(_v)
-scene_builders.build_stadium_lighting(bpy, **light_kwargs)
+if TEAM_MASK:
+    # No lights + a zero-strength world: only the emissive team codes reach the sensor; every
+    # diffuse surface (grass, lines, goals, ball) stays black yet still occludes bodies exactly
+    # as in the beauty pass.
+    _mask_world = bpy.data.worlds.new("mask_world")
+    _mask_world.use_nodes = True
+    _mask_world.node_tree.nodes["Background"].inputs["Strength"].default_value = 0.0
+    bpy.context.scene.world = _mask_world
+else:
+    scene_builders.build_stadium_lighting(bpy, **light_kwargs)
 
 # ── cameras: the virtual operator (cameras.npz), static bbox specs as legacy fallback ─────
 # anim_export plans FIXED mounts inside the stadium bowl with a per-frame look-at + horizontal
@@ -437,8 +457,8 @@ print(f"BLENDER_ANIM_CAMS {'virtual-operator' if virtual_cams else 'static-legac
 # ── render settings ──────────────────────────────────────────────────────────
 sc = bpy.context.scene
 sc.render.engine = "CYCLES"
-sc.cycles.samples = SAMPLES
-sc.cycles.use_denoising = True
+sc.cycles.samples = 1 if TEAM_MASK else SAMPLES  # flat emission needs one sample, no denoise
+sc.cycles.use_denoising = not TEAM_MASK
 # Keep the built scene resident on the device between renders. Without this, every
 # bpy.ops.render.render() call below tears down and re-uploads the whole Cycles scene (BVH for the
 # ~20 deforming bodies, geometry, denoiser), so the GPU idled (~0–25%) waiting on CPU re-sync for

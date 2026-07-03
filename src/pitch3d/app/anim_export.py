@@ -253,11 +253,14 @@ def _export_subjects(
             color=color,
             frames=frames.astype(np.int64),
             alpha=alpha.astype(np.float32),
+            # Team id ("A"/"B", "" when untracked) — lets the renderer draw per-team AOV masks
+            # (--team-mask) that downstream hue re-pinning keys on after generative finishing.
+            team=str(subj.team_id or ""),
             **num_extra,
             **tex_extra,
         )
         entries[fname] = sorted(
-            ["verts", "faces", "color", "frames", "alpha", *num_extra, *tex_extra]
+            ["verts", "faces", "color", "frames", "alpha", "team", *num_extra, *tex_extra]
         )
         tracks.append((frames.astype(np.int64), transl.astype(np.float64)))
 
