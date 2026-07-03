@@ -53,6 +53,9 @@ COH_ARGS=()
 if [ "${STITCH:-1}" = "1" ]; then echo "== continuity: stitch ON (default)";
 else COH_ARGS+=(--no-stitch); echo "== continuity: stitch OFF (STITCH=${STITCH})"; fi
 if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
+# DEMO_EDITS=0 skips the dry-run edit walkthrough so no demo offset/refit correction lands in the
+# exported scene (deliverable runs); default 1 keeps the full golden-path seam coverage.
+if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo edits: OFF (DEMO_EDITS=0)"; fi
 
 cd "$REPO"
 echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} =="

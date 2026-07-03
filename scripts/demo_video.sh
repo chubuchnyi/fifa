@@ -146,7 +146,7 @@ info "Blender installs on first use (pip bpy, cached on the volume); Cycles rend
   # LOCAL machine's value and leak a path that does not exist on the pod (the SMPLX_MODELS gotcha).
   export PITCH3D_STADIUM_VIDEO='$CLIP_POD'
   FRAMES='$FRAMES' OUT='$OUT_POD' REUSE_SCENE='$REUSE_SCENE' \
-  STITCH='$STITCH' COHERENCE='$COHERENCE' \
+  STITCH='$STITCH' COHERENCE='$COHERENCE' DEMO_EDITS='${DEMO_EDITS:-0}' \
   ANIM_DEVICE='$DEVICE' ANIM_RES_X='$RES_X' ANIM_RES_Y='$RES_Y' ANIM_SAMPLES='$SAMPLES' \
   ANIM_CAMERAS='$CAMERAS' bash scripts/pod_make_video.sh
 " || die "pod video generation failed (see output above)"

@@ -78,7 +78,7 @@ def run_dry_run(
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake",
-    stitch: bool = True, coherence: bool = False,
+    stitch: bool = True, coherence: bool = False, demo_edits: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -144,109 +144,118 @@ def run_dry_run(
     )
     _print_observation(obs_before, label="observe:before")
 
-    # 4) The agent reads the prioritized 'needs attention' list (UX-4).
-    attention = app.get_attention(scene_id, max_items=5)
-    print(f"\n== attention: {len(attention)} item(s)")
-    for it in attention:
-        where = f"subject {it.track_id}" if it.track_id is not None else "ball/global"
-        frame = f" frame {it.frame}" if it.frame is not None else ""
-        print(f"    [{it.score:.2f}] {it.reason} ({where}{frame}) — {it.detail}")
+    # 4-8e) The dry-run edit walkthrough exercises the OBSERVE→edit→resolve seams, but steps 7
+    #     (offset) and 8c (refit) COMMIT demo corrections into the scene — fine for the synthetic
+    #     golden path, wrong for a real deliverable. --no-demo-edits keeps the scene measured-only.
+    if demo_edits:
+        # 4) The agent reads the prioritized 'needs attention' list (UX-4).
+        attention = app.get_attention(scene_id, max_items=5)
+        print(f"\n== attention: {len(attention)} item(s)")
+        for it in attention:
+            where = f"subject {it.track_id}" if it.track_id is not None else "ball/global"
+            frame = f" frame {it.frame}" if it.frame is not None else ""
+            print(f"    [{it.score:.2f}] {it.reason} ({where}{frame}) — {it.detail}")
 
-    # 5) Reason → pick an edit. Nudge the first subject's root up over the first half.
-    tid = scene.subjects[0].track_id
-    frames = scene.subjects[0].proposal.pose.frames
-    frame_range = (int(frames[0]), int(frames[len(frames) // 2]))
-    delta = np.array([0.0, 0.0, 0.10])  # lift the root 10 cm (Z-up, meters)
-    target = CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=tid)
+        # 5) Reason → pick an edit. Nudge the first subject's root up over the first half.
+        tid = scene.subjects[0].track_id
+        frames = scene.subjects[0].proposal.pose.frames
+        frame_range = (int(frames[0]), int(frames[len(frames) // 2]))
+        delta = np.array([0.0, 0.0, 0.10])  # lift the root 10 cm (Z-up, meters)
+        target = CorrectionTarget(kind=TargetKind.ROOT_TRANSLATION, subject_track_id=tid)
 
-    # 6) PREVIEW (FR-23): resolve AS IF the candidate were applied — must NOT mutate the scene.
-    candidate = make_offset("candidate", target, frame_range, delta, note="dry-run nudge")
-    n_before = len(scene.corrections)
-    pv = app.preview(scene_id, candidate)
-    assert len(app.get_scene(scene_id).corrections) == n_before, "preview must not mutate"
-    print(f"\n== preview (not committed): max_abs_change={pv['max_abs_change']:.4f} m "
-          f"over frames {pv['frame_range']} — corrections still {n_before}")
+        # 6) PREVIEW (FR-23): resolve AS IF the candidate were applied — must NOT mutate the scene.
+        candidate = make_offset("candidate", target, frame_range, delta, note="dry-run nudge")
+        n_before = len(scene.corrections)
+        pv = app.preview(scene_id, candidate)
+        assert len(app.get_scene(scene_id).corrections) == n_before, "preview must not mutate"
+        print(f"\n== preview (not committed): max_abs_change={pv['max_abs_change']:.4f} m "
+              f"over frames {pv['frame_range']} — corrections still {n_before}")
 
-    # 7) Commit the correction (the only way edits ever enter the scene — ADR-0002).
-    corr = app.apply_offset(scene_id, target, frame_range, delta, note="dry-run nudge")
-    print(f"== committed {corr.id} ({corr.mode.value}) → {len(app.get_scene(scene_id).corrections)} correction(s)")
+        # 7) Commit the correction (the only way edits ever enter the scene — ADR-0002).
+        corr = app.apply_offset(scene_id, target, frame_range, delta, note="dry-run nudge")
+        print(f"== committed {corr.id} ({corr.mode.value}) → "
+              f"{len(app.get_scene(scene_id).corrections)} correction(s)")
 
-    # 8) OBSERVE (after): the loop is closed — the agent sees the consequence of its edit.
-    obs_after = app.observe(scene_id, frame=mid_frame, quality="preview")
-    _print_observation(obs_after, label="observe:after")
+        # 8) OBSERVE (after): the loop is closed — the agent sees the consequence of its edit.
+        obs_after = app.observe(scene_id, frame=mid_frame, quality="preview")
+        _print_observation(obs_after, label="observe:after")
 
-    # 8c) M3-2: constraint-guided RE-FIT hardened on the measured homography anchor + validation.
-    #     Re-fit the first subject's first half locked to its MEASURED ground track (bbox-foot →
-    #     world via the homography), then validate the resolved root still sits on that anchor.
-    #     A generative cluster-occlusion completion (--occlusion-backend, gated R-8) would be the
-    #     thing under scrutiny here; a completion that drifts off-anchor is flagged, not
-    #     trusted (R-6).
-    subj0 = app.get_scene(scene_id).subject(tid)
-    anchor_xy = subj0.proposal.pose.transl[:, :2].copy()  # measured homography ground track
-    in_range = (frames >= frame_range[0]) & (frames <= frame_range[1])
-    refit_corr = app.apply_refit(
-        scene_id, target, frame_range, {"foot_anchor": anchor_xy[in_range]},
-        note="dry-run refit locked to the measured homography anchor",
-    )
-    resolved0 = app.resolved(scene_id).subject(tid)
-    report = validate_against_anchor(
-        resolved0.proposal.pose.frames, resolved0.proposal.pose.transl, anchor_xy,
-    )
-    print(
-        f"\n== M3-2 refit[{refit_corr.id}]: locked {int(in_range.sum())} frame(s) to the measured "
-        f"anchor → on-anchor {report.n_valid}/{report.n_frames} "
-        f"(max residual {report.worst_residual_m:.3f} m, {report.n_off_anchor} off-anchor, R-6)"
-    )
-
-    # 8d) M3-8: a learned temporal denoiser offered through the SAME smoothing Correction seam
-    #     (method="learned"). PREVIEWED (FR-23, not committed) so the gated learned model swaps in
-    #     without changing this path — here the GPU-free fake prior denoises the subject's stepped
-    #     root path. The pure moving_average/gaussian methods need no prior; the learned model
-    #     (HTD-Refine/StableMotion) is gated (R-8, --motion-prior learned).
-    smooth_cand = make_smoothing(
-        "cand-learned-smooth", target, (int(frames[0]), int(frames[-1])), method="learned",
-        note="dry-run learned motion-prior denoise (preview only)",
-    )
-    n_corr = len(app.get_scene(scene_id).corrections)
-    try:
-        pv_smooth = app.preview(scene_id, smooth_cand)
-        assert len(app.get_scene(scene_id).corrections) == n_corr, "preview must not mutate"
-        span = pv_smooth["frame_range"][1] - pv_smooth["frame_range"][0] + 1
-        print(
-            f"== M3-8 learned-smoothing[preview]: MotionPrior '{ports.motion_prior.info().name}' "
-            f"denoised subject {tid} root over {span} frame(s) → max_abs_change "
-            f"{pv_smooth['max_abs_change']:.4f} m (not committed; learned model gated R-8 — "
-            f"--motion-prior learned)"
+        # 8c) M3-2: constraint-guided RE-FIT hardened on the measured homography anchor +
+        #     validation. Re-fit the first subject's first half locked to its MEASURED ground
+        #     track (bbox-foot → world via the homography), then validate the resolved root still
+        #     sits on that anchor. A generative cluster-occlusion completion (--occlusion-backend,
+        #     gated R-8) would be the thing under scrutiny here; a completion that drifts
+        #     off-anchor is flagged, not trusted (R-6).
+        subj0 = app.get_scene(scene_id).subject(tid)
+        anchor_xy = subj0.proposal.pose.transl[:, :2].copy()  # measured homography ground track
+        in_range = (frames >= frame_range[0]) & (frames <= frame_range[1])
+        refit_corr = app.apply_refit(
+            scene_id, target, frame_range, {"foot_anchor": anchor_xy[in_range]},
+            note="dry-run refit locked to the measured homography anchor",
         )
-    except (NotImplementedError, RuntimeError) as exc:
+        resolved0 = app.resolved(scene_id).subject(tid)
+        report = validate_against_anchor(
+            resolved0.proposal.pose.frames, resolved0.proposal.pose.transl, anchor_xy,
+        )
         print(
-            f"\n== M3-8 learned-smoothing[preview]: skipped — learned model not wired "
-            f"({type(exc).__name__}); use --motion-prior fake (GPU-free gaussian)"
+            f"\n== M3-2 refit[{refit_corr.id}]: locked {int(in_range.sum())} frame(s) to the "
+            f"measured anchor → on-anchor {report.n_valid}/{report.n_frames} "
+            f"(max residual {report.worst_residual_m:.3f} m, {report.n_off_anchor} off-anchor, R-6)"
         )
 
-    # 8e) A-10: BOUNDED, ATTENTION-DRIVEN AUTONOMY. The agent doesn't just preview one edit — it
-    #     reads the attention list, targets the worst off-anchor subject, and applies bounded
-    #     anchor-pull corrections until attention clears (R-6 measured proof) — all on a LOCAL
-    #     scene copy, so nothing here pollutes the export. We seed a wrong pose (2 m off-anchor)
-    #     on the measured ground track and watch the loop fix it within its EditBudget leash.
-    base = app.resolved(scene_id)
-    anchors = {s.track_id: s.proposal.pose.transl[:, :2].copy() for s in base.subjects}
-    seeded = replace(
-        base,
-        corrections=[
-            make_offset(
-                "seed-wrong-pose", target, (int(frames[0]), int(frames[-1])),
-                np.array([2.0, 0.0, 0.0]), note="seeded 2 m off-anchor reconstruction error",
+        # 8d) M3-8: a learned temporal denoiser offered through the SAME smoothing Correction seam
+        #     (method="learned"). PREVIEWED (FR-23, not committed) so the gated learned model
+        #     swaps in without changing this path — here the GPU-free fake prior denoises the
+        #     subject's stepped root path. The pure moving_average/gaussian methods need no prior;
+        #     the learned model (HTD-Refine/StableMotion) is gated (R-8, --motion-prior learned).
+        smooth_cand = make_smoothing(
+            "cand-learned-smooth", target, (int(frames[0]), int(frames[-1])), method="learned",
+            note="dry-run learned motion-prior denoise (preview only)",
+        )
+        n_corr = len(app.get_scene(scene_id).corrections)
+        try:
+            pv_smooth = app.preview(scene_id, smooth_cand)
+            assert len(app.get_scene(scene_id).corrections) == n_corr, "preview must not mutate"
+            span = pv_smooth["frame_range"][1] - pv_smooth["frame_range"][0] + 1
+            print(
+                f"== M3-8 learned-smoothing[preview]: MotionPrior "
+                f"'{ports.motion_prior.info().name}' denoised subject {tid} root over {span} "
+                f"frame(s) → max_abs_change {pv_smooth['max_abs_change']:.4f} m (not committed; "
+                f"learned model gated R-8 — --motion-prior learned)"
             )
-        ],
-    )
-    _fixed, areport = auto_correct(seeded, anchors, budget=EditBudget(max_abs_change_m=1.0))
-    print(
-        f"\n== A-10 autonomy[eval]: seeded subject {tid} 2 m off-anchor → "
-        f"attention {areport.attention_before}→{areport.attention_after} in "
-        f"{areport.edits_applied} bounded edit(s) (≤1.0 m), cleared={areport.cleared} "
-        f"(local copy; export untouched)"
-    )
+        except (NotImplementedError, RuntimeError) as exc:
+            print(
+                f"\n== M3-8 learned-smoothing[preview]: skipped — learned model not wired "
+                f"({type(exc).__name__}); use --motion-prior fake (GPU-free gaussian)"
+            )
+
+        # 8e) A-10: BOUNDED, ATTENTION-DRIVEN AUTONOMY. The agent doesn't just preview one edit —
+        #     it reads the attention list, targets the worst off-anchor subject, and applies
+        #     bounded anchor-pull corrections until attention clears (R-6 measured proof) — all on
+        #     a LOCAL scene copy, so nothing here pollutes the export. We seed a wrong pose (2 m
+        #     off-anchor) on the measured ground track and watch the loop fix it within its
+        #     EditBudget leash.
+        base = app.resolved(scene_id)
+        anchors = {s.track_id: s.proposal.pose.transl[:, :2].copy() for s in base.subjects}
+        seeded = replace(
+            base,
+            corrections=[
+                make_offset(
+                    "seed-wrong-pose", target, (int(frames[0]), int(frames[-1])),
+                    np.array([2.0, 0.0, 0.0]), note="seeded 2 m off-anchor reconstruction error",
+                )
+            ],
+        )
+        _fixed, areport = auto_correct(seeded, anchors, budget=EditBudget(max_abs_change_m=1.0))
+        print(
+            f"\n== A-10 autonomy[eval]: seeded subject {tid} 2 m off-anchor → "
+            f"attention {areport.attention_before}→{areport.attention_after} in "
+            f"{areport.edits_applied} bounded edit(s) (≤1.0 m), cleared={areport.cleared} "
+            f"(local copy; export untouched)"
+        )
+    else:
+        print("\n== demo edits: OFF (--no-demo-edits) — no dry-run offset/refit committed; "
+              "the scene carries only measured proposals + auto corrections")
 
     # 8b) SEAM B (ADR-0007, FR-30): the data amplifier. Synthesize N pseudo-multi-views from the
     #     single broadcast camera and attach them to the scene; the env/avatar reconstruction below
@@ -439,6 +448,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--coherence", action="store_true",
                         help="bridge short interior pose gaps (slerp/lerp) + add auto "
                              "temporal-smoothing corrections (off by default)")
+    parser.add_argument("--no-demo-edits", dest="demo_edits", action="store_false",
+                        help="skip the dry-run edit walkthrough (steps 4-8e) so no demo "
+                             "offset/refit correction is committed — use for real deliverables")
     args = parser.parse_args(argv)
 
     return run_dry_run(
@@ -472,6 +484,7 @@ def main(argv: list[str] | None = None) -> int:
         motion_prior=args.motion_prior,
         stitch=args.stitch,
         coherence=args.coherence,
+        demo_edits=args.demo_edits,
     )
 
 

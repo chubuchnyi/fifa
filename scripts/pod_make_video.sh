@@ -48,6 +48,7 @@ else
   # jittery poses. BOTH default ON from video_defaults.sh — a direct pod run must match demo_video.sh.
   FORMAT=json OUT="$OUT" FRAMES="$FRAMES" \
     STITCH="${STITCH:-$VIDEO_STITCH_DEFAULT}" COHERENCE="${COHERENCE:-$VIDEO_COHERENCE_DEFAULT}" \
+    DEMO_EDITS="${DEMO_EDITS:-0}" \
     PITCH3D_REPO="$REPO" PITCH3D_PY="$PY" PITCH3D_CLIP="$CLIP" \
     bash scripts/pod_real_e2e.sh
 fi
