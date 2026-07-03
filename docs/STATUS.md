@@ -260,6 +260,8 @@ fabricate or silently hide.
   fresh finish run validates it). Artifacts local:
   `out/anim_finish/sideline_rgbnight_kitinj_720p_pinned2.mp4` (**new best FINAL**),
   `out/clusters/*` (inject check + judged A/B crops). Pod session ~40 min ≈ $0.5, **pod STOPPED**.
+  Temporal probe (mean|max consecutive-frame abs diff @832×480): kitinj 5.00|10.91 vs hi720
+  5.12|11.04 — the mask-driven injection adds NO flicker (marginally smoother, if anything).
 - **2026-07-03** — **PLAYER-CRISPNESS LEVER LANDED: v2v at 1280×720 is the new default.**
   Diagnosis (`out/anim_finish/crisp_zoom_*_f30.png`, stage-by-stage crops of the same distant
   players): crisp in the 720p beauty render → MUSH after Wan-VACE at 832×480 (a 15–25 px player
