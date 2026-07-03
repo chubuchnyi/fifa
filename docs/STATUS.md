@@ -25,7 +25,10 @@
   stay ours — but depth-only control does NOT lock per-player KIT COLOURS (teams drift to the prompt).
   Next: research priority 2 — colour/semantic conditioning (start with `--control rgb|gray` A/B in
   `scripts/pod_v2v.sh`, then AOV passes in the export contract) to pin team identity; after that 720p +
-  SeedVR2.** Spike artifacts local: `out/pod_adr11_check/v2v/` (broadcast+sideline mp4 + judged stills);
+  SeedVR2.** Also queued: **#207 player-physics gate (M3-9)** — user's "unnaturally fast players"
+  confirmed by `scripts/motion_stats.py` (1083 accel-violation frames; MA5 can't fix teleports; see §3/§6);
+  and deliverable re-renders now default `DEMO_EDITS=0` (a demo +10 cm offset + refit used to leak into
+  every exported scene — fixed 2026-07-03). Spike artifacts local: `out/pod_adr11_check/v2v/` (broadcast+sideline mp4 + judged stills);
   weights + genfinish venv persist on the pod volume. Historical context — the 2026-06-28
   deliverable FAILED the eye-judgement (see §6 top): players = 5–10 px specks because the renderer's static
   bbox cameras framed the whole bowl from OUTSIDE; sideline = crowd wall; plus two wiring holes (COHERENCE
@@ -88,6 +91,7 @@ cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body
 | #203 | Depth collapse / wrong world scale (players not spread across pitch) | **VALIDATED on pod ✓ (34×40 m spread)** | done | NOT the identity fallback: the default render used `--calibrator fake` = `FakeFieldCalibrator` (`adapters/fakes/perception.py:125`), a 30 m **top-down orthographic toy** `H` with NO perspective. Numeric proof: whole frame → 30×17 m world box; realistic feet → 22.7×7.3 m; the ~7 m y-axis is the "thin horizon" blob. Real PnLCalib was wired (`adapters/models/pnlcalib_backend.py`) but opt-in & OFF. | DONE + VALIDATED 2026-06-27: real PnLCalib is now the **default** render calib (`pod_real_e2e.sh` defaults `PNLCALIB_REPO=/workspace/repos/PnLCalib`; run echoed `calibration: REAL PnLCalib`). **Pod 48f scene.json root spread: X (length) 34.1 m, Y (width) 40.0 m, Z (pelvis) 0.69–1.01 m** — i.e. real-scale spread within the touchlines, NOT the fake-calib 22×7 m collapse; the ~7 m "thin horizon" is gone. Players cluster in one half (localized broadcast action), as expected. **Deepest root — also fixes #204.** |
 | #204 | Virtual cameras don't frame the action (players tiny at horizon) | **VALIDATED on pod ✓ (broadcast frames the pitch)** | done | the VIDEO render (`blender_animate.py`) derives its OWN cameras from `ctr`/`span` of the loaded geometry — NOT `viewpoints.py`/`controller.py` (those drive the *in-pipeline* render, a different path). With #203's collapsed 22×7 m blob + a bare plane, the cams framed empty grass. | DONE + VALIDATED 2026-06-27: #205 folds the FULL pitch bounds into `ctr`/`span` + #203 puts bodies on the field. **Pod render eye-check (`out/val/video/{broadcast,top}.mp4`): broadcast camera frames the whole pitch at a realistic oblique angle (players fill the action third, not a horizon speck); top camera frames the full 105×68 m.** No per-frame tracking camera needed for v0. |
 | #205 | Bare pitch (no lines / no goals) | **VALIDATED on pod ✓ (lines + goals render)** | done | the ACTUAL video render is `scripts/blender_animate.py` (builds its scene from scratch — only drew a bare grass plane); pitch lines existed only in the *other* (in-pipeline Cycles) path, and the goal mesh was genuinely absent | DONE + VALIDATED 2026-06-27: measured `goal_frame_geometry()` + `pitch_line_ribbons()` in pure core; `anim_export.py` writes `pitch.npz`, `blender_animate.py` builds `pitch_lines` + `goals`. **Pod 48f run: `anim_export` logged `pitch: 2848 line-tris + 72 goal-tris (105x68 m)`; render eye-check confirms full markings (boxes, circle, arcs, halfway) + goal frames on both views.** |
+| #207 | **Unnatural player motion in the deliverable** (jitter + teleport-fast movement; user eye-report 2026-07-03) | **MEASURED ✓; fix = roadmap M3-9** | no (probe runs anywhere) | user perception CONFIRMED by `scripts/motion_stats.py` on `out/anim_adr11/export/scene.json` (fps 29.97): TOTAL **32 speed- + 1083 accel-violation frames** over 23 subjects (limits 10.5 m/s, 8 m/s²); subj 1 sp_max **69.6 m/s**, 23 frames >10.5 (ID-swap teleports); typical ac_max 100–3186 m/s², turn up to 5370 °/s; **ball CLEAN** (p95 16.2 m/s, 0 >36). NOT an export bug: plumbing probe proved coherence MA(5) smoothing IS applied and survives resolve→save→load (synthetic 3769→558 m/s²) — `corrections=[]` in the exported file is the bake, by design. MA(5) is simply too weak for teleport-class errors (a 1-frame 1.8 m jump stays ~70× over the accel limit after MA5). Related: mux `FPS=25` vs source 29.97 plays the clip ~20 % slow — a separate small fidelity fix (the "too fast" feel comes from jitter, not fps). | **Kinematic plausibility gate — roadmap M3-9:** limits as attention items + limits-aware auto-corrections (velocity clamp / constrained smoother) via the ADR-0002 Correction seam; teleport spikes routed to identity/stitch review, not smoothed over. Probe on any scene: `python scripts/motion_stats.py --scene <export/scene.json>`. |
 | #206 | Ball lands OUTSIDE the pitch (surfaced during v0 validation) | **VALIDATED ✓ (0/48→48/48 in-pitch); contact-anchored** | no (local) | monocular height ambiguity: the ball is airborne the whole window (image-v 449–525 above all feet 556–894) so ground-plane un-projection overshoots ~13 m, and the old lift drew a straight line between the two **frozen** WASB endpoints (both off-pitch). `field.py` + `ball_lift.py`. | DONE + VALIDATED 2026-06-27 (local, no pod) — **contact-anchoring** per user instruction: new pure-core `detect_ball_contacts()` finds frames where the ball 2D lands on a player's projected foot (new `FieldCalibration.world_to_image`), keeps one anchor/player, gates by plausible speed (≤35 m/s) to drop depth-spurious matches; `lift_ball_to_3d(motions=…)` pins ball XY to those feet + ballistic Z, falls back to mono projection if no contact; stale (frozen) frames excluded; wired in `pipeline.py`. **Re-run on `/tmp/val_scene.json`: ball in-pitch 0/48 → 48/48; recovered the pass t12@f10 (−36.3,−24.8) → t18@f19 (−32.8,−28.1).** 7 new tests; full suite green. **Visual VALIDATED:** top-down schematic (`/tmp/ball_fix_topdown.png`, old ball red off-pitch vs new blue on-pitch) + full Blender re-render (top + broadcast from `/tmp/val_scene_fixed.json`) — ball among players on the field. #206 CLOSED. |
 
 **Validation — DONE 2026-06-27 (pod `zueopp6nzozxb7`, 48f real run, `out/val/`):** the four v0 *player/
@@ -202,6 +206,27 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **PLAYER PHYSICS: user's "players move unnaturally fast" CONFIRMED by measurement;
+  root-caused; gate designed (M3-9) + TWO real bugs found, one fixed.** New probe
+  `scripts/motion_stats.py` (per-subject speed/accel/turn vs human limits, both layers + ball) on the
+  deliverable scene `out/anim_adr11/export/scene.json`: **TOTAL 32 speed- / 1083 accel-violation frames**
+  across 23 subjects; subj 1 sp_max **69.6 m/s** with 23 frames >10.5 m/s (ID-swap teleports); typical
+  ac_max 100–3186 m/s² (limit 8), turn up to 5370 °/s; **ball clean** (p95 16.2 m/s, 0 >36) — full row
+  dump in §3 #207. Root-cause trail: (1) suspected "export drops corrections" — **DISPROVED** by a
+  synthetic plumbing probe: `add_temporal_coherence → resolve_scene → save_scene → load_scene` keeps the
+  smoothed values (ac_max 3769→558; `corrections=[]` in the file = the bake, by design, assemble.py:74);
+  (2) so the deliverable IS smoothed — **MA(5) is just structurally too weak** for teleport-class errors
+  (a 1-frame 1.8 m jump stays ~70× over the accel limit after MA5) → the right fix is the **kinematic
+  plausibility gate, now roadmap M3-9** (limits→attention items R-6; limits-aware auto-corrections via
+  the ADR-0002 seam; teleports→identity/stitch review); (3) **REAL BUG FOUND+FIXED: the golden-path demo
+  walkthrough was polluting real deliverables** — cli steps 7/8c committed a dry-run **+10 cm root
+  offset** (measured: exactly 0.100 m in the exported scene) **+ a REFIT** on subject[0]; new
+  `--no-demo-edits` flag gates steps 4–8e, `DEMO_EDITS` env in `pod_real_e2e.sh`, **default OFF in
+  `pod_make_video.sh`/`demo_video.sh`** (deliverables), ON elsewhere (seam coverage); e2e green both
+  modes; (4) noted: mux `FPS=25` vs source 29.97 → deliverable plays ~20 % slow-motion (separate small
+  fix; the "too fast" feel is jitter, not fps). Next deliverable re-render inherits: no demo offset, no
+  demo refit.
 
 - **2026-07-03** — **PRIORITY-1 SPIKE: structure-locked generative finishing WORKS — depth-locked Wan VACE
   turns the CG deliverable into night-broadcast footage.** New `scripts/pod_v2v_finish.py` +
