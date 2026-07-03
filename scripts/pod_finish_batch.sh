@@ -4,15 +4,21 @@
 #   1) recon → kit-boost export (crowd QUILT default) → beauty render   (pod_make_video.sh;
 #      PHYSICS=1 and DEMO_EDITS=0 default inside it)
 #   2) night-grade (grade3 — the eye-picked recipe)
-#   3) rgb-control Wan-VACE over the night-graded frames (the winning variant, STATUS §6)
-#   4) SeedVR2 720p upscale
-#   5) team-mask AOV pass (same frame list as the beauty pass; 1 sample — cheap)
-#   6) hue-pin: undo the v2v/SeedVR2 kit-hue drift — target auto-measured from THIS run's
-#      beauty render (TARGET_HUE env = manual override)
+#   3) team-mask AOV pass (same frame list as the beauty pass; 1 sample — cheap)
+#   4) kit-colour re-injection into the control (cluster fix, A/B 2026-07-03): grade3 erases
+#      kit colour in tight clusters → Wan gets shape without identity and hallucinates kits;
+#      KIT_INJECT=0 reverts to the plain night frames
+#   5) rgb-control Wan-VACE over the injected night frames (the winning variant, STATUS §6)
+#   6) SeedVR2 720p upscale
+#   7) hue-pin team B: undo the v2v/SeedVR2 kit-hue drift — target auto-measured from THIS
+#      run's beauty render (TARGET_HUE env = manual override)
+#   8) hue-pin team A (yellow band 5-80, sat-min 0.35 keeps faces out) — PIN_A=0 skips
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TARGET_HUE=  DILATE=15
 #      V2V_WIDTH=1280 V2V_HEIGHT=720 V2V_FLOW=5.0  (832x480/3.0 = the old fast-draft cell)
+#      KIT_INJECT=1  ALPHA=0.8  ERODE=3  CS=1.0  PIN_A=1
+#      TEAM_A_HSV/TEAM_B_HSV: unset = validated "65 0.85"/"185 0.95"; set-empty = auto-measure
 set -euo pipefail
 cd /workspace/fifa
 . scripts/video_defaults.sh
@@ -38,21 +44,9 @@ for f in "$SRC"/frame_*.png; do
 done
 echo "== night grade done: $(ls "$DST" | wc -l) frames =="
 
-# 3) v2v: rgb control over the night-graded frames.
-# V2V must be ABSOLUTE: pod_seedvr2.sh cd's into its own repo before testing INPUTS.
-# 1280x720 default (A/B 2026-07-03): at 832x480 a distant player is 2-3 latent px after the
-# 8x VAE and Wan repaints him as mush; 720p resolves limbs/poses (~10 min vs ~3 min per clip).
-V2V="$(realpath -m "$BATCH_OUT")/v2v/${CAM}_rgbnight.mp4"
-FRAMES="$DST" OUT="$V2V" bash scripts/pod_v2v.sh --control rgb \
-  --width "${V2V_WIDTH:-1280}" --height "${V2V_HEIGHT:-720}" --flow-shift "${V2V_FLOW:-5.0}"
-
-# 4) SeedVR2 720p
-INPUTS="$V2V" bash scripts/pod_seedvr2.sh
-V2V720="${V2V%.mp4}_720p.mp4"
-test -f "$V2V720" || { echo "finish_batch: missing $V2V720" >&2; exit 1; }
-
-# 5) team-mask AOV pass — same frame list as the beauty pass (masks are resized to the
-# video by hue_pin, so 832x480 is plenty)
+# 3) team-mask AOV pass — feeds the kit injection AND the hue pins (masks are resized to
+# the consumer's resolution, so 832x480 is plenty)
+MASKS="$BATCH_OUT/mesh/mask/$CAM"
 BMODE="$(PITCH3D_PY="$PY" bash scripts/pod_ensure_blender.sh)"
 case "$BMODE" in
   BLENDER_MODE=module)   RENDER=("$PY" scripts/blender_animate.py);;
@@ -64,9 +58,36 @@ esac
   --device "${ANIM_DEVICE:-$VIDEO_DEVICE_DEFAULT}" --res-x 832 --res-y 480 \
   --frame-step "${ANIM_STEP:-$VIDEO_STEP_DEFAULT}"
 
-# 6) hue-pin the finished clip back to THIS run's render hue (or TARGET_HUE)
+# 4) kit-colour re-injection into the control frames (KIT_INJECT=0 → plain night frames)
+CTRL="$DST"
+if [ "${KIT_INJECT:-1}" = "1" ]; then
+  CTRL="$BATCH_OUT/mesh/frames_nightkit/$CAM"
+  INJ_FLAGS=(--alpha "${ALPHA:-0.8}" --erode "${ERODE:-3}")
+  A_HSV="${TEAM_A_HSV-65 0.85}"
+  B_HSV="${TEAM_B_HSV-185 0.95}"
+  if [ -n "$A_HSV" ]; then INJ_FLAGS+=(--team-a-hsv $A_HSV); fi
+  if [ -n "$B_HSV" ]; then INJ_FLAGS+=(--team-b-hsv $B_HSV); fi
+  "$PY" scripts/control_kit_inject.py --frames "$DST" --masks "$MASKS" --out "$CTRL" \
+    "${INJ_FLAGS[@]}"
+fi
+
+# 5) v2v: rgb control over the (kit-injected) night frames.
+# V2V must be ABSOLUTE: pod_seedvr2.sh cd's into its own repo before testing INPUTS.
+# 1280x720 default (A/B 2026-07-03): at 832x480 a distant player is 2-3 latent px after the
+# 8x VAE and Wan repaints him as mush; 720p resolves limbs/poses (~10 min vs ~3 min per clip).
+V2V="$(realpath -m "$BATCH_OUT")/v2v/${CAM}_rgbnight.mp4"
+FRAMES="$CTRL" OUT="$V2V" bash scripts/pod_v2v.sh --control rgb \
+  --width "${V2V_WIDTH:-1280}" --height "${V2V_HEIGHT:-720}" --flow-shift "${V2V_FLOW:-5.0}" \
+  --conditioning-scale "${CS:-1.0}"
+
+# 6) SeedVR2 720p
+INPUTS="$V2V" bash scripts/pod_seedvr2.sh
+V2V720="${V2V%.mp4}_720p.mp4"
+test -f "$V2V720" || { echo "finish_batch: missing $V2V720" >&2; exit 1; }
+
+# 7) hue-pin team B back to THIS run's render hue (or TARGET_HUE)
 PINNED="${V2V720%.mp4}_pinned.mp4"
-PIN=(--video "$V2V720" --mask-dir "$BATCH_OUT/mesh/mask/$CAM" --out "$PINNED"
+PIN=(--video "$V2V720" --mask-dir "$MASKS" --out "$PINNED"
      --channel g --dilate "${DILATE:-15}")
 if [ -n "${TARGET_HUE:-}" ]; then
   PIN+=(--target-hue "$TARGET_HUE")
@@ -75,8 +96,17 @@ else
 fi
 "$PY" scripts/hue_pin.py "${PIN[@]}"
 
+# 8) hue-pin team A (validated 2026-07-03: 48.0→70.6, faces untouched at sat-min 0.35)
+FINAL="$PINNED"
+if [ "${PIN_A:-1}" = "1" ]; then
+  FINAL="${V2V720%.mp4}_pinned2.mp4"
+  "$PY" scripts/hue_pin.py --video "$PINNED" --mask-dir "$MASKS" --out "$FINAL" \
+    --channel r --dilate "${DILATE:-15}" --hue-band 5 80 --sat-min 0.35 \
+    --target-from-frames "$SRC"
+fi
+
 echo "BATCH_FINISH_OK"
 echo "  beauty video : $BATCH_OUT/video/$CAM.mp4"
-echo "  v2v 480p     : $V2V"
+echo "  v2v          : $V2V"
 echo "  seedvr2 720p : $V2V720"
-echo "  FINAL pinned : $PINNED"
+echo "  FINAL pinned : $FINAL"

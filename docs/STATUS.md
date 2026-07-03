@@ -26,8 +26,12 @@
   final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
   drift 244.2°→184.9°, auto target), physics continuous around the old teleport zone. **Player
   crispness FIXED same day (§6): v2v now runs at 1280×720 by default — 480p latents were
-  repainting distant players as mush; A/B shows separated limbs/readable poses, no regressions.
-  Best FINAL: `out/anim_finish/sideline_rgbnight_hi720_720p_pinned.mp4`** (local). Next: user
+  repainting distant players as mush; A/B shows separated limbs/readable poses, no regressions.**
+  **Cluster smear FIXED same day (§6): kit-colour re-injection into the control inside the
+  team-mask AOV (grade3 was erasing kit identity in tight clusters → Wan hallucinated white/
+  orange shirts) + a second hue-pin for team A (yellow) — both now defaults in
+  `pod_finish_batch.sh` (mask pass moved before v2v).
+  Best FINAL: `out/anim_finish/sideline_rgbnight_kitinj_720p_pinned2.mp4`** (local). Next: user
   eye-judgement of the final vs the GOAL + pick the next photoreal lever.** Historical context
   of the recipe: kit-boost at source +
   night-graded rgb control = team identity AND floodlit-night tone survive Wan-VACE in one pass**
@@ -233,6 +237,29 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-03** — **PLAYER-CLUSTER SMEAR FIXED: kit-colour re-injection into the v2v control
+  (+ team-A hue pin).** Diagnosis (`out/clusters/control_vs_output_f10.png`): in tight clusters
+  the night-graded control keeps clean separable geometry but grade3 all but erases kit colour —
+  uniform dark-teal mannequins → Wan gets shape without identity and hallucinates white/orange
+  shirts. Fix `scripts/control_kit_inject.py`: push H/S toward each team's kit colour inside the
+  eroded team-mask AOV, keep V (shading/limb boundaries survive). Auto-target = histogram-MODE of
+  the grade-surviving masked pixels (a circular mean is wrong here: grade3 splits team-A yellow
+  into a yellow/olive bimodal — night 140–160°+60–70° vs beauty 60–80° unimodal — and the mean
+  landed on green 139.8°); manual `TEAM_A_HSV`/`TEAM_B_HSV` used & validated this run
+  ("65 0.85"/"185 0.95"). A/B (`scripts/pod_cluster_ab.sh`, same seed/steps/res, ONLY the control
+  changed): **f10 far cluster — the white-shirt+orange hallucination on team B is GONE, all
+  players azure; f30/f55 + mid crops: parity or slightly cleaner, no regressions.** Bonus: kit
+  drift shrinks again (230.1° vs 235.8° pre-pin). Team-A residual (yellow renders ORANGE — the
+  pin only covered B): second hue-pin pass, channel r, band 5–80°, sat-min 0.35 (faces stay out
+  of the gate), target auto-measured 70.6° from the beauty render → f30 torso orange→yellow, no
+  collateral. WanVACE `conditioning_scale` confirmed in diffusers 0.38 (default 1.0) — wired as
+  `--conditioning-scale`/`CS` env, left at 1.0 in this A/B. PROMOTED into `pod_finish_batch.sh`:
+  mask pass moved BEFORE v2v, `KIT_INJECT=1` default (TEAM_*_HSV unset = validated constants,
+  set-empty = auto-measure), `PIN_A=1` second pin. The reordered one-command wrapper has not yet
+  been re-run E2E as a single command (every step ran individually on the pod today — the next
+  fresh finish run validates it). Artifacts local:
+  `out/anim_finish/sideline_rgbnight_kitinj_720p_pinned2.mp4` (**new best FINAL**),
+  `out/clusters/*` (inject check + judged A/B crops). Pod session ~40 min ≈ $0.5, **pod STOPPED**.
 - **2026-07-03** — **PLAYER-CRISPNESS LEVER LANDED: v2v at 1280×720 is the new default.**
   Diagnosis (`out/anim_finish/crisp_zoom_*_f30.png`, stage-by-stage crops of the same distant
   players): crisp in the 720p beauty render → MUSH after Wan-VACE at 832×480 (a 15–25 px player
