@@ -20,7 +20,14 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **v2v finishing recipe FOUND & VALIDATED 2026-07-03 (§6): kit-boost at source +
+- **NEXT ACTION:** **FULL FINISHING CHAIN RUN E2E ON THE POD 2026-07-03 (§6): fresh recon
+  (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
+  pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
+  final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
+  drift 244.2°→184.9°, auto target), physics continuous around the old teleport zone. FINAL:
+  `out/anim_finish/sideline_rgbnight_720p_pinned.mp4` (local). Next: user eye-judgement of the
+  final vs the GOAL + pick the next photoreal lever (player crispness at distance is the top
+  candidate by eye).** Historical context of the recipe: kit-boost at source +
   night-graded rgb control = team identity AND floodlit-night tone survive Wan-VACE in one pass**
   (yellow team locks hard, cyan reads as the second team with a cyan→blue hue drift; night look kept
   end-to-end — first variant ever). Chain of evidence: depth spike (restyle ✓, kits ✗) → rgb|gray A/B
@@ -224,6 +231,21 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-03** — **FULL FINISHING CHAIN E2E ON THE POD — all three levers land in one run.**
+  `pod_finish_batch.sh` executed on a FRESH reconstruction (PHYSICS=1, DEMO_EDITS=0, 60 frames,
+  sideline): recon 310 s → quilt export → GPU render 60/60 → grade3 → Wan-VACE (57 f) → SeedVR2
+  720p → team-mask pass 60/60 → hue-pin 57/57 (auto target measured 184.9° from THIS run's
+  beauty render — matches the local 183.5° constant; this run's drift 244.2°, delta −59.3°).
+  One bug found & fixed mid-run: INPUTS for `pod_seedvr2.sh` must be ABSOLUTE (it cd's into its
+  own repo before `test -f`) — batch died between v2v and SeedVR2, fixed in
+  `pod_finish_batch.sh` (388bac8) and resumed from SeedVR2 without redoing recon/render/v2v.
+  Eye-verdict on `final_compare_f10/30/55.png` (unpinned top vs pinned bottom): **crowd quilt
+  survives the whole generative chain — no kaleidoscope, non-periodic stands**; night look
+  holds; pin turns team-B kits azure, yellow/grass/crowd untouched; beauty f29→f31 (the old
+  teleport zone): positions continuous, no ghost slide — **M3-9 physics gate passes by eye**.
+  Pod session ~50 min ≈ $0.6, **pod STOPPED**. Artifacts local `out/anim_finish/`:
+  `sideline_rgbnight_720p_pinned.mp4` (FINAL), unpinned 720p, v2v 480p, `sideline_beauty.mp4`,
+  compare stills; full set persists on the pod volume.
 - **2026-07-03** — **KIT-HUE DRIFT MEASURED + PIN BUILT & VIDEO-VALIDATED (the cyan→blue lever,
   fully local).** Measured on team-B kit pixels (mask∩blue-gate, sideline f30): render hue
   **183.5°** (azure-cyan; clip truth ≈195°, measured team colour [0.367,0.514,0.647] = 208° flat) →
