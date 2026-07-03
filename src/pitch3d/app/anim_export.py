@@ -53,8 +53,9 @@ from pitch3d.core.scene.stadium import (
 )
 from pitch3d.env import load_env
 
-STADIUM_REPEAT_AROUND = 40.0  # crowd-tile copies laid around the loop (mirror-tiled in Blender)
-STADIUM_REPEAT_UP = 4.0       # copies up the rake; broadcast crowd band is short, so tile upward
+STADIUM_REPEAT_AROUND = 40.0  # tile mode: crowd-tile copies laid around the loop (mirror-tiled)
+STADIUM_REPEAT_UP = 4.0       # tile mode: copies up the rake
+CROWD_QUILT_SIZE = (8192, 512)  # quilt mode: (width, height) of the one non-repeating crowd texture
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -67,6 +68,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--out", default=env.get("PITCH3D_ANIM_OUT", "out/anim/mesh"))
     p.add_argument("--smplx-models", default=env.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models"))
     p.add_argument("--source-video", default=env.get("PITCH3D_STADIUM_VIDEO", ""))
+    p.add_argument(
+        "--crowd-mode",
+        choices=("quilt", "tile"),
+        default=env.get("PITCH3D_CROWD_MODE", "quilt"),
+        help="stands texture: one large non-repeating quilt (auto default) or the legacy "
+        "small-tile mirror repeat",
+    )
+    p.add_argument(
+        "--crowd-seed", type=int, default=int(env.get("PITCH3D_CROWD_SEED", "0"))
+    )
     p.add_argument("--fade-frames", type=int, default=int(env.get("PITCH3D_FADE_FRAMES", "4")))
     p.add_argument(
         "--canonical-up",
@@ -340,25 +351,49 @@ def _export_pitch(scene, out_dir: str, entries: dict[str, list[str]]) -> None:
 
 
 def _export_stadium(
-    scene, out_dir: str, source_video: str, source_ok: bool, entries: dict[str, list[str]]
+    scene,
+    out_dir: str,
+    source_video: str,
+    source_ok: bool,
+    entries: dict[str, list[str]],
+    *,
+    crowd_mode: str = "quilt",
+    crowd_seed: int = 0,
 ) -> None:
     # Hybrid stadium backdrop (M2): procedural bowl + REAL appearance from THIS clip — a
-    # *tinted mosaic* (crisp crowd tile x per-vertex measured tint, mirror copy-fill for the
+    # *tinted mosaic* (crisp crowd texture x per-vertex measured tint, mirror copy-fill for the
     # unseen side). No clip → we cannot measure crowd colour, so omit the bowl, not invent it.
+    # AUTO default texture is the QUILT (one large non-repeating stitch of measured crowd crops,
+    # uint8, continuous 0-1 unwrap, REPEAT) — repeating the small tile reads as a kaleidoscope
+    # once sharpened. MANUAL: --crowd-mode tile restores the legacy 40x4 mirror mosaic,
+    # --crowd-seed re-rolls the quilt.
     if not source_ok:
         print("stadium: no source clip (--source-video / PITCH3D_STADIUM_VIDEO), skipping "
               "stadium.npz")
         return
-    from pitch3d.adapters.render.stadium_backdrop import bake_backdrop_colors, extract_crowd_tile
+    from pitch3d.adapters.render.stadium_backdrop import (
+        assemble_crowd_quilt,
+        bake_backdrop_colors,
+        extract_crowd_tile,
+    )
 
     dims = scene.field.dimensions
     sv, sf, sp = stadium_bowl_geometry(dims)
     scolors, scov = bake_backdrop_colors(scene.camera, sv, source_video)
     sfilled, _ = fill_holes_by_copy(sv, scolors, scov)
     stile = extract_crowd_tile(scene.camera, sv, sp, scov, source_video)
-    suv = bowl_tile_loop_uvs(
-        sf, sp, repeat_around=STADIUM_REPEAT_AROUND, repeat_up=STADIUM_REPEAT_UP
-    )
+    if crowd_mode == "quilt":
+        qw, qh = CROWD_QUILT_SIZE
+        quilt = assemble_crowd_quilt(stile, width=qw, height=qh, seed=crowd_seed)
+        tex = (quilt * 255.0 + 0.5).astype(np.uint8)
+        suv = bowl_tile_loop_uvs(sf, sp, repeat_around=1.0, repeat_up=1.0)
+        tile_ext = "REPEAT"
+    else:
+        tex = stile.astype(np.float32)
+        suv = bowl_tile_loop_uvs(
+            sf, sp, repeat_around=STADIUM_REPEAT_AROUND, repeat_up=STADIUM_REPEAT_UP
+        )
+        tile_ext = "MIRROR"
     dst = os.path.join(out_dir, "stadium.npz")
     np.savez(
         dst,
@@ -366,13 +401,14 @@ def _export_stadium(
         faces=sf.astype(np.int32),
         colors=sfilled.astype(np.float32),
         uv=suv.astype(np.float32),
-        tile=stile.astype(np.float32),
+        tile=tex,
+        tile_ext=tile_ext,
     )
-    entries["stadium.npz"] = ["colors", "faces", "tile", "uv", "verts"]
+    entries["stadium.npz"] = ["colors", "faces", "tile", "tile_ext", "uv", "verts"]
     print(
         f"stadium: {sv.shape[0]} verts {sf.shape[0]} tris; covered "
         f"{int(scov.sum())}/{scov.size} ({scov.mean() * 100:.0f}%); "
-        f"tile {stile.shape[1]}x{stile.shape[0]} -> stadium.npz"
+        f"{crowd_mode} {tex.shape[1]}x{tex.shape[0]} (ext {tile_ext}) -> stadium.npz"
     )
 
 
@@ -424,7 +460,10 @@ def main(argv: list[str] | None = None) -> int:
     ball = _export_ball(scene, args.out, entries)
     _export_cameras(subject_tracks, ball, args.out, entries)
     _export_pitch(scene, args.out, entries)
-    _export_stadium(scene, args.out, args.source_video, source_ok, entries)
+    _export_stadium(
+        scene, args.out, args.source_video, source_ok, entries,
+        crowd_mode=args.crowd_mode, crowd_seed=args.crowd_seed,
+    )
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)
 
     write_manifest(args.out, entries)

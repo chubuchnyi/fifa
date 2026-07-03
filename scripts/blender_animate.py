@@ -246,7 +246,8 @@ def _add_static_mesh(name, verts, faces, rgb, roughness):
     return ob
 
 
-def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, emission_strength=1.0):
+def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, tile_ext="MIRROR",
+                      emission_strength=1.0):
     """Build the stadium bowl as a *tinted mosaic*: a crowd image (``tile``) tiled over the bowl by
     per-loop ``uv`` and modulated by the per-vertex measured colour (``tint``). Their product drives
     *emission* (base colour black) so the crowd renders at its clip brightness, not lit by the
@@ -254,8 +255,11 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, emission_
 
     The tile is normalised to unit mean, turning it into a pure detail map, so ``tint`` sets each
     stand's real colour (its regional yellow/red) while the tile only carries crowd texture; that
-    keeps the multiply from double-darkening or distorting hue. Falls back to flat vertex colour if
-    no tile/uv is given (older exports) or the Blender build predates the emission input.
+    keeps the multiply from double-darkening or distorting hue. ``tile_ext`` is the sampler edge
+    mode the exporter chose: MIRROR for the legacy small-tile repeat (reflection hides its seams),
+    REPEAT for the non-repeating 0-1 quilt (the wrap-seam faces sample u slightly past 1). Falls
+    back to flat vertex colour if no tile/uv is given (older exports) or the Blender build predates
+    the emission input.
     """
     me = bpy.data.meshes.new(name)
     me.from_pydata(
@@ -289,7 +293,8 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, emission_
         bsdf.inputs["Emission Strength"].default_value = emission_strength
 
     if have_tex and emissive:
-        til = np.asarray(tile, dtype=np.float32)
+        til = np.asarray(tile)
+        til = til.astype(np.float32) / 255.0 if til.dtype == np.uint8 else til.astype(np.float32)
         mean = np.clip(til.reshape(-1, 3).mean(axis=0), 1e-3, None)
         norm = (til / mean)[::-1]  # unit-mean detail map; flip to Blender's bottom-left origin
         hh, ww = norm.shape[:2]
@@ -302,7 +307,7 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, emission_
         uvmap.uv_map = "UVMap"
         tex = nt.nodes.new("ShaderNodeTexImage")
         tex.image = img
-        tex.extension = "MIRROR"  # reflect at tile edges so the repeat seams disappear
+        tex.extension = tile_ext
         nt.links.new(uvmap.outputs["UV"], tex.inputs["Vector"])
         mul = nt.nodes.new("ShaderNodeVectorMath")
         mul.operation = "MULTIPLY"
@@ -337,6 +342,7 @@ if os.path.exists(stadium_path):
         "stadium", sd["verts"], sd["faces"], sd["colors"],
         uv=sd["uv"] if "uv" in sd.files else None,
         tile=sd["tile"] if "tile" in sd.files else None,
+        tile_ext=str(sd["tile_ext"]) if "tile_ext" in sd.files else "MIRROR",
     )
 
 # Floodlit-NIGHT lighting (v2 lever 3) with BOTH auto-detect and manual override. AUTO baseline:

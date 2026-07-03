@@ -27,10 +27,12 @@
   (control channel alone ✗ — the render's own kit signal was too weak) → kit-boost render + grade3
   night-grade (both ✓) → **(c) SeedVR2 720p upscale DONE 2026-07-03** (§6: sharper kits/bodies, night
   holds, ranking unchanged; `scripts/pod_seedvr2.sh`). **Full finishing chain now: recon → kit-boost
-  render → night-grade → rgb-control Wan-VACE → SeedVR2 720p.** Next fidelity levers: pin the
-  cyan→blue kit drift (per-team semantic hint / AOV masks in the export contract), fix the crowd
-  kaleidoscope at source (sharpness now exposes it), eye-check the M3-9 physics gate on the next
-  fresh recon. Artifacts: `out/kitboost/` local (480p+720p mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
+  render → night-grade → rgb-control Wan-VACE → SeedVR2 720p.** **Crowd kaleidoscope FIXED at source
+  2026-07-03 (§6): non-repeating crowd QUILT** (`--crowd-mode quilt` auto-default, legacy `tile` +
+  `--crowd-seed` manual; eye-validated on a local CPU render). Remaining fidelity levers: pin the
+  cyan→blue kit drift (per-team semantic hint / AOV masks in the export contract), eye-check the
+  M3-9 physics gate — both land in the same next pod re-render, which picks the quilt up
+  automatically. Artifacts: `out/kitboost/` local (480p+720p mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
   (clamp impossible motion via the Correction seam; teleports MARKED not erased, R-6) **+ the root-cause
   coherence fix** (coast velocity capped at 10.5 m/s — a dying track's 43 m/s edge slid a ghost 10.9 m).
   Real-scene probe: speed/accel violations 22/999 → **0/0**, 10 raw teleports → **1 marked region event**
@@ -47,8 +49,8 @@
   the manifest FIRST and aims from `cameras.npz`; wrapper knob defaults single-sourced in
   `scripts/video_defaults.sh`. Old export dirs are refused by design — **RE-EXPORT on the pod**
   (`scripts/pod_make_video.sh` runs both halves). After the re-render eye-judgement, the known photoreal
-  gaps remain: crowd-mosaic kaleidoscope (MIRROR tiling reads as pattern), grass visible past the bowl,
-  night exposure/tone, body-texture coverage ~7–11 % measured. Commit at every checkpoint
+  gaps remain: grass visible past the bowl, night exposure/tone, body-texture coverage ~7–11 %
+  measured (crowd kaleidoscope FIXED 2026-07-03 — non-repeating quilt). Commit at every checkpoint
   (standing-authorized, NO push). **180°-roll** still bites any raw-pixel consumer (auto-detect
   `-rot[1][2]<0` + rotate before sampling).
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
@@ -216,6 +218,25 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-03** — **CROWD-QUILT VALIDATED: the stands kaleidoscope is dead at source.** Root cause
+  was the mosaic scheme itself: ONE small measured crowd tile mirror-repeated 40×4 over the bowl
+  (`tex.extension=MIRROR`) — the periodicity reads as a kaleidoscope, crisply since SeedVR2. Fix:
+  new `assemble_crowd_quilt` (`adapters/render/stadium_backdrop.py`) stitches one large
+  non-repeating 8192×512 texture from ~100 random crops of the SAME measured tile (random offsets,
+  50 % x-flips, ±8 % gain jitter, Hann-feathered seams; placement wraps in x so the loop seam blends
+  like any other); the bowl now unwraps continuously (`bowl_tile_loop_uvs` repeat=(1,1)) with
+  extension REPEAT; the per-vertex measured-tint multiply is unchanged. AUTO default
+  `--crowd-mode quilt`; MANUAL `--crowd-mode tile` (legacy mosaic) + `--crowd-seed N` re-roll (env
+  `PITCH3D_CROWD_MODE`/`PITCH3D_CROWD_SEED`). `stadium.npz`: `tile` now uint8 in quilt mode (12.6 MB
+  vs 50 MB) + optional `tile_ext` key; `blender_animate` reads both dtypes/exts, old exports keep
+  MIRROR. Eye-verdict (LOCAL: anim_export on the kitboost scene + CPU Cycles f0/f30 sideline
+  832×480, vs the old kitboost still): old = mirrored V-motifs + a horizontal repeat seam along
+  every stand; new = varied non-periodic crowd, wrap seam invisible (quilt PNGs judged directly
+  too). Texel density ~22 px/m ≈ 2.3× oversampling at 720p — slight softness vs the oversampled old
+  tile accepted (v2v+SeedVR2 re-detail). Tests: `tests/unit/test_crowd_quilt.py` (coverage,
+  determinism, non-periodicity, flat-tile neutrality, unwrap-UV); full unit + fakes-e2e green.
+  Artifacts: `out/quilt/` (export, texture PNGs, 2 rendered frames). All LOCAL — **pod untouched
+  (STOPPED)**; the next pod re-render picks the quilt up automatically.
 - **2026-07-03** — **SeedVR2 720p UPSCALE VALIDATED (priority-2c): the winning v2v variant upscales
   cleanly 480p→720p; the quality ceiling is now the v2v pass itself, not resolution.** New
   `scripts/pod_seedvr2.sh` (standalone numz CLI, no ComfyUI/flash-attn; weights auto-download to the

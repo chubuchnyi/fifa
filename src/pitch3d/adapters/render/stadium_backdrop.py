@@ -178,3 +178,58 @@ def extract_crowd_tile(
     if xb - xa < 2 or yb - ya < 2:
         raise ValueError("crowd-band box collapsed; widen height_band or lower inset")
     return _busiest_window(rgb[ya : yb + 1, xa : xb + 1], tile_frac[0], tile_frac[1])
+
+
+def assemble_crowd_quilt(
+    tile: np.ndarray,
+    *,
+    width: int = 8192,
+    height: int = 512,
+    seed: int = 0,
+) -> np.ndarray:
+    """Stitch one large NON-repeating crowd texture from random crops of the measured tile.
+
+    Repeating the small tile over the bowl (the 40×4 mirror mosaic) reads as a kaleidoscope the
+    moment the video is sharpened — the tell is the *periodicity*, not the tile. The quilt keeps
+    every pixel measured but kills the period: a canvas the size of the whole unwrapped bowl is
+    covered by ~a hundred crops of the tile at random offsets, half of them flipped left-right,
+    each with a small brightness jitter, and blended in under a Hann window so patch seams feather
+    away. Placement wraps in ``x`` (the around-the-bowl axis), so with the continuous 0–1 unwrap
+    and REPEAT extension the wrap seam is blended like any interior seam. The default 16:1 canvas
+    matches the bowl's perimeter:rake aspect (~375 m : 24 m at default geometry).
+
+    Deterministic for a given ``seed`` — the manual dial next to ``--crowd-mode`` (auto default =
+    quilt, seed 0). Returns ``(height, width, 3)`` float32 RGB in ``[0, 1]``.
+    """
+    import cv2
+
+    tile = np.asarray(tile, dtype=np.float32)
+    rng = np.random.default_rng(seed)
+
+    ph = max(2, height // 2)  # two-ish patch rows up the rake
+    sh = max(ph + 1, int(round(ph * 1.4)))  # vertical slack so crops differ in spectator-row phase
+    sw = max(2, int(round(tile.shape[1] * sh / tile.shape[0])))
+    interp = cv2.INTER_AREA if sh < tile.shape[0] else cv2.INTER_LINEAR
+    scaled = cv2.resize(tile, (sw, sh), interpolation=interp)
+    pw = min(width, sw, max(2, int(round(ph * tile.shape[1] / tile.shape[0]))))
+
+    win = (np.hanning(ph)[:, None] * np.hanning(pw)[None, :]).astype(np.float32) + 1e-4
+    acc = np.zeros((height, width, 3), dtype=np.float32)
+    wsum = np.zeros((height, width), dtype=np.float32)
+    step_y = max(1, ph - ph // 3)
+    step_x = max(1, pw - pw // 3)
+    ys = list(range(0, height - ph + 1, step_y))
+    if ys[-1] != height - ph:
+        ys.append(height - ph)
+    for y in ys:
+        for x in range(0, width, step_x):
+            y0 = int(rng.integers(0, sh - ph + 1))
+            x0 = int(rng.integers(0, sw - pw + 1))
+            patch = scaled[y0 : y0 + ph, x0 : x0 + pw]
+            if rng.random() < 0.5:
+                patch = patch[:, ::-1]
+            patch = patch * rng.uniform(0.92, 1.08)
+            cols = (x + np.arange(pw)) % width  # wrap around the bowl
+            acc[y : y + ph, cols] += patch * win[..., None]
+            wsum[y : y + ph, cols] += win
+    return np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
