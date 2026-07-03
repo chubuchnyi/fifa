@@ -20,16 +20,14 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **v2v finishing spike CONFIRMED the reconstruct-then-condition bet (2026-07-03, §6):
-  depth-locked Wan VACE over our render closes night tone + crowd + grass in one pass, structure/motion
-  stay ours — but depth-only control does NOT lock per-player KIT COLOURS (teams drift to the prompt).
-  **rgb|gray A/B DONE 2026-07-03 (§6): control-channel choice alone CANNOT pin team identity — rgb/gray
-  lock the day-bright CG tone (night lost) yet players still get prompt-dressed (cyan team vanished in
-  every variant) because the render's own kit signal is weak (grey bodies: dark desaturated measured
-  night pixels + 7–11 % coverage). Next (refined priority 2): (a) strengthen team colour at the SOURCE —
-  saturated kit fallback / higher kit blend in the per-vertex colours; (b) composite conditioning —
-  depth control + per-team semantic hint (AOV masks in the export contract) or night-graded rgb; then
-  (c) 720p + SeedVR2.** **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
+- **NEXT ACTION:** **v2v finishing recipe FOUND & VALIDATED 2026-07-03 (§6): kit-boost at source +
+  night-graded rgb control = team identity AND floodlit-night tone survive Wan-VACE in one pass**
+  (yellow team locks hard, cyan reads as the second team with a cyan→blue hue drift; night look kept
+  end-to-end — first variant ever). Chain of evidence: depth spike (restyle ✓, kits ✗) → rgb|gray A/B
+  (control channel alone ✗ — the render's own kit signal was too weak) → kit-boost render + grade3
+  night-grade (both ✓). Remaining priority order: (c) **720p + SeedVR2 upscale** of the winning recipe;
+  then pin the cyan→blue drift (per-team semantic hint / AOV masks in the export contract) and the
+  uniform-yellow crowd (control mosaic leaks). Artifacts: `out/kitboost/` local (mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
   (clamp impossible motion via the Correction seam; teleports MARKED not erased, R-6) **+ the root-cause
   coherence fix** (coast velocity capped at 10.5 m/s — a dying track's 43 m/s edge slid a ghost 10.9 m).
   Real-scene probe: speed/accel violations 22/999 → **0/0**, 10 raw teleports → **1 marked region event**
@@ -214,6 +212,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **KIT-BOOST + NIGHT-GRADE VALIDATED (priority-2a+b): the v2v recipe that keeps BOTH
+  team identity AND the night tone is found.** Fresh full recon (kit-colour boost in `anim_export`
+  vcolors: team A [.77,.73,.26]→[1,.91,0] yellow, team B [.37,.51,.65]→[.28,.61,.9] cyan; sat×1.6
+  val×1.4) → sideline render → grade3 night-grade (`eq=brightness=-.28:contrast=1.12:gamma=.75:
+  saturation=.9,colorbalance=bs=.12:bm=.06`) → two rgb-control v2v runs (57 f 832×480, 30 steps,
+  ref=source f0). Eye-verdict on f10/f30/f55: (1) **the boosted render itself now carries legible team
+  colours** (yellow vs cyan, vs the old grey bodies); (2) **v2v over night-graded control keeps the
+  floodlit-NIGHT look end-to-end** — first variant ever (dark stands, dark striped grass, floodlit feel)
+  — AND both teams stay distinct (yellow locks hard; cyan drifts to generic blue but reads as the second
+  team); (3) v2v over un-graded boosted rgb re-confirms the day-bright drift (neon grass) even though
+  kits lock — so the WINNING RECIPE = **kit-boost at source + night-graded rgb control**. Source-side
+  colour strength was the missing signal, exactly as diagnosed (control channel alone couldn't pin it).
+  Residuals for next pass: cyan→blue hue drift (semantic/per-team hint could pin it), crowd goes
+  uniform-yellow (control's kaleidoscope mosaic leaks), 480p bodies still rough → (c) 720p + SeedVR2.
+  Artifacts local: `out/kitboost/{sideline,sideline_rgbnight,sideline_rgbboost}.mp4` + judged stills
+  `*_f{1,2,3}.png` (f10/f30/f55) + `night_grade_f30.png`; on-pod `out/anim_kitboost/`, `out/v2v/`.
+  Batch script pattern: `/workspace/run_kitboost_batch.sh` (recon→render→grade→2×v2v). **Pod STOPPED.**
 
 - **2026-07-03** — **rgb|gray CONTROL A/B (sideline, vs the depth run): NEITHER locks team identity, BOTH
   lose the night restyle — the control channel is not the lever; the render's colour signal is.**
