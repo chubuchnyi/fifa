@@ -25,9 +25,12 @@
   (yellow team locks hard, cyan reads as the second team with a cyan→blue hue drift; night look kept
   end-to-end — first variant ever). Chain of evidence: depth spike (restyle ✓, kits ✗) → rgb|gray A/B
   (control channel alone ✗ — the render's own kit signal was too weak) → kit-boost render + grade3
-  night-grade (both ✓). Remaining priority order: (c) **720p + SeedVR2 upscale** of the winning recipe;
-  then pin the cyan→blue drift (per-team semantic hint / AOV masks in the export contract) and the
-  uniform-yellow crowd (control mosaic leaks). Artifacts: `out/kitboost/` local (mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
+  night-grade (both ✓) → **(c) SeedVR2 720p upscale DONE 2026-07-03** (§6: sharper kits/bodies, night
+  holds, ranking unchanged; `scripts/pod_seedvr2.sh`). **Full finishing chain now: recon → kit-boost
+  render → night-grade → rgb-control Wan-VACE → SeedVR2 720p.** Next fidelity levers: pin the
+  cyan→blue kit drift (per-team semantic hint / AOV masks in the export contract), fix the crowd
+  kaleidoscope at source (sharpness now exposes it), eye-check the M3-9 physics gate on the next
+  fresh recon. Artifacts: `out/kitboost/` local (480p+720p mp4s + judged stills). **#207 player-physics gate (M3-9) BUILT 2026-07-03** — `core/correction/kinematics.py`
   (clamp impossible motion via the Correction seam; teleports MARKED not erased, R-6) **+ the root-cause
   coherence fix** (coast velocity capped at 10.5 m/s — a dying track's 43 m/s edge slid a ghost 10.9 m).
   Real-scene probe: speed/accel violations 22/999 → **0/0**, 10 raw teleports → **1 marked region event**
@@ -212,6 +215,22 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **SeedVR2 720p UPSCALE VALIDATED (priority-2c): the winning v2v variant upscales
+  cleanly 480p→720p; the quality ceiling is now the v2v pass itself, not resolution.** New
+  `scripts/pod_seedvr2.sh` (standalone numz CLI, no ComfyUI/flash-attn; weights auto-download to the
+  volume `/workspace/models/SEEDVR2`; venv `/workspace/venvs/seedvr2` torch 2.11 cu128): 3B fp16 on the
+  32 GB RTX PRO 4500 Blackwell, `--resolution 720 --batch_size 33` (4n+1 temporal), 57 f per clip in
+  minutes. Eye-verdict f10/f30/f55 vs 480p: **kits, bodies and markings clearly sharper** (1248×720),
+  night tone holds (SeedVR2 slightly brightens the green), teams stay yellow vs blue; the un-graded
+  control cell upscales equally sharp but keeps its day-bright drift — recipe ranking unchanged.
+  Honest flip side: sharpness exposes the residuals — the crowd kaleidoscope mosaic and v2v body
+  artifacts are now crisply visible (garbage in → sharp garbage out). **Deliverable chain as of today:
+  recon → kit-boost render → night-grade → rgb-control Wan-VACE → SeedVR2 720p.** Next fidelity levers:
+  pin cyan→blue kit drift (per-team semantic hint / AOV masks), fix the crowd mosaic at source
+  (mirror-tiling → measured crowd texture), and eye-check the M3-9 physics gate on the next fresh
+  recon (`PHYSICS=1` default). Artifacts local: `out/kitboost/sideline_{rgbnight,rgbboost}_720p.mp4`
+  + stills. **Pod STOPPED.**
 
 - **2026-07-03** — **KIT-BOOST + NIGHT-GRADE VALIDATED (priority-2a+b): the v2v recipe that keeps BOTH
   team identity AND the night tone is found.** Fresh full recon (kit-colour boost in `anim_export`
