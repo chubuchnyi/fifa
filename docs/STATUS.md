@@ -20,8 +20,11 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **Deliverable-path refactor (ADR-0011) DONE & E2E-verified locally (2026-07-03) — re-run
-  the deliverable on the pod through the NEW path and eye-judge the real-clip framing.** The 2026-06-28
+- **NEXT ACTION:** **Deliverable-path refactor (ADR-0011) DONE & E2E-verified locally (2026-07-03) — pod
+  re-run IN PROGRESS (`out/anim_adr11`, 60 f × 4 cams): first attempt reconstructed the WRONG clip
+  (`/workspace/clip.mp4` default = stale daytime stock video) and crashed in the stadium backdrop;
+  relaunched with `PITCH3D_CLIP=/workspace/Colombia-1-0-Congo-DR1080p.mp4` (§6). Then: copy mp4s local,
+  STOP the pod, eye-judge the framing.** The 2026-06-28
   deliverable FAILED the eye-judgement (see §6 top): players = 5–10 px specks because the renderer's static
   bbox cameras framed the whole bowl from OUTSIDE; sideline = crowd wall; plus two wiring holes (COHERENCE
   unset→0 on direct pod runs, `PITCH3D_STADIUM_VIDEO` never wired officially). Fixed: exporter is now
@@ -197,6 +200,20 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **POD RE-RUN, attempt 1: crashed on the WRONG CLIP; root-caused & relaunched.** First
+  ADR-0011 pod run used `pod_make_video.sh` defaults → `PITCH3D_CLIP=/workspace/clip.mp4`, which turned out
+  to be a **stale daytime stock clip** (Pexels; byte-identical to `samples/video/15449383-hd_1920_1080_60fps.mp4`),
+  not the target night match. Every symptom followed from that one mistake: PnLCalib found 0 keypoints (no
+  soccer pitch → identity homographies, conf 0), 11 phantom subjects with ~445 m translation spans, fov pinned
+  at 50°, body-texture coverage 0–4 %, and finally the loud crash in `anim_export` stadium backdrop
+  («no crowd-band vertex is visible in any frame») — the contract refused to render garbage, which is ADR-0011
+  working as designed. Eliminated en route: coherence edge-extension, commit regressions, stale `.env`, kp
+  thresholds, CUDA, weights, PnLCalib repo drift. **The 2026-06-28 deliverable is NOT affected** (its scene
+  `source_id = Colombia-1-0-Congo-DR1080p` — the framing eye-verdict stands). Relaunched with
+  `PITCH3D_CLIP=/workspace/Colombia-1-0-Congo-DR1080p.mp4` (byte-identical to the local target sample) →
+  `out/anim_adr11`. Candidate guard for later: wrapper-level clip-provenance check (expected duration/hash),
+  since the default path silently reconstructs whatever `/workspace/clip.mp4` happens to be.
 
 - **2026-07-03** — **RESEARCH: mid-2026 generative-model landscape vs. this task («как бы делали с нуля»)**
   → [`research/2026-07-generative-render-landscape.md`](research/2026-07-generative-render-landscape.md)
