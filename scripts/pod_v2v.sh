@@ -26,7 +26,8 @@ if [ ! -x "$VENV/bin/python" ]; then
 fi
 if ! "$VENV/bin/python" -c "import diffusers, transformers, torch" 2>/dev/null; then
   echo "== installing deps (torch + diffusers stack)"
-  "$VENV/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cu124
+  # Blackwell (sm_120) needs the cu128 build — cu124 wheels have no kernels for it
+  "$VENV/bin/pip" install -q torch --index-url https://download.pytorch.org/whl/cu128
   "$VENV/bin/pip" install -q diffusers transformers accelerate ftfy sentencepiece protobuf "imageio[ffmpeg]" opencv-python-headless
 fi
 "$VENV/bin/python" - <<'PY'
