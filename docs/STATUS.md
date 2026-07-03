@@ -23,9 +23,13 @@
 - **NEXT ACTION:** **v2v finishing spike CONFIRMED the reconstruct-then-condition bet (2026-07-03, §6):
   depth-locked Wan VACE over our render closes night tone + crowd + grass in one pass, structure/motion
   stay ours — but depth-only control does NOT lock per-player KIT COLOURS (teams drift to the prompt).
-  Next: research priority 2 — colour/semantic conditioning (start with `--control rgb|gray` A/B in
-  `scripts/pod_v2v.sh`, then AOV passes in the export contract) to pin team identity; after that 720p +
-  SeedVR2.** Also queued: **#207 player-physics gate (M3-9)** — user's "unnaturally fast players"
+  **rgb|gray A/B DONE 2026-07-03 (§6): control-channel choice alone CANNOT pin team identity — rgb/gray
+  lock the day-bright CG tone (night lost) yet players still get prompt-dressed (cyan team vanished in
+  every variant) because the render's own kit signal is weak (grey bodies: dark desaturated measured
+  night pixels + 7–11 % coverage). Next (refined priority 2): (a) strengthen team colour at the SOURCE —
+  saturated kit fallback / higher kit blend in the per-vertex colours; (b) composite conditioning —
+  depth control + per-team semantic hint (AOV masks in the export contract) or night-graded rgb; then
+  (c) 720p + SeedVR2.** Also queued: **#207 player-physics gate (M3-9)** — user's "unnaturally fast players"
   confirmed by `scripts/motion_stats.py` (1083 accel-violation frames; MA5 can't fix teleports; see §3/§6);
   and deliverable re-renders now default `DEMO_EDITS=0` (a demo +10 cm offset + refit used to leak into
   every exported scene — fixed 2026-07-03). Spike artifacts local: `out/pod_adr11_check/v2v/` (broadcast+sideline mp4 + judged stills);
@@ -206,6 +210,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **rgb|gray CONTROL A/B (sideline, vs the depth run): NEITHER locks team identity, BOTH
+  lose the night restyle — the control channel is not the lever; the render's colour signal is.**
+  Same recipe as the depth spike (57 f 832×480, 30 steps, ref = source frame 0), only `--control`
+  varies. Eye-verdict on f10/f30/f55 vs the CG input and the depth run: **rgb and gray keep the CG
+  day-bright tone** (acid-green pitch, bright yellow crowd — the night look the depth run achieved is
+  GONE) because luminance-carrying control locks tone; **and the kits still drift** — every player gets
+  prompt-dressed yellow-shirt+blue-shorts (referee red survives), the cyan team vanishes in BOTH, i.e.
+  the same identity failure as depth with none of its restyle win. **Sharpened diagnosis:** the v2v
+  input's own kit signal is too weak to lock onto — near bodies read GREY (measured per-vertex colours
+  sampled from a dark night clip + 7–11 % coverage; kit-fallback tint subtle at 480p), so identity
+  currently lives only in the prompt, and no single global control video can pin per-player colours.
+  **Refined priority 2:** (a) strengthen team colour at the SOURCE (saturate the kit fallback / raise
+  kit-vs-measured blend in `anim_export` vcolors) so the render itself carries unambiguous team colours;
+  (b) composite conditioning — depth (restyle freedom) + per-team semantic hint (AOV masks in the export
+  contract) or a night-GRADED rgb control; (c) then 720p + SeedVR2. Artifacts local:
+  `out/pod_adr11_check/v2v/sideline_{rgb,gray}.mp4` + `side_{rgb,gray,input}_f{10,30,55}.png`.
+  **Pod STOPPED.**
 
 - **2026-07-03** — **PLAYER PHYSICS: user's "players move unnaturally fast" CONFIRMED by measurement;
   root-caused; gate designed (M3-9) + TWO real bugs found, one fixed.** New probe
