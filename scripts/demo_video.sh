@@ -33,6 +33,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 set -a; [ -f .env ] && . ./.env; set +a
+# Shared knob defaults (FRAMES/STITCH/COHERENCE/ANIM_*) — single source of truth with pod_make_video.sh.
+. scripts/video_defaults.sh
 
 if [ -t 1 ]; then C0=$'\033[0m'; CH=$'\033[1;36m'; CG=$'\033[1;32m'; CY=$'\033[1;33m'; CR=$'\033[1;31m'; CD=$'\033[2m'
 else C0=""; CH=""; CG=""; CY=""; CR=""; CD=""; fi
@@ -44,12 +46,14 @@ warn(){ printf '   %s! %s%s\n' "$CY" "$*" "$C0"; }
 die(){  printf '\n%sVIDEO DEMO FAILED: %s%s\n' "$CR" "$*" "$C0" >&2; exit 1; }
 
 CLIP_LOCAL="${PITCH3D_CLIP_LOCAL:-samples/video/Colombia-1-0-Congo-DR1080p.mp4}"
-FRAMES="${FRAMES:-60}"; CAMERAS="${ANIM_CAMERAS:-broadcast,sideline,top,goal}"
-RES="${ANIM_RES:-1280x720}"; SAMPLES="${ANIM_SAMPLES:-32}"; DEVICE="${ANIM_DEVICE:-gpu}"
+FRAMES="${FRAMES:-$VIDEO_FRAMES_DEFAULT}"; CAMERAS="${ANIM_CAMERAS:-$VIDEO_CAMERAS_DEFAULT}"
+RES="${ANIM_RES:-${VIDEO_RES_X_DEFAULT}x${VIDEO_RES_Y_DEFAULT}}"
+SAMPLES="${ANIM_SAMPLES:-$VIDEO_SAMPLES_DEFAULT}"; DEVICE="${ANIM_DEVICE:-$VIDEO_DEVICE_DEFAULT}"
 OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}"; REAL_CALIB="${REAL_CALIB:-1}"
 # Direction A polish on by default: re-linked tracklets (--stitch) + gap-fill (--coherence) so animated
 # bodies don't pop in/out, and a 4-frame mesh-opacity ramp at genuine entries/exits. Override with =0.
-STITCH="${STITCH:-1}"; COHERENCE="${COHERENCE:-1}"; FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
+STITCH="${STITCH:-$VIDEO_STITCH_DEFAULT}"; COHERENCE="${COHERENCE:-$VIDEO_COHERENCE_DEFAULT}"
+FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
 while [ $# -gt 0 ]; do case "$1" in
   --clip)     CLIP_LOCAL="$2"; shift;;
   --frames)   FRAMES="$2"; shift;;
@@ -137,6 +141,10 @@ info "Blender installs on first use (pip bpy, cached on the volume); Cycles rend
   export PNLCALIB_REPO='${PNLCALIB_REPO:-}' PNLCALIB_WEIGHTS_KP='${PNLCALIB_WEIGHTS_KP:-}' PNLCALIB_WEIGHTS_LINES='${PNLCALIB_WEIGHTS_LINES:-}'
   export PITCH3D_BLENDER_TARBALL_URL='${PITCH3D_BLENDER_TARBALL_URL:-}'
   export PITCH3D_FADE_FRAMES='$FADE_FRAMES'
+  # Measured appearance (stadium crowd / body texture / floodlight colour) samples the SAME staged
+  # clip we reconstruct from. Always the POD path — a '\${VAR:-}' default here would expand to the
+  # LOCAL machine's value and leak a path that does not exist on the pod (the SMPLX_MODELS gotcha).
+  export PITCH3D_STADIUM_VIDEO='$CLIP_POD'
   FRAMES='$FRAMES' OUT='$OUT_POD' REUSE_SCENE='$REUSE_SCENE' \
   STITCH='$STITCH' COHERENCE='$COHERENCE' \
   ANIM_DEVICE='$DEVICE' ANIM_RES_X='$RES_X' ANIM_RES_Y='$RES_Y' ANIM_SAMPLES='$SAMPLES' \

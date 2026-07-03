@@ -18,18 +18,21 @@
 #   PITCH3D_SMPLX_MODELS=/workspace/repos/SMPLest-X/human_models/human_model_files  (smplx pkg models dir)
 set -euo pipefail
 
+# Shared knob defaults (FRAMES/STITCH/COHERENCE/ANIM_*) — single source of truth with demo_video.sh.
+. "$(dirname "${BASH_SOURCE[0]}")/video_defaults.sh"
+
 REPO="${PITCH3D_REPO:-/workspace/fifa}"
 PY="${PITCH3D_PY:-/workspace/.venv/bin/python}"
 CLIP="${PITCH3D_CLIP:-/workspace/clip.mp4}"
-FRAMES="${FRAMES:-60}"
+FRAMES="${FRAMES:-$VIDEO_FRAMES_DEFAULT}"
 OUT="${OUT:-out/anim}"
-ANIM_DEVICE="${ANIM_DEVICE:-gpu}"
-ANIM_RES_X="${ANIM_RES_X:-1280}"
-ANIM_RES_Y="${ANIM_RES_Y:-720}"
-ANIM_SAMPLES="${ANIM_SAMPLES:-32}"
-ANIM_FPS="${ANIM_FPS:-25}"
-ANIM_STEP="${ANIM_STEP:-1}"
-ANIM_CAMERAS="${ANIM_CAMERAS:-broadcast,sideline,top,goal}"
+ANIM_DEVICE="${ANIM_DEVICE:-$VIDEO_DEVICE_DEFAULT}"
+ANIM_RES_X="${ANIM_RES_X:-$VIDEO_RES_X_DEFAULT}"
+ANIM_RES_Y="${ANIM_RES_Y:-$VIDEO_RES_Y_DEFAULT}"
+ANIM_SAMPLES="${ANIM_SAMPLES:-$VIDEO_SAMPLES_DEFAULT}"
+ANIM_FPS="${ANIM_FPS:-$VIDEO_FPS_DEFAULT}"
+ANIM_STEP="${ANIM_STEP:-$VIDEO_STEP_DEFAULT}"
+ANIM_CAMERAS="${ANIM_CAMERAS:-$VIDEO_CAMERAS_DEFAULT}"
 SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-/workspace/repos/SMPLest-X/human_models/human_model_files}"
 
 cd "$REPO"
@@ -40,19 +43,23 @@ SCENE_JSON="$OUT/export/scene.json"
 if [ "${REUSE_SCENE:-0}" = 1 ] && [ -f "$SCENE_JSON" ]; then
   echo "== reuse scene: $SCENE_JSON exists, skipping reconstruction (REUSE_SCENE=1) =="
 else
-  # Forward continuity (stitch, ON by default — #202) + temporal coherence (opt-in) into the
-  # reconstruction so the animated bodies inherit the re-linked tracklets + gap-fill. pod_real_e2e.sh
-  # stitches unless STITCH=0; coherence stays off unless COHERENCE=1. demo_video.sh sets both.
+  # Forward continuity (stitch — #202) + temporal coherence (gap-fill + zero-phase smoothing) into
+  # the reconstruction so the animated bodies inherit re-linked tracklets and don't render raw
+  # jittery poses. BOTH default ON from video_defaults.sh — a direct pod run must match demo_video.sh.
   FORMAT=json OUT="$OUT" FRAMES="$FRAMES" \
-    STITCH="${STITCH:-1}" COHERENCE="${COHERENCE:-0}" \
+    STITCH="${STITCH:-$VIDEO_STITCH_DEFAULT}" COHERENCE="${COHERENCE:-$VIDEO_COHERENCE_DEFAULT}" \
     PITCH3D_REPO="$REPO" PITCH3D_PY="$PY" PITCH3D_CLIP="$CLIP" \
     bash scripts/pod_real_e2e.sh
 fi
 test -f "$SCENE_JSON" || { echo "pod_make_video: missing $SCENE_JSON" >&2; exit 1; }
 
-# 2) forward all frames through SMPL-X + resolve the ball (venv: torch+smplx)
+# 2) forward all frames through SMPL-X + resolve the ball (venv: torch+smplx).
+# The staged clip doubles as the MEASURED-appearance source (stadium crowd, per-vertex body
+# texture, floodlight colour): without it anim_export silently skips all three, so default it to
+# the clip we just reconstructed from.
 echo "== anim export: $SCENE_JSON → $OUT/mesh =="
 PITCH3D_SMPLX_MODELS="$SMPLX_MODELS" PITCH3D_SCENE_JSON="$SCENE_JSON" PITCH3D_ANIM_OUT="$OUT/mesh" \
+  PITCH3D_STADIUM_VIDEO="${PITCH3D_STADIUM_VIDEO:-$CLIP}" \
   PYTHONPATH=src "$PY" scripts/anim_export.py
 
 # 3) ensure Blender (bpy module, or a tarball binary) + ffmpeg, then render the cameras
