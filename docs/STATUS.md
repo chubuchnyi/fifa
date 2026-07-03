@@ -247,7 +247,12 @@ fabricate or silently hide.
   now defaults `V2V_WIDTH=1280 V2V_HEIGHT=720 V2V_FLOW=5.0` (env knobs = manual override, old
   480p reachable). Artifacts local: `out/anim_finish/sideline_rgbnight_hi720_720p_pinned.mp4`
   (best-yet FINAL), `ab_hires_{far,mid,full}_f30.png` (judged). Pod session ~35 min ≈ $0.4,
-  **pod STOPPED**.
+  **pod STOPPED**. Multi-frame hardening (f10/f55 crops + probe): verdict holds — at f55 the
+  480p cell's team-B tops came out brownish even after the pin (their drift differed from the
+  clip median) while 720p wears correct azure; residual artifact both cells: tight player
+  clusters still smear (orange blob f10). Temporal probe (mean|max consecutive-frame abs diff,
+  identical motion): A480 4.90|11.28 vs B720 5.71|11.93 — more detail, no flicker blow-up;
+  final say = watching the clip.
 - **2026-07-03** — **FULL FINISHING CHAIN E2E ON THE POD — all three levers land in one run.**
   `pod_finish_batch.sh` executed on a FRESH reconstruction (PHYSICS=1, DEMO_EDITS=0, 60 frames,
   sideline): recon 310 s → quilt export → GPU render 60/60 → grade3 → Wan-VACE (57 f) → SeedVR2
