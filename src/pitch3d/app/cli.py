@@ -14,6 +14,7 @@ manifest, canonical-JSON export) and the process exits 0 when the path completes
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from ..core.agent import EditBudget, auto_correct
 from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.coherence import CoherenceConfig
 from ..core.correction.engine import make_offset, make_smoothing
+from ..core.correction.kinematics import KinematicConfig
 from ..core.orchestration import StitchConfig
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
@@ -78,7 +80,8 @@ def run_dry_run(
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake",
-    stitch: bool = True, coherence: bool = False, demo_edits: bool = True,
+    stitch: bool = True, coherence: bool = False, physics: bool = False,
+    demo_edits: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -117,9 +120,21 @@ def run_dry_run(
     # 2) Reconstruction: DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the proposal scene.
     stitch_cfg = StitchConfig() if stitch else None
     coherence_cfg = CoherenceConfig() if coherence else None
+    # M3-9 gate limits: auto defaults + manual env override (PITCH3D_KIN_*), never forced.
+    kinematic_cfg = (
+        KinematicConfig(
+            max_speed=float(os.environ.get("PITCH3D_KIN_MAX_SPEED", KinematicConfig.max_speed)),
+            max_accel=float(os.environ.get("PITCH3D_KIN_MAX_ACCEL", KinematicConfig.max_accel)),
+            teleport_factor=float(
+                os.environ.get("PITCH3D_KIN_TELEPORT", KinematicConfig.teleport_factor)
+            ),
+        )
+        if physics
+        else None
+    )
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
-        stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg,
+        stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
     )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
@@ -136,6 +151,17 @@ def run_dry_run(
               f"extended {cr.extended_frames} edge frame(s) across "
               f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
+    kr = app.kinematic_report(scene_id)
+    if kr is not None:
+        print(f"== physics: speed viol {kr.speed_viol_before}→{kr.speed_viol_after}, "
+              f"accel viol {kr.accel_viol_before}→{kr.accel_viol_after}, "
+              f"max dev {kr.max_dev_m:.2f}m, "
+              f"+{kr.corrections_added} kinematic correction(s) on "
+              f"{kr.subjects_corrected}/{kr.n_subjects} subject(s), "
+              f"{len(kr.teleports)} teleport(s) marked")
+        for tp in kr.teleports[:5]:  # marked, not erased (R-6) — identity/stitch review queue
+            print(f"    teleport: subject {tp.track_id} @f{tp.frame} "
+                  f"jump {tp.jump_m:.2f}m ({tp.speed_mps:.1f} m/s)")
 
     # 3) OBSERVE (initial): multi-viewpoint 3D + frame overlay + radar + UI + textual summary.
     obs_before = app.observe(
@@ -448,6 +474,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--coherence", action="store_true",
                         help="bridge short interior pose gaps (slerp/lerp) + add auto "
                              "temporal-smoothing corrections (off by default)")
+    parser.add_argument("--physics", action="store_true",
+                        help="M3-9 kinematic plausibility gate (off by default): clamp root "
+                             "speed/accel to human limits via auto corrections, mark teleports "
+                             "for identity review (limits: PITCH3D_KIN_MAX_SPEED/MAX_ACCEL/"
+                             "TELEPORT)")
     parser.add_argument("--no-demo-edits", dest="demo_edits", action="store_false",
                         help="skip the dry-run edit walkthrough (steps 4-8e) so no demo "
                              "offset/refit correction is committed — use for real deliverables")
@@ -484,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
         motion_prior=args.motion_prior,
         stitch=args.stitch,
         coherence=args.coherence,
+        physics=args.physics,
         demo_edits=args.demo_edits,
     )
 

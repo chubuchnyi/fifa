@@ -53,6 +53,8 @@ COH_ARGS=()
 if [ "${STITCH:-1}" = "1" ]; then echo "== continuity: stitch ON (default)";
 else COH_ARGS+=(--no-stitch); echo "== continuity: stitch OFF (STITCH=${STITCH})"; fi
 if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
+# PHYSICS=1 → M3-9 kinematic gate: clamp impossible root speed/accel, mark teleports (#207).
+if [ "${PHYSICS:-0}" = "1" ]; then COH_ARGS+=(--physics); echo "== physics: --physics ON (M3-9 kinematic gate)"; fi
 # DEMO_EDITS=0 skips the dry-run edit walkthrough so no demo offset/refit correction lands in the
 # exported scene (deliverable runs); default 1 keeps the full golden-path seam coverage.
 if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo edits: OFF (DEMO_EDITS=0)"; fi

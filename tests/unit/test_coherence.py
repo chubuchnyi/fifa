@@ -155,6 +155,18 @@ def test_extend_leading_coasts_backward():
     np.testing.assert_allclose(z[:3], [0.29, 1.1, 2.0], atol=1e-9)
 
 
+def test_extend_max_step_caps_coast_velocity():
+    # #207: a dying track slides off the body, so the measured edge velocity can be garbage
+    # (2 m/frame = 50 m/s @ 25fps). max_step caps the coast speed; direction is preserved.
+    pose = _pose([0, 1, 2], tz=[0.0, 2.0, 4.0])  # edge velocity 2 m/frame
+    out, _ = extend_pose_to_span(pose, 0, 5, decay=0.9, vel_window=3, max_step=1.0)
+    z = out.transl[:, 2]
+    np.testing.assert_allclose(z[3:], [5.0, 5.9, 6.71], atol=1e-9)  # coasts at the cap
+    # below the cap the velocity is untouched (identical to the uncapped coast)
+    out2, _ = extend_pose_to_span(pose, 0, 5, decay=0.9, vel_window=3, max_step=5.0)
+    np.testing.assert_allclose(out2.transl[3:, 2], [6.0, 7.8, 9.42], atol=1e-9)
+
+
 def test_extend_standing_holds_position_and_posture():
     # no translation → velocity 0 → position held; posture frozen at the last measured pose.
     pose = _pose([0, 1, 2], tz=[0.0, 0.0, 0.0], gz=[0.0, 0.0, 0.7], j0z=[0.2, 0.2, 0.2])
@@ -332,6 +344,20 @@ def test_add_extends_partial_subject_to_clip_span(make_scene):
 
     assert report.subjects_extended == 1   # only the short track needed extension
     assert report.extended_frames == 4     # frames 0,1,4,5
+
+
+def test_add_caps_coast_speed_at_human_limit(make_scene):
+    # #207 measured artifact: a track dies with a garbage 50 m/s edge velocity; the coast
+    # must be capped at coast_max_speed (m/s, converted per-frame via fps), not inherit it.
+    full = Subject(track_id=1, proposal=_motion(_pose(range(6), tz=[0.0, 1, 2, 3, 4, 5])))
+    bad = Subject(track_id=2, proposal=_motion(_pose([2, 3], tz=[0.0, 2.0])))  # 2 m/frame
+    cfg = CoherenceConfig()
+    out, _ = add_temporal_coherence(make_scene(subjects=[full, bad]), cfg, fps=25.0)
+    z = out.subject(2).proposal.pose.transl[:, 2]
+    steps = np.abs(np.diff(z))
+    cap = cfg.coast_max_speed / 25.0  # 0.42 m/frame
+    assert steps[0] <= cap + 1e-9 and steps[-1] <= cap + 1e-9  # extrapolated edges capped
+    assert z[4] > z[3]  # coast direction is still the measured one
 
 
 def test_add_can_disable_extension(make_scene):

@@ -34,6 +34,7 @@ from ..scene.layers import ConfidenceMap, Correction, CorrectionTarget, TargetKi
 from ..scene.motion import PoseSequence, SubjectMotion
 from ..scene.scene import Scene
 from .engine import interp_rotation, interp_vector, make_smoothing
+from .kinematics import HUMAN_MAX_SPEED
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,11 @@ class CoherenceConfig:
     extrapolate_decay: float = 0.9       # per-frame geometric velocity decay at the edges
     extrapolated_confidence: float = 0.2  # subject_frame_conf for extrapolated edge frames
     extrapolate_velocity_window: int = 3  # frames used to estimate the edge velocity
+    # A dying track often slides off the body BEFORE the tracker loses it, so the measured
+    # edge velocity can be garbage (#207: 43 m/s inherited by the coast → a ghost slid 10.9m).
+    # Coasting is inference, not measurement — inferring at inhuman speed is fabrication (R-6),
+    # so the coast velocity is capped at the shared human sprint ceiling.
+    coast_max_speed: float = HUMAN_MAX_SPEED  # m/s cap on the extrapolation edge velocity
 
 
 @dataclass
@@ -172,6 +178,7 @@ def extend_pose_to_span(
     *,
     decay: float = 0.9,
     vel_window: int = 3,
+    max_step: float | None = None,
 ) -> tuple[PoseSequence, np.ndarray]:
     """Extend a pose to cover ``[first, last]`` by motion-aware edge extrapolation.
 
@@ -200,8 +207,15 @@ def extend_pose_to_span(
         tail = np.repeat(v[-1:], tn, axis=0)
         return np.concatenate([head, v, tail], axis=0)
 
-    # translation coasts with a decaying edge velocity (held position when velocity is zero)
+    # translation coasts with a decaying edge velocity (held position when velocity is zero);
+    # max_step (m/frame) caps that velocity — a dying track's slid-off edge must not launch
+    # the coast at inhuman speed (#207)
     v_lead, v_trail = _edge_velocity(ef, pose.transl, vel_window)
+    if max_step is not None:
+        for v in (v_lead, v_trail):
+            m = float(np.linalg.norm(v))
+            if m > max_step:
+                v *= max_step / m
     tr_head = pose.transl[0][None, :] - v_lead[None, :] * _geom_steps(f0 - lead, decay)[:, None]
     tr_tail = pose.transl[-1][None, :] + v_trail[None, :] * _geom_steps(trail - fn, decay)[:, None]
     transl = np.concatenate([tr_head, pose.transl, tr_tail], axis=0)
@@ -255,13 +269,14 @@ def coherence_corrections(
 
 
 def add_temporal_coherence(
-    scene: Scene, cfg: CoherenceConfig | None = None
+    scene: Scene, cfg: CoherenceConfig | None = None, *, fps: float = 25.0
 ) -> tuple[Scene, CoherenceReport]:
     """Densify subject gaps + append auto-smoothing corrections; return a NEW scene + report.
 
     The input ``scene`` is never mutated. Bridged frames get a low ``subject_frame_conf`` so
     the attention list flags them as inferred (R-6). Smoothing is layered as corrections, so a
     later ``resolve_scene`` applies it non-destructively over the (now dense) proposal.
+    ``fps`` converts ``cfg.coast_max_speed`` (m/s) into the per-frame edge-coast cap.
     """
     cfg = cfg or CoherenceConfig()
     base_conf = scene.confidence or ConfidenceMap()
@@ -302,6 +317,7 @@ def add_temporal_coherence(
                 span[1],
                 decay=cfg.extrapolate_decay,
                 vel_window=cfg.extrapolate_velocity_window,
+                max_step=cfg.coast_max_speed / fps,
             )
             motion = SubjectMotion(shape=motion.shape, pose=new_pose)
         new_subjects.append(replace(s, proposal=motion))

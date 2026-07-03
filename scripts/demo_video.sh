@@ -53,6 +53,7 @@ OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}";
 # Direction A polish on by default: re-linked tracklets (--stitch) + gap-fill (--coherence) so animated
 # bodies don't pop in/out, and a 4-frame mesh-opacity ramp at genuine entries/exits. Override with =0.
 STITCH="${STITCH:-$VIDEO_STITCH_DEFAULT}"; COHERENCE="${COHERENCE:-$VIDEO_COHERENCE_DEFAULT}"
+PHYSICS="${PHYSICS:-$VIDEO_PHYSICS_DEFAULT}"
 FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
 while [ $# -gt 0 ]; do case "$1" in
   --clip)     CLIP_LOCAL="$2"; shift;;
@@ -146,7 +147,7 @@ info "Blender installs on first use (pip bpy, cached on the volume); Cycles rend
   # LOCAL machine's value and leak a path that does not exist on the pod (the SMPLX_MODELS gotcha).
   export PITCH3D_STADIUM_VIDEO='$CLIP_POD'
   FRAMES='$FRAMES' OUT='$OUT_POD' REUSE_SCENE='$REUSE_SCENE' \
-  STITCH='$STITCH' COHERENCE='$COHERENCE' DEMO_EDITS='${DEMO_EDITS:-0}' \
+  STITCH='$STITCH' COHERENCE='$COHERENCE' PHYSICS='$PHYSICS' DEMO_EDITS='${DEMO_EDITS:-0}' \
   ANIM_DEVICE='$DEVICE' ANIM_RES_X='$RES_X' ANIM_RES_Y='$RES_Y' ANIM_SAMPLES='$SAMPLES' \
   ANIM_CAMERAS='$CAMERAS' bash scripts/pod_make_video.sh
 " || die "pod video generation failed (see output above)"

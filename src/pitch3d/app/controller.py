@@ -35,6 +35,11 @@ from ..core.correction.engine import (
     resolve_ball,
     resolve_subject_motion,
 )
+from ..core.correction.kinematics import (
+    KinematicConfig,
+    KinematicReport,
+    kinematic_gate,
+)
 from ..core.orchestration import (
     ReconstructionPipeline,
     StitchConfig,
@@ -72,6 +77,7 @@ class Application:
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
+    _scene_kinematics: dict[str, KinematicReport | None] = field(default_factory=dict, repr=False)
     _snapshots: SnapshotStore = field(default_factory=SnapshotStore, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
@@ -112,6 +118,7 @@ class Application:
         params: dict | None = None,
         stitch_cfg: StitchConfig | None = None,
         coherence_cfg: CoherenceConfig | None = None,
+        kinematic_cfg: KinematicConfig | None = None,
     ) -> str:
         """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
 
@@ -122,6 +129,10 @@ class Application:
         appends auto temporal-smoothing corrections after assembly; the report is kept for
         :meth:`coherence_report`. It runs before the camera so the static track spans the
         now-dense frame set.
+
+        ``kinematic_cfg`` (default ``None`` = off) runs the M3-9 plausibility gate after
+        coherence: impossible root speed/accel is clamped via per-subject KEYFRAME_INTERP
+        corrections, teleports are marked in :meth:`kinematic_report` (never erased, R-6).
         """
         clip = self._clips[episode_id]
         ep = self._episodes[episode_id]
@@ -138,12 +149,16 @@ class Application:
         )
         coherence_rep: CoherenceReport | None = None
         if coherence_cfg is not None:
-            scene, coherence_rep = add_temporal_coherence(scene, coherence_cfg)
+            scene, coherence_rep = add_temporal_coherence(scene, coherence_cfg, fps=clip.fps)
+        kinematic_rep: KinematicReport | None = None
+        if kinematic_cfg is not None:
+            scene, kinematic_rep = kinematic_gate(scene, kinematic_cfg, fps=clip.fps)
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
         self._scene_stitch[scene_id] = result.stitch
         self._scene_coherence[scene_id] = coherence_rep
+        self._scene_kinematics[scene_id] = kinematic_rep
         return scene_id
 
     def stitch_report(self, scene_id: str) -> StitchReport | None:
@@ -153,6 +168,10 @@ class Application:
     def coherence_report(self, scene_id: str) -> CoherenceReport | None:
         """The temporal-coherence report for a scene, or ``None`` if coherence was off."""
         return self._scene_coherence.get(scene_id)
+
+    def kinematic_report(self, scene_id: str) -> KinematicReport | None:
+        """The M3-9 kinematic-gate report for a scene, or ``None`` if the gate was off."""
+        return self._scene_kinematics.get(scene_id)
 
     def get_scene(self, scene_id: str) -> Scene:
         return self._scenes[scene_id]
