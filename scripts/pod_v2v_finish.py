@@ -53,6 +53,8 @@ def parse_args(argv=None):
     p.add_argument("--guidance", type=float, default=5.0)
     p.add_argument("--flow-shift", type=float, default=3.0,
                    help="UniPC flow shift: 3.0 for 480p, 5.0 for 720p+")
+    p.add_argument("--conditioning-scale", type=float, default=1.0,
+                   help="VACE control-stream strength (diffusers >=0.34)")
     p.add_argument("--fps", type=float, default=25.0,
                    help="output fps (matches the deliverable, not Wan's 16)")
     p.add_argument("--seed", type=int, default=42)
@@ -135,12 +137,14 @@ def main(argv=None):
     gen = torch.Generator(device="cpu").manual_seed(args.seed)
     print(f"== generating: {args.num_frames}f {args.width}x{args.height} "
           f"steps={args.steps} guidance={args.guidance} control={args.control} "
+          f"cs={args.conditioning_scale} "
           f"ref={'yes' if ref_images else 'no'}", flush=True)
     result = pipe(
         video=control,
         reference_images=ref_images,
         prompt=args.prompt,
         negative_prompt=args.negative,
+        conditioning_scale=args.conditioning_scale,
         height=args.height,
         width=args.width,
         num_frames=args.num_frames,
