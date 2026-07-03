@@ -16,3 +16,4 @@ Format follows [MADR](https://adr.github.io/madr/)-style headers; all are **Acce
 | [0008](0008-llm-in-the-loop-mcp-and-visual-feedback.md) | LLM-in-the-loop editing via MCP + multi-view visual feedback | FR-21..23, UX-4 |
 | [0009](0009-device-config-and-cpu-validation-profile.md) | Inference `device` is a runtime knob; CPU is the local validation profile, GPU the production target | NFR-6, M1 |
 | [0010](0010-live-blender-edit-bridge.md) | Live Blender edits become `Correction`s over a socket; the host owns the scene, human ≡ LLM | C2, FR-14/21/22a, ADR-0008 |
+| [0011](0011-deliverable-video-path-contract-and-virtual-operator.md) | Deliverable video path: package CLI + versioned export manifest + virtual-operator cameras | R-6, eye-verdict 2026-07-03, ADR-0003 |

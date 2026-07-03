@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-06-28 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-03 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -20,16 +20,20 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **v2 levers 1–3 DONE + FULL deliverable RENDERED (2026-06-28) — eye-judge it, then pick the
-  next photoreal gap.** The full multi-camera deliverable (48 f × 4 cameras @ 1920×1080 s64) is rendered and
-  stitched to **`out/deliverable_video/{broadcast,sideline,top,goal}.mp4`** (GPU pod, ~4 min after the
-  GPU-util fix; see §6 top). **Eye-judge the 4 mp4s whole against the clip**, then attack the biggest
-  remaining gap. Candidates: body-texture coverage is only ~7–11 % of verts *measured* (rest is flat kit
-  colour — honest R-6 but flat); the grass plane extends visibly *beyond* the finite stadium bowl (you see
-  past the stands); exposure/tone polish. Commit at every checkpoint (standing-authorized, NO push).
-  **Lighting is floodlit-NIGHT, not daytime** — the original "sun azimuth/elevation + Nishita sky" idea was
-  WRONG for this clip (measured: no sky, neutral-cool floodlights, soft even multi-shadows); see §6 top.
-  **180°-roll** still bites any raw-pixel consumer (auto-detect `-rot[1][2]<0` + rotate before sampling).
+- **NEXT ACTION:** **Deliverable-path refactor (ADR-0011) DONE & E2E-verified locally (2026-07-03) — re-run
+  the deliverable on the pod through the NEW path and eye-judge the real-clip framing.** The 2026-06-28
+  deliverable FAILED the eye-judgement (see §6 top): players = 5–10 px specks because the renderer's static
+  bbox cameras framed the whole bowl from OUTSIDE; sideline = crowd wall; plus two wiring holes (COHERENCE
+  unset→0 on direct pod runs, `PITCH3D_STADIUM_VIDEO` never wired officially). Fixed: exporter is now
+  **`pitch3d.app.anim_export`** (CLI; writes **`cameras.npz`** — the virtual operator: fixed in-bowl mounts
+  that pan/zoom with the action — and **`manifest.json`**, the versioned contract), the renderer validates
+  the manifest FIRST and aims from `cameras.npz`; wrapper knob defaults single-sourced in
+  `scripts/video_defaults.sh`. Old export dirs are refused by design — **RE-EXPORT on the pod**
+  (`scripts/pod_make_video.sh` runs both halves). After the re-render eye-judgement, the known photoreal
+  gaps remain: crowd-mosaic kaleidoscope (MIRROR tiling reads as pattern), grass visible past the bowl,
+  night exposure/tone, body-texture coverage ~7–11 % measured. Commit at every checkpoint
+  (standing-authorized, NO push). **180°-roll** still bites any raw-pixel consumer (auto-detect
+  `-rot[1][2]<0` + rotate before sampling).
 - **Target clip:** `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -175,10 +179,53 @@ fabricate or silently hide.
   `scripts/blender_animate.py` reads `lighting.npz` then lets `--light-rgb/--light-energy/--sky-strength/
   --sun-count/--sun-elevation/--sun-angle` override it, calls `build_stadium_lighting`, renders through the
   **Standard** view transform (broadcast-faithful colour, not AgX).
+- **Deliverable video path (ADR-0011): virtual operator + export contract:** `src/pitch3d/core/scene/cameras.py`
+  (`plan_virtual_cameras` — fixed in-bowl mounts broadcast/sideline/goal/top with per-frame look+fov;
+  `action_track` — median centroid + bulk-quantile (q80) radius, straggler-robust, zero-phase smoothing;
+  `project_normalized` — the framing contract check), `src/pitch3d/adapters/blender/anim_contract.py`
+  (`SCHEMA_VERSION=1`, `write_manifest`/`load_manifest` — BOTH processes validate; pitch3d-free, imported by
+  file on the Blender side), `src/pitch3d/app/anim_export.py` (`main(argv)`, flags > env > `.env`; writes
+  subjects/ball/pitch/[stadium/lighting]/`cameras.npz` + `manifest.json`; `scripts/anim_export.py` = thin
+  shim), `scripts/blender_animate.py` (manifest gate FIRST; `cameras.npz` → `sensor_fit=HORIZONTAL`,
+  per-frame `_look_at` + `angle`, `clip_end=2000`; legacy bbox cams = fallback only; prints
+  `BLENDER_ANIM_CAMS virtual-operator|static-legacy`), `scripts/video_defaults.sh` (single source of wrapper
+  knob defaults), `tests/unit/test_virtual_cameras.py` (9), `tests/unit/test_anim_contract.py` (8),
+  `tests/e2e/test_video_path_smoke.py` (4, gated on torch/smplx/SMPL-X models/Blender).
 
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-03** — **EYE-VERDICT: the 2026-06-28 deliverable is UNWATCHABLE as broadcast → deliverable-path
+  refactor (ADR-0011), E2E-verified locally.** Eye-judgement of the 4 mp4s vs the source clip (the pending
+  NEXT ACTION; frames extracted with ffmpeg, judged multimodally): **broadcast/goal** show the whole stadium
+  bowl from OUTSIDE with players as 5–10 px specks; **sideline** is a wall of crowd texture with zero players
+  visible; the crowd mosaic MIRROR-tiles into a kaleidoscope pattern; the look reads day-ish vs the floodlit
+  night clip; the grass plane runs past the bowl; the render covers 1.92 s of the 11.2 s clip (17 %).
+  **Root causes:** (1) `blender_animate.py` derived four STATIC cameras from the bbox of everything loaded —
+  with the 105×68 m pitch folded in, every deliverable camera sat outside the stadium (the eye-validated
+  close-ups had come from the `action` camera, which was NOT in the deliverable set); (2) `COHERENCE` unset
+  → `0` on direct pod runs, so the deliverable rendered RAW unsmoothed poses; (3) `PITCH3D_STADIUM_VIDEO`
+  never wired in the official path → stadium/body-texture/lighting silently skipped. **Fix (ADR-0011),
+  committed c8c1294 → fb048d7 → d2fc70a:** shared `scripts/video_defaults.sh` sourced by both wrappers
+  (COHERENCE=1 everywhere; STADIUM_VIDEO defaults to the clip); **virtual operator** `core/scene/cameras.py`
+  — fixed mounts INSIDE the bowl envelope (main stand @ halfway h=12 m, low pitchside, behind the action-half
+  goal, overhead) that PAN (median action centroid — one idle keeper must not drag the aim) and ZOOM
+  (bulk-quantile q80 radius + pad, fov fits BOTH image axes, zoom smoothed slower than aim so it never pumps)
+  — 9 unit tests incl. "action fits in frame for every tracking camera" via `project_normalized`;
+  **versioned contract** `adapters/blender/anim_contract.py` (manifest.json, schema v1, required-keys per
+  artifact, validated on write AND read; 8 unit tests) — drift now fails in ms with a named cause instead of
+  after a GPU render; **exporter → package** `pitch3d.app.anim_export` (argparse CLI, env as defaults;
+  writes `cameras.npz` + `manifest.json`; purge covers them; script = shim); **renderer** validates the
+  manifest FIRST, aims per frame from `cameras.npz`, `clip_end=2000` (bowl ~150 m > the 100 m default).
+  **Verified E2E locally** (gated smoke `tests/e2e/test_video_path_smoke.py`, 4 green): dry-run scene →
+  `anim_export.main` → manifest+cameras asserted → REAL Blender 5.1.2 render → `BLENDER_ANIM_CAMS
+  virtual-operator` + PNGs; unmanifested dir REFUSED («Re-run anim_export»). **4-camera render eye-checked**
+  (`out/smoke_virtualcam/`): broadcast frames the action from inside the bowl (lines legible), sideline =
+  eye-level bodies, goal = down-the-pitch, top = full-pitch schematic. Full suite green; ruff/mypy clean on
+  all new files. **NEXT:** re-export + re-render the real-clip deliverable on the pod through the new path
+  (old export dirs are refused by design), eye-judge framing; then crowd-kaleidoscope / grass-past-bowl /
+  night tone / texture coverage.
 
 - **2026-06-28** — **FULL DELIVERABLE RENDERED on the GPU pod + the "100 % CPU / 0 % GPU" bug found & fixed.**
   Rendered the whole deliverable — **48 frames × 4 cameras** (broadcast, sideline, top, goal) @ **1920×1080,

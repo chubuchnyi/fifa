@@ -85,7 +85,8 @@ src/pitch3d/
   core/
     scene/          # WorldFrame (Z-up, meters), Field+homography, Camera, Subject (SMPL-X),
                     # BallTrack, 3-layer model (proposal/corrections/resolved), Confidence,
-                    # RenderAssetRef, SynthViewRef, provenance/RunLog, JSON serialization
+                    # RenderAssetRef, SynthViewRef, provenance/RunLog, JSON serialization,
+                    # virtual-operator camera planning (cameras.py — pan/zoom from fixed mounts, ADR-0011)
     correction/     # rotations (Rodrigues/slerp/Shepperd), 4 propagation modes as pure functions,
                     # layer resolve (proposal ⊕ corrections → resolved)
     orchestration/  # Stage enum, Pipeline DAG, cache-key derivation, ball 2D→3D lift,
@@ -99,13 +100,16 @@ src/pitch3d/
     models/         # real-model adapters behind ports: detect/track/calibrate/pose/ball all wired
                     # (split: pure half unit-tested via injected stub; heavy half gated by extra)
     viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
-    blender/        # proxy plan (pure, no bpy) + out-of-process `blender --background` (.blend F-curves, proxy SCENE_3D) — gated on a binary
+    blender/        # proxy plan (pure, no bpy) + out-of-process `blender --background` (.blend F-curves, proxy SCENE_3D) — gated on a binary;
+                    # pitch3d-free modules imported BY FILE into Blender scripts: scene_builders.py (shared node-graphs),
+                    # anim_contract.py (versioned anim-export manifest, both sides validate — ADR-0011)
     render/         # ReprojectionOverlayRenderPass wired (numpy+stdlib, no GPU); splat/VS-seam-A stubs
     mcp/            # LLM control surface: tool→use-case dispatch (pure) + serve() over stdio (lazy SDK, mcp extra) — driving adapter, ADR-0008
     export/         # GltfExporter wired: SMPL-X npz + JSON real; glTF/GLB gated (export extra); USD/FBX/Alembic stubs
     fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams),
                     # FakeSceneObserver (stdlib PNG snapshots), in-proc queue, cache
   app/              # wiring (composition) + CLI dry-run (source → … → export)
+                    # + anim_export CLI: scene.json → Blender-ready npz dir incl. cameras.npz + manifest (ADR-0011)
 ```
 
 ---
@@ -357,3 +361,34 @@ the dry-run on `FakeSceneObserver` — **no GPU, no Blender, no LLM** required t
 - **M1** — editable loop: detect+track+homography+HMR, placement, ball-on-ground, proxy, reprojection overlay, pose/trajectory editing, propagation. *Artifact: an editable 3D clip.*
 - **M2** — photoreal: 3DGS/NeRF env, avatars (#1+#2), render pass, edit↔render sync. **+ ViewSynthesizer seam A** (optional orbit render).
 - **M3** — quality: per-subject Gaussian avatars (#3) selectively, constraint-guided re-fit, **ViewSynthesizer seam B** (amplify + inpaint), confidence/prioritization, versioning, web export.
+
+---
+
+## 13. Deliverable video path (ADR-0011) & parked subsystems
+
+The path that produces the actual product artifact (novel-view mp4 per camera) is two processes
+talking only through files, each half validated against the same versioned contract:
+
+```
+scene.json ── pitch3d.app.anim_export (pipeline venv: torch/smplx; CLI flags > env > .env)
+                 │  anim_subject_*.npz  ball.npz  pitch.npz  [stadium.npz lighting.npz]
+                 │  cameras.npz   ← virtual operator (core/scene/cameras.py): fixed mounts
+                 │                  inside the bowl, per-frame pan/zoom on the action
+                 ▼  manifest.json ← anim_contract.write_manifest (schema-versioned)
+scripts/blender_animate.py (Blender --factory-startup; anim_contract.load_manifest FIRST,
+                 │  refuses stale/partial dirs; aims cameras from cameras.npz)
+                 ▼
+<camera>/frame_*.png ── ffmpeg → out/…/{broadcast,sideline,top,goal}.mp4
+```
+
+Wrappers: `scripts/pod_make_video.sh` (on-box) and `scripts/demo_video.sh` (laptop→pod), both
+sourcing their knob defaults from `scripts/video_defaults.sh` (single source — ADR-0011.4).
+Gated E2E smoke: `tests/e2e/test_video_path_smoke.py`.
+
+**Parked subsystems** (built + unit-tested, deliberately NOT on the current results-first
+critical path; do not extend them until the deliverable quality demands it):
+`adapters/viewsynth/` (seams A/B stubs), `adapters/mcp/` + `core/agent/` beyond observation
+(ADR-0008 LLM loop), the live Blender edit bridge (ADR-0010), the web viewer/export target,
+Gaussian per-subject avatars (M3), and the offline queue/cache beyond the in-proc fake
+(ADR-0004). They stay in the tree because their seams are the long-term product surface; the
+current focus is making ONE real-clip reconstruction good end-to-end.
