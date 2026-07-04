@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-04 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-05 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -67,8 +67,11 @@
   "no sideline ball" were thumbnail-scale eye errors — zoom before verdicts). Goal-cam-only
   residual: green half-erased player ghosts near fast clusters. SHIRT NUMBERS (§6): unreadable
   in this window (digits ≈ 7 px at raw 1080p) → all None honestly; `jersey_numbers.py`
-  makes per-recon assignment repeatable when a legible window exists. Pod DOWN; next lever:
-  grass tone final-vs-clip (local, pod-free). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  makes per-recon assignment repeatable when a legible window exists. GRASS TONE vs clip in
+  progress (§6): root cause = DEFAULT_PROMPT's own «muted yellow-green night grass» (Wan
+  amplifies stated colours; clip measures plain green H 78.8 S .67 vs tail3 H ~68 S ~.88);
+  tail6 (drop «yellow-») closed ~1/3 of the hue gap (H 70-73, S unchanged); tail7 («dull
+  green», saturation knob) in flight. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -289,6 +292,20 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **TAIL #6: grass tone — the prompt itself violated the
+  twice-measured rule; dropping «yellow-» closes ~1/3 of the hue gap, saturation untouched;
+  tail7 (dull-green wording) in flight.** Measured gap (grass ROI y .45-.92 x .15-.85, green
+  band H 60-180 S>.15, medians): clip H 78.8 S 0.67 V 0.52; best-final tail3 H 67.5-68.9
+  S 0.87-0.90 — the lime cast traces to DEFAULT_PROMPT's literal «muted yellow-green night
+  grass» (Wan amplifies stated colour adjectives — the four-times-measured rule, violated by
+  our own wording). Local HSV sim (H+11 S−0.20 on the grass band) eye-validated the direction
+  before spending pod time. tail6 = TAIL_ONLY sideline, one-word change «muted green night
+  grass» (NOT «deep green» — known emerald overshoot H→120): H 70.3-73.1 (+3-4°, ~1/3 of the
+  gap), S 0.85-0.89 (unchanged); eye A/B = greener but still vivid vs the clip's duller green.
+  Saturation knob next: tail7 «muted dull green night grass» (precedent: intensity wording cut
+  crowd S .94→.74). Artifacts: `out/kitzones_pod/sideline_tail6_pinned2.mp4`,
+  `/tmp/grass_abc_tail6.png` (clip/tail3/tail6 stack).
 
 - **2026-07-05 (night run)** — **SHIRT NUMBERS: honestly UNREADABLE in the current window —
   all 23 stay None (R-6); repeatable assignment tool landed for future windows.** Investigation:
