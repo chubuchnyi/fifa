@@ -56,10 +56,10 @@
   fixes — B-team azure overrides (pooled scene beats the fallback, `535fde4`) and a full-kit
   v2v prompt (bare "jerseys" wording made Wan paint shirtless torsos; now `DEFAULT_PROMPT`);
   stripes 1.05 clip-like. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.
-  Next: NEXT LEVER BY EYE off the fresh final (candidates: Colombia shorts render yellow-ish
-  not white + red socks bleed up the thigh — prompt/pin polish; stand saturation residual
-  S .63 vs clip .42; far-body softness at 720p latent scale). Pipeline overview:
-  `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  Prompt polish is SATURATED (tail3 §6: colour negatives bleed across garments); stand-S
+  residual small (.576 vs clip .462). Current lever: far-body softness — v2v resolution /
+  conditioning-scale A/B (tail4 1600x900 in flight); then a second novel-view camera + ball
+  visibility check on it. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -280,6 +280,20 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04 (night run)** — **TAIL #3: negative-prompt polish — trade confirmed, the prompt
+  lever is SATURATED for kit micro-layout.** "bright white shorts" + negative "red trousers,
+  red leggings, shirtless players, bare chest" (`c07a596`): shirts stay on (2nd clean run),
+  red-trouser smear gone, BUT the negative bled into the red SOCKS (dimmer than tail2) and the
+  shorts still render yellow-ish. REUSABLE: negatives act compositionally — a colour+garment
+  negative dims that colour on OTHER garments too; don't stack colour negatives to sculpt a
+  kit. Stand-S residual is now small: clip .462 / tail3 .576 (was .94 pre-mute) — dropped from
+  the lever list. Best FINAL = `out/kitzones_pod/sideline_tail3_pinned2.mp4` (cleanest legs,
+  no artifacts; tail2 kept as the stronger-socks variant). Ball: exported (60f, sane
+  trajectory toward the left goal, conf 0 = heuristic heights) and rendered (0.11 m white
+  sphere) but not visually confirmed in the sideline finals (likely cluster-occluded ~4 px) —
+  recheck when a goal-side camera run happens. Next lever: far-body softness — tail4 = v2v
+  1600x900 A/B in flight.
 
 - **2026-07-04** — **POD E2E BATCH #2: kit zones + stripes 1.05 through the full generative
   chain; two fixes en route. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.**
