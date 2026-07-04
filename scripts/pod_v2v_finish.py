@@ -18,18 +18,23 @@ import glob
 import os
 import sys
 
-# Colour wording is load-bearing (measured 2026-07-04, three times): whatever surface colour
+# Colour wording is load-bearing (measured 2026-07-04, four times): whatever surface colour
 # the prompt does NOT state, Wan repaints from its prior, overriding a clip-matched control —
 # and whatever colour it DOES state, Wan amplifies past the words. "deep green pitch" turned
 # H-82 grass into H-120 emerald; an uncoloured "packed crowd" turned the H-69 warm crowd into
 # H-200 cold gray; "warm yellow and amber shirts" turned a clip-exact S-.49 stand into S-.94
-# glowing panels, while "muted dark amber ... half in shadow" landed S .74. State the measured
-# look of EVERY large surface AT its measured intensity, push failure colours into the negative.
+# glowing panels, while "muted dark amber ... half in shadow" landed S .74; a bare "yellow
+# jerseys / cyan jerseys" turned kit-zoned bodies into shirtless-skin torsos, while spelling
+# out the full kit (shirts+shorts+socks per team) restored every shirt (batch #2 A/B). State
+# the measured look of EVERY large surface AT its measured intensity, push failure colours
+# into the negative.
 DEFAULT_PROMPT = (
     "Professional television broadcast of a floodlit night football match. "
     "Dark stadium bowl at night, bright white floodlights, muted yellow-green "
-    "night grass with faint mowing stripes, one team in yellow jerseys and the "
-    "other in cyan blue jerseys, distant dark stands densely packed with "
+    "night grass with faint mowing stripes, one team in yellow short-sleeved "
+    "shirts with white shorts and deep red socks, the other team in an all "
+    "sky-blue kit with sky-blue shirts, sky-blue shorts and sky-blue socks, "
+    "dark-skinned players, distant dark stands densely packed with "
     "thousands of tiny individual fans in muted dark amber and brown clothing, "
     "crowd dimly lit and half in shadow behind advertising boards, long-lens "
     "broadcast camera, photorealistic, sharp, high detail."

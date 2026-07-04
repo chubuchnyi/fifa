@@ -51,10 +51,15 @@
   chroma at broadcast distance, so THIS clip's shorts/socks/skin ride closeup-measured env
   overrides in `pod_make_video.sh`) + shirt-only TEAM_MASK (colour attribute reads back LINEAR
   → dim 0.1; >127 gates in kit-inject/hue-pin become shirt-only with zero consumer changes).
-  Local render eye-verified: Colombia yellow/white/red + skin, Congo all-azure. Next: POD
-  BATCH #2 — stripes 1.05 + kit zones E2E through the full generative chain
-  (`pod_finish_batch.sh`), then eye verdict vs clip (remaining candidate: stand saturation
-  residual S .63 vs clip .42). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  Local render eye-verified: Colombia yellow/white/red + skin, Congo all-azure. POD E2E
+  BATCH #2 CONFIRMED same day (§6): kit zones survive the full generative chain after two
+  fixes — B-team azure overrides (pooled scene beats the fallback, `535fde4`) and a full-kit
+  v2v prompt (bare "jerseys" wording made Wan paint shirtless torsos; now `DEFAULT_PROMPT`);
+  stripes 1.05 clip-like. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.
+  Next: NEXT LEVER BY EYE off the fresh final (candidates: Colombia shorts render yellow-ish
+  not white + red socks bleed up the thigh — prompt/pin polish; stand saturation residual
+  S .63 vs clip .42; far-body softness at 720p latent scale). Pipeline overview:
+  `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -275,6 +280,32 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04** — **POD E2E BATCH #2: kit zones + stripes 1.05 through the full generative
+  chain; two fixes en route. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.**
+  Chain: fresh recon (23 subjects) → kit-zones export → 720p beauty → grade3 → shirt-only
+  mask → kit-inject → Wan-VACE 720p → SeedVR2 → pins (~1.2h pod ≈ $0.9 incl. one killed
+  restart + one TAIL_ONLY iteration).
+  **Fix 1 (caught mid-batch, `535fde4`):** on the pooled pod scene Congo's post-grass samples
+  pass the 40-sample floor, so the polluted line-white median (B shorts 0.765,0.702,0.71) BEAT
+  the shorts→shirt azure fallback that the sparse local scene fell into — B legs would have
+  rendered grey-white. Killed the render, pinned B shorts/socks to the f275-measured azure
+  (0.189,0.52,0.688) in `pod_make_video.sh`, relaunched with REUSE_SCENE=1. npz probe
+  confirmed both teams correct. LESSON: the fallback chain's outcome depends on scene
+  DENSITY — measured overrides must cover BOTH teams, "unset = fallback" is not stable.
+  **Fix 2 (tail iteration):** with the old prompt ("yellow jerseys / cyan blue jerseys") Wan
+  painted several torsos as BARE SKIN and smeared red socks into red trousers — 4th
+  confirmation of the twice-measured rule: the prompt named no shorts/socks/skin, so the
+  prior repainted them. TAIL_ONLY=1 rerun (~15 min, $0.2) with the full-kit wording ("yellow
+  short-sleeved shirts with white shorts and deep red socks … all sky-blue kit … dark-skinned
+  players") restored every shirt; Congo reads all-sky-blue, Colombia yellow + red socks.
+  Promoted to `DEFAULT_PROMPT` in `pod_v2v_finish.py`.
+  Control (grade3 + shirt-only-mask kit-inject) kept the zones intact — the measured layer is
+  clean end-to-end; stripes 1.05 read subtle/clip-like in beauty and control (eye).
+  RESIDUAL for a next lever: Colombia shorts lean yellow instead of white at distance; red
+  socks bleed up the thigh on 1–2 players; far bodies still soft at 720p latent scale.
+  Sheets: `out/kitzones_pod/final_vs_clip.png` (tail1), zooms in `/tmp` regenerable from the
+  pulled mp4s (`sideline_rgbnight_720p_pinned2.mp4` = tail1, `sideline_tail2_pinned2.mp4`).
 
 - **2026-07-04** — **KIT ZONES: players get a real football kit — shirt/shorts/socks/skin/boots
   zones instead of the whole-body team-colour "morphsuit" (v2 face/limb lever, local).** Root
