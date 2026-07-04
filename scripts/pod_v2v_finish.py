@@ -18,15 +18,18 @@ import glob
 import os
 import sys
 
-# Grass wording measured 2026-07-04: "deep green pitch" made Wan repaint the clip-matched
-# control (H 82 S 0.66) back to vivid emerald (H 120 S 1.0) — describe the clip's muted
-# night turf instead, and push saturated emerald into the negative.
+# Colour wording is load-bearing (measured 2026-07-04, twice): whatever surface colour the
+# prompt does NOT state, Wan repaints from its prior, overriding a clip-matched control.
+# "deep green pitch" turned H-82 grass into H-120 emerald; an uncoloured "packed crowd"
+# turned the H-69 warm crowd into H-200 cold gray. State the measured look of EVERY large
+# surface, and push the failure colours into the negative.
 DEFAULT_PROMPT = (
     "Professional television broadcast of a floodlit night football match. "
     "Dark stadium bowl at night, bright white floodlights, muted yellow-green "
     "night grass with faint mowing stripes, one team in yellow jerseys and the "
-    "other in cyan blue jerseys, packed crowd in the stands behind advertising "
-    "boards, long-lens broadcast camera, photorealistic, sharp, high detail."
+    "other in cyan blue jerseys, stands densely packed with fans in warm yellow "
+    "and amber shirts behind advertising boards, long-lens broadcast camera, "
+    "photorealistic, sharp, high detail."
 )
 DEFAULT_NEGATIVE = (
     "cartoon, anime, illustration, CGI render, video game, daylight, blue sky, "
