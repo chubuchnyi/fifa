@@ -180,6 +180,192 @@ def extract_crowd_tile(
     return _busiest_window(rgb[ya : yb + 1, xa : xb + 1], tile_frac[0], tile_frac[1])
 
 
+def _robust_quadfit(
+    t: np.ndarray, y: np.ndarray, valid: np.ndarray, *, floor_px: float = 1.5
+) -> tuple[np.ndarray, np.ndarray]:
+    """Quadratic fit y(t) with MAD outlier rejection: (coef, kept mask). Raises if too sparse."""
+    keep = valid.copy()
+    if int(keep.sum()) < 8:
+        raise ValueError("too few valid columns for a robust band fit")
+    coef = np.polyfit(t[keep], y[keep], 2)
+    for _ in range(3):
+        resid = y - np.polyval(coef, t)
+        mad = max(floor_px, float(np.median(np.abs(resid[keep] - np.median(resid[keep])))))
+        new_keep = valid & (np.abs(resid) < 6.0 * mad)
+        if int(new_keep.sum()) < 8 or bool(np.all(new_keep == keep)):
+            break
+        keep = new_keep
+        coef = np.polyfit(t[keep], y[keep], 2)
+    return coef, keep
+
+
+def extract_board_strip(
+    camera: CameraTrack,
+    board_verts: np.ndarray,
+    video_uri: str,
+    *,
+    strip_height: int = 48,
+) -> np.ndarray:
+    """Cut the LED ad-board run from the clip to wrap around the ring: ``(strip_height, W, 3)``.
+
+    The geometric ring renders as a flat white band, but the clip's boards are LED panels with
+    sponsor text ("BANK OF AMERICA") — that rhythm is the realism tell at the grass boundary.
+    Three measurements (2026-07-04, night clip) shape the recipe:
+
+    - **Raw-frame sampling.** The solved camera projects onto the 180°-rolled frame; cropping the
+      rotated image (the crowd-tile trick) would bake the text in upside-down. Projected coords
+      are point-reflected into RAW-frame coords instead, and the strip is cut from the raw frame
+      at its native decode resolution — letters come out upright, in reading order, and as sharp
+      as the source.
+    - **The ring prior only picks the run.** The scene's CameraTrack is an aggregated constant
+      camera: its far-touchline projection came out exactly horizontal and ~200 px (≈19 board
+      heights) above the real band, which slants ~40 px across the frame — projection can place
+      NOTHING here. It still answers WHAT to cut: the farthest visible ring straight (max mean
+      depth, span tie-break) at its widest frame — the run facing the broadcast camera — plus the
+      on-screen scale of one board height. Selecting verts by raw depth had mixed straights and
+      corner arcs into one x-sorted zigzag polyline landing in the crowd.
+    - **The band is anchored to the measured grass boundary.** Prior-relative LED search kept
+      locking onto the stand's white fascia rail (same bright-unsaturated signature) because the
+      real band sat outside any sane prior window. What IS reliable image-side: the boards stand
+      immediately above the floodlit pitch. Per column we find the topmost solid run of bright
+      saturated green (hedges and dark seats fail the brightness gate), robust-fit that boundary,
+      then take the row maximising the box-filtered LED signature — val·(1−sat) — in the thin
+      zone just above it. MAD-rejected quadratic fits ride over goalposts and players crossing
+      the boards; the band height is the median contiguous high-score run at the fitted centre.
+
+    ``board_verts`` is the ring's board band as built by ``adboard_ring_geometry`` (bottom/top
+    interleaved per loop point). Returns image-style rows (row 0 = board top) RGB ``[0, 1]``.
+    """
+    import cv2
+
+    pairs = np.asarray(board_verts, dtype=float).reshape(-1, 2, 3)  # (n, [bottom, top], 3)
+    k = camera.intrinsics
+    w, h = int(k.width), int(k.height)
+    frames = np.asarray(camera.frames, dtype=int)
+
+    bx, by = pairs[:, 0, 0], pairs[:, 0, 1]
+    hx, hy = float(np.abs(bx).max()), float(np.abs(by).max())
+    sides = [
+        np.abs(by - hy) < 1e-3,
+        np.abs(by + hy) < 1e-3,
+        np.abs(bx - hx) < 1e-3,
+        np.abs(bx + hx) < 1e-3,
+    ]
+
+    best = None  # ((depth bin, span px), frame, uv bottom, uv top)
+    for idx in frames:
+        uv_all_b, d_b, vis_b = project_world_points_with_depth(camera, int(idx), pairs[:, 0])
+        uv_all_t, _d_t, vis_t = project_world_points_with_depth(camera, int(idx), pairs[:, 1])
+        ok = vis_b & vis_t
+        for side in sides:
+            m = ok & side
+            if int(m.sum()) < 8:
+                continue
+            span = float(uv_all_b[m, 0].max() - uv_all_b[m, 0].min())
+            if span < 32.0:
+                continue
+            # Depth quantised to 5 m bins: the far straight beats the near one outright, while
+            # frames of the SAME straight compete on visible span.
+            key = (round(float(d_b[m].mean()) / 5.0), span)
+            if best is None or key > best[0]:
+                best = (key, int(idx), uv_all_b[m], uv_all_t[m])
+    if best is None:
+        raise ValueError("no ad-board straight is visible in any frame; cannot cut a strip")
+    _key, best_idx, uv_b, uv_t = best
+
+    rot0, _ = camera_pose(camera, int(frames[0]))
+    if float(-rot0[1, 2]) < 0.0:  # rolled camera: reflect coords instead of rotating the image
+        uv_b = np.float32([w - 1, h - 1]) - uv_b
+        uv_t = np.float32([w - 1, h - 1]) - uv_t
+
+    bgr = None
+    for _idx, frame_bgr in iter_clip_frames(video_uri, [best_idx]):
+        bgr = frame_bgr
+    if bgr is None:
+        raise ValueError(f"could not decode frame {best_idx} from {video_uri}")
+    dh, dw = bgr.shape[:2]
+    scale = np.float32([dw / w, dh / h])  # cut at native decode resolution, not intrinsics grid
+    uv_b = uv_b.astype(np.float32) * scale
+    uv_t = uv_t.astype(np.float32) * scale
+    rgb = bgr[:, :, ::-1].astype(np.float32) / 255.0
+
+    order = np.argsort(uv_b[:, 0])
+    xb, yb = uv_b[order, 0], uv_b[order, 1]
+    ot = np.argsort(uv_t[:, 0])
+    xt, yt = uv_t[ot, 0], uv_t[ot, 1]
+    width = int(round(float(xb[-1] - xb[0])))
+    if width < 48:
+        raise ValueError("ad-board run projects too small; check ring geometry vs the camera")
+    xs = np.linspace(float(xb[0]), float(xb[-1]), width, dtype=np.float32)
+    y_mid = 0.5 * (np.interp(xs, xb, yb) + np.interp(xs, xt, yt)).astype(np.float32)
+    h_prior = max(4.0, float(np.median(np.interp(xs, xb, yb) - np.interp(xs, xt, yt))))
+
+    # Window: headroom above the prior line, then all the way down to the frame bottom — the
+    # grass boundary is found inside it, wherever the aggregated camera's residual pushed it.
+    up = int(round(6.0 * h_prior))
+    down = int(np.ceil(float(dh - 1 - y_mid.min())))
+    offs = np.arange(-up, max(down, up) + 1, dtype=np.float32)  # 1 px row spacing
+    map_y = y_mid[None, :] + offs[:, None]
+    map_x = np.broadcast_to(xs[None, :], map_y.shape).copy()
+    rect = cv2.remap(rgb, map_x, map_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    n_rows = rect.shape[0]
+
+    val = rect.max(axis=2)
+    sat = (val - rect.min(axis=2)) / np.maximum(val, 1e-6)
+    led = val * (1.0 - sat)
+    kk = max(3, int(round(h_prior)) | 1)
+    sm = cv2.boxFilter(led, -1, (1, kk), borderType=cv2.BORDER_REPLICATE)
+
+    # Topmost solid run of floodlit grass per column -> pitch boundary. val > 0.3 keeps night
+    # hedges and green seats out; k2 (~2 board heights) demands a run, not a stray green pixel.
+    hsv = cv2.cvtColor(rect, cv2.COLOR_RGB2HSV)  # float32 RGB in -> H in [0, 360)
+    grass = (
+        (hsv[..., 0] > 70.0) & (hsv[..., 0] < 170.0) & (hsv[..., 1] > 0.25) & (val > 0.3)
+    ).astype(np.float32)
+    k2 = max(3, int(round(2.0 * h_prior)) | 1)
+    g_sm = cv2.boxFilter(grass, -1, (1, k2), borderType=cv2.BORDER_REPLICATE)
+    solid = g_sm > 0.6
+    have = solid.any(axis=0)
+    y_edge = np.argmax(solid, axis=0).astype(np.float32) - 0.1 * k2  # crossing -> run top
+    t = np.arange(width, dtype=np.float32) / max(1.0, width - 1.0)
+    g_coef, g_keep = _robust_quadfit(t, y_edge, have)
+    if int(g_keep.sum()) < 0.3 * width:
+        raise ValueError("grass boundary not found under the ad-board run")
+    g_fit = np.polyval(g_coef, t).astype(np.float32)
+
+    # LED band centre in the thin zone just above the boundary.
+    rr = np.arange(n_rows, dtype=np.float32)[:, None]
+    zone = (rr >= (g_fit - 3.2 * h_prior)[None, :]) & (rr <= (g_fit + 0.2 * h_prior)[None, :])
+    r_hat = np.argmax(np.where(zone, sm, -1.0), axis=0).astype(np.float32)
+    coef, keep = _robust_quadfit(t, r_hat, zone.any(axis=0))
+    if int(keep.sum()) < 0.3 * width:
+        raise ValueError("LED band fit failed; boards not found in the frame")
+    r_fit = np.polyval(coef, t).astype(np.float32)
+
+    ri = np.clip(np.round(r_fit).astype(int), 0, rect.shape[0] - 1)
+    hmax = int(round(3.0 * h_prior))
+    heights = []
+    for c in range(0, width, max(1, width // 200)):
+        prof = sm[:, c]
+        r = int(ri[c])
+        thr = 0.5 * (float(prof[r]) + float(np.median(prof)))
+        a = b = r
+        while a > 0 and r - a < hmax and prof[a - 1] >= thr:
+            a -= 1
+        while b < len(prof) - 1 and b - r < hmax and prof[b + 1] >= thr:
+            b += 1
+        if b > a:
+            heights.append(b - a + 1)
+    h_band = float(np.median(heights)) if heights else h_prior
+    h_band = float(np.clip(h_band, 0.5 * h_prior, 3.0 * h_prior))
+
+    tt = (np.arange(strip_height, dtype=np.float32) + 0.5) / strip_height
+    smap_y = (r_fit - 0.5 * h_band)[None, :] + (tt * h_band)[:, None]
+    smap_x = np.broadcast_to(np.arange(width, dtype=np.float32)[None, :], smap_y.shape).copy()
+    strip = cv2.remap(rect, smap_x, smap_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return strip.astype(np.float32)
+
+
 def apply_stand_structure(
     quilt: np.ndarray,
     *,

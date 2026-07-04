@@ -47,6 +47,7 @@ from pitch3d.core.scene.cameras import plan_virtual_cameras
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.core.scene.stadium import (
+    adboard_loop_uvs,
     adboard_ring_geometry,
     bowl_tile_loop_uvs,
     fill_holes_by_copy,
@@ -457,26 +458,50 @@ def _export_stadium(
 
 
 def _export_boards(
-    scene, out_dir: str, entries: dict[str, list[str]], *, height: float, offset: float
+    scene, out_dir: str, entries: dict[str, list[str]], *, height: float, offset: float,
+    source_video: str = "", source_ok: bool = False,
 ) -> None:
     # Broadcast perimeter furniture (v2 lever, 2026-07-03): grass → white LED boards → dark
     # walkway → crowd is the night-broadcast silhouette the finisher knows; without it the
-    # grass runs straight into the crowd wall and Wan paints mush at the boundary. A geometric
-    # PRIOR (not measured), so it needs no clip; --board-height 0 / PITCH3D_BOARD_HEIGHT=0
-    # disables it.
+    # grass runs straight into the crowd wall and Wan paints mush at the boundary. The RING is
+    # a geometric prior (needs no clip; --board-height 0 / PITCH3D_BOARD_HEIGHT=0 disables it);
+    # with a clip the sponsor LED strip is MEASURED off it and wrapped around the ring
+    # (2026-07-04), scaled so one texture repeat covers strip-aspect × board-height metres.
     if height <= 0.0:
         print("boards: --board-height 0, skipping boards.npz")
         return
     bv, bf, bc = adboard_ring_geometry(scene.field.dimensions, offset=offset, height=height)
-    np.savez(
-        os.path.join(out_dir, "boards.npz"),
-        verts=bv.astype(np.float32),
-        faces=bf.astype(np.int32),
-        colors=bc.astype(np.float32),
-    )
-    entries["boards.npz"] = ["colors", "faces", "verts"]
+    payload: dict[str, Any] = {
+        "verts": bv.astype(np.float32),
+        "faces": bf.astype(np.int32),
+        "colors": bc.astype(np.float32),
+    }
+    keys = ["colors", "faces", "verts"]
+    note = "flat prior"
+    if source_ok:
+        from pitch3d.adapters.render.stadium_backdrop import extract_board_strip
+
+        band = bv[: bv.shape[0] // 2]  # board band verts; walkway band follows
+        try:
+            strip = extract_board_strip(scene.camera, band, source_video)
+            bottoms = band.reshape(-1, 2, 3)[:, 0, :]
+            hops = np.diff(np.vstack([bottoms, bottoms[:1]]), axis=0)
+            perim = float(np.linalg.norm(hops, axis=1).sum())
+            aspect = strip.shape[1] / strip.shape[0]
+            repeat = max(1.0, round(perim / (aspect * height)))
+            payload.update(
+                tile=strip.astype(np.float32),
+                uv=adboard_loop_uvs(bottoms.shape[0], repeat_around=repeat).astype(np.float32),
+                tile_ext="REPEAT",
+            )
+            keys += ["tile", "tile_ext", "uv"]
+            note = f"measured LED strip {strip.shape[1]}x{strip.shape[0]} x{repeat:.0f} around"
+        except ValueError as exc:
+            note = f"flat prior (strip failed: {exc})"
+    np.savez(os.path.join(out_dir, "boards.npz"), **payload)
+    entries["boards.npz"] = keys
     print(f"boards: ring {bv.shape[0]} verts {bf.shape[0]} tris "
-          f"(h={height} m at +{offset} m) -> boards.npz")
+          f"(h={height} m at +{offset} m; {note}) -> boards.npz")
 
 
 def _export_lighting(
@@ -533,7 +558,10 @@ def main(argv: list[str] | None = None) -> int:
         crowd_structure=bool(args.crowd_structure),
         crowd_fan_scale=args.crowd_fan_scale,
     )
-    _export_boards(scene, args.out, entries, height=args.board_height, offset=args.board_offset)
+    _export_boards(
+        scene, args.out, entries, height=args.board_height, offset=args.board_offset,
+        source_video=args.source_video, source_ok=source_ok,
+    )
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)
 
     write_manifest(args.out, entries)

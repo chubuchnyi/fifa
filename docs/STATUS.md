@@ -35,9 +35,13 @@
   at the measured intensity. New best FINAL `out/struct_pod/tail1_pinned2.mp4`, sheet
   `out/struct_pod/stand_tail1_b2_clip.png`.** CROWD GRAIN fixed at the control same day (§6):
   quilt stitched at NATIVE tile px (`fan_scale`, default 1.0) + 16384×1024 canvas — control
-  marble 7 px → 5-px speckle (clip ~2.7); pod E2E of the grain rides the NEXT batch. Pick the
-  next lever BY EYE (candidates: boards text; player face/limb fidelity; stripe-contrast
-  residual; crowd-grain E2E confirm). Pipeline overview:
+  marble 7 px → 5-px speckle (clip ~2.7); pod E2E of the grain rides the NEXT batch. BOARDS
+  TEXT landed same day (§6): measured «BANK OF AMERICA» strip cut from the clip (grass-boundary
+  anchor; the aggregated camera is CONSTANT — projection only picks the run) and wrapped around
+  the ring (optional tile/uv in boards.npz, normalize=False emission, u AGAINST ring order);
+  local 1-frame render verified — brightest band, forward text, red logo, dark walkway. Next:
+  POD E2E BATCH (boards text + crowd grain together), then pick the next lever BY EYE
+  (candidates: player face/limb fidelity; stripe-contrast residual). Pipeline overview:
   `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -259,6 +263,38 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04** — **BOARDS TEXT: the real "BANK OF AMERICA" LED strip, cut from the clip and
+  wrapped around the ad-board ring (v2 lever).** The ring was flat white; the clip boards carry
+  sponsor text + red logo. Now `extract_board_strip` (`stadium_backdrop.py`) cuts the strip,
+  `_export_boards` (`anim_export.py`) adds OPTIONAL `tile`/`uv`/`tile_ext` keys to `boards.npz`
+  (contract untouched — REQUIRED_KEYS are minimums, extras ride the manifest entries; graceful
+  fallback to flat prior on extraction failure, reason printed), and the renderer wraps it with
+  `normalize=False` (measured ABSOLUTE LED white + red logo hues skip the unit-mean norm and
+  chroma pull), REPEAT extension, `PITCH3D_BOARD_EMISSION` (default 4.0).
+  **Finding 1 (affects any future projection work): the pipeline scene.json CameraTrack is a
+  CONSTANT AXIS-ALIGNED camera — aggregation keeps only POSITION from PnLCalib** (kitboost
+  synthetic and adr11 real-calib both have rot0=[-1,0,0]; far-touchline projection exactly
+  horizontal at y≈204/720p vs the real band slanting ~40 px and sitting ~200 px lower ≈ 19 board
+  heights). Projection can place NOTHING pixel-exact; it only picks WHICH run/frame/span (straights
+  in world coords; per frame+side ≥8 visible pairs, span ≥32 px, key=(depth//5 m, span) — widest-
+  only had picked the useless NEAR straight). **Finding 2: anchor the band to the measured GRASS
+  BOUNDARY** — plain LED-score argmax (val·(1−sat), box ~1 board height) locked onto the stand's
+  white fascia rail TWICE; the fix is the topmost solid bright-green run per column (float-HSV hue
+  70–170°, sat>.25, val>.3 — val gate excludes night hedges/dark seats), `_robust_quadfit` the
+  boundary (3× MAD passes, 1.5 px floor, rides over goalposts/players), then LED argmax only in
+  [g−3.2h, g+0.2h]. Raw-frame sampling: solved camera projects onto the 180°-rolled frame →
+  point-reflect projected uv (letters upright), scale to native decode res (1280×720 grid →
+  1920×1080). Measured: band 10.6 px, strip 939×48, mean rgb [.72 .69 .77], repeat =
+  perim/(aspect·h) ≈ 19. **UV direction is AGAINST ring vertex order** (`adboard_loop_uvs`,
+  `stadium.py`): ring runs toward −x on the far touchline, the upright-view strip toward +x —
+  forward u rendered every board mirror-image (verified numerically: segment u vs screen x).
+  Validation: unit 618 pass / 12 skip (+3 boards tests: contract keys, UV↔face order incl. wrap
+  seam, quadfit outlier rejection); local exporter on `out/realcalib/scene_adr11.json` (real
+  PnLCalib camera) + 1-frame CPU render on the grain_scratch export — band is the frame's
+  brightest element, text reads FORWARD ("K OF AMERICA" legible at 720p), red logo hues intact,
+  walkway stays dark. Artifacts: `out/boards_tex/{zoom_far_full,frame0_grade3}.png`. Pod E2E
+  rides the NEXT batch together with the crowd-grain confirm.
 
 - **2026-07-04** — **CROWD GRAIN FIXED AT THE CONTROL: quilt stitched at NATIVE tile
   resolution + 2× canvas — marble → per-fan speckle.** Gap: the clip stand is ~2.7-px per-fan

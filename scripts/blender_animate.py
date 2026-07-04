@@ -271,7 +271,7 @@ def _add_static_mesh(name, verts, faces, rgb, roughness):
 
 
 def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, tile_ext="MIRROR",
-                      emission_strength=1.0):
+                      emission_strength=1.0, normalize=True):
     """Build the stadium bowl as a *tinted mosaic*: a crowd image (``tile``) tiled over the bowl by
     per-loop ``uv`` and modulated by the per-vertex measured colour (``tint``). Their product drives
     *emission* (base colour black) so the crowd renders at its clip brightness, not lit by the
@@ -279,11 +279,14 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, tile_ext=
 
     The tile is normalised to unit mean, turning it into a pure detail map, so ``tint`` sets each
     stand's real colour (its regional yellow/red) while the tile only carries crowd texture; that
-    keeps the multiply from double-darkening or distorting hue. ``tile_ext`` is the sampler edge
-    mode the exporter chose: MIRROR for the legacy small-tile repeat (reflection hides its seams),
-    REPEAT for the non-repeating 0-1 quilt (the wrap-seam faces sample u slightly past 1). Falls
-    back to flat vertex colour if no tile/uv is given (older exports) or the Blender build predates
-    the emission input.
+    keeps the multiply from double-darkening or distorting hue. ``normalize=False`` skips both the
+    unit-mean norm and the chroma pull: a measured LED-board strip must keep its ABSOLUTE white
+    level and its red logo hues, with the white board tint passing them through (the walkway band
+    tints the same texture near-black at a constant mid-texture UV). ``tile_ext`` is the sampler
+    edge mode the exporter chose: MIRROR for the legacy small-tile repeat (reflection hides its
+    seams), REPEAT for the non-repeating 0-1 quilt (the wrap-seam faces sample u slightly past 1)
+    and for the board strip wrapping the ring. Falls back to flat vertex colour if no tile/uv is
+    given (older exports) or the Blender build predates the emission input.
     """
     me = bpy.data.meshes.new(name)
     me.from_pydata(
@@ -319,14 +322,17 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, tile_ext=
     if have_tex and emissive:
         til = np.asarray(tile)
         til = til.astype(np.float32) / 255.0 if til.dtype == np.uint8 else til.astype(np.float32)
-        mean = np.clip(til.reshape(-1, 3).mean(axis=0), 1e-3, None)
-        norm = (til / mean)[::-1]  # unit-mean detail map; flip to Blender's bottom-left origin
-        # Clip crowds read as a WARM mass varying in luma, not hue confetti: pull the tile's
-        # per-pixel colour toward its luma so the measured tint owns the hue (0 = pure luma).
-        chroma = float(os.environ.get("PITCH3D_CROWD_CHROMA", "0.15"))
-        if chroma < 1.0:
-            luma = norm @ np.float32([0.2126, 0.7152, 0.0722])
-            norm = luma[..., None] + (norm - luma[..., None]) * chroma
+        if normalize:
+            mean = np.clip(til.reshape(-1, 3).mean(axis=0), 1e-3, None)
+            norm = (til / mean)[::-1]  # unit-mean detail map; flip to Blender's bottom-left origin
+            # Clip crowds read as a WARM mass varying in luma, not hue confetti: pull the tile's
+            # per-pixel colour toward its luma so the measured tint owns the hue (0 = pure luma).
+            chroma = float(os.environ.get("PITCH3D_CROWD_CHROMA", "0.15"))
+            if chroma < 1.0:
+                luma = norm @ np.float32([0.2126, 0.7152, 0.0722])
+                norm = luma[..., None] + (norm - luma[..., None]) * chroma
+        else:
+            norm = til[::-1]  # measured absolute colours, flipped to Blender's bottom-left origin
         hh, ww = norm.shape[:2]
         img = bpy.data.images.new(name + "_tile", width=ww, height=hh, float_buffer=True)
         img.colorspace_settings.name = "Non-Color"  # raw values, matching the linear vertex tint
@@ -394,15 +400,21 @@ if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollu
         emission_strength=float(os.environ.get("PITCH3D_CROWD_EMISSION", "3.6")) * _tgain,
     )
 
-# LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): flat
-# vertex-colour emission. Boards saturate the PNG (strength >1) so the night grade still
-# leaves them the brightest element — matching the clip, where the LED strip glows.
+# LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): emission-driven.
+# When the exporter measured a sponsor strip from the clip (uv/tile keys, 2026-07-04) the ring
+# wraps it — real "BANK OF AMERICA" rhythm at the grass boundary; else flat vertex colour.
+# Boards saturate the PNG (strength >1) so the night grade still leaves them the brightest
+# element — matching the clip, where the LED strip glows.
 boards_path = os.path.join(IN, "boards.npz")
 if os.path.exists(boards_path) and not TEAM_MASK:
     bdz = np.load(boards_path)
     _add_stadium_mesh(
         "adboards", bdz["verts"], bdz["faces"], bdz["colors"],
+        uv=bdz["uv"] if "uv" in bdz.files else None,
+        tile=bdz["tile"] if "tile" in bdz.files else None,
+        tile_ext=str(bdz["tile_ext"]) if "tile_ext" in bdz.files else "REPEAT",
         emission_strength=float(os.environ.get("PITCH3D_BOARD_EMISSION", "4.0")),
+        normalize=False,
     )
 
 # Floodlit-NIGHT lighting (v2 lever 3) with BOTH auto-detect and manual override. AUTO baseline:

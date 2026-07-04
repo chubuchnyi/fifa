@@ -218,6 +218,31 @@ def bowl_tile_loop_uvs(
     return np.stack([u, v], axis=-1).reshape(-1, 2).astype(np.float32)
 
 
+def adboard_loop_uvs(n_around: int, *, repeat_around: float) -> np.ndarray:
+    """Per-loop UVs wrapping a measured LED strip around the ad-board ring: ``(12·n, 2)`` float.
+
+    Row order mirrors :func:`adboard_ring_geometry` exactly (board-band faces then walkway faces,
+    two triangles per segment, same corner order), so a renderer can ``foreach_set`` directly.
+    ``u`` walks the loop in ``[repeat_around, 0]`` — *against* ring vertex order, because the ring
+    runs toward −x along the far touchline while a strip cut left→right from the upright clip view
+    runs toward +x there (measured 2026-07-04: forward u rendered every board mirror-image). One
+    global reversal orients text for any camera inside the ring; ``v`` spans the board height 0→1.
+    The wrap segment keeps ``u`` monotonic by running down to 0 instead of folding back to a full
+    turn — REPEAT extension samples it like any interior segment.
+    Walkway faces get a constant mid-texture UV: their near-black vertex tint owns the colour, the
+    sampled texel just cancels out of the product.
+    """
+    us = (n_around - np.arange(n_around + 1, dtype=np.float32)) / n_around * repeat_around
+    quads = []
+    for i in range(n_around):
+        ui, uj = us[i], us[i + 1]
+        # tri [a, c, b] = (bottom-i, top-j, bottom-j); tri [a, d, c] = (bottom-i, top-i, top-j)
+        quads.append([(ui, 0.0), (uj, 1.0), (uj, 0.0), (ui, 0.0), (ui, 1.0), (uj, 1.0)])
+    board = np.asarray(quads, dtype=np.float32).reshape(-1, 2)
+    walkway = np.full_like(board, 0.5)
+    return np.concatenate([board, walkway], axis=0)
+
+
 def fill_holes_by_copy(
     verts: np.ndarray, colors: np.ndarray, covered: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:

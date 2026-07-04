@@ -3,7 +3,9 @@
 The clip (floodlit night) reads grass -> bright white LED strip -> dark walkway -> crowd; the
 render previously ran grass straight into the crowd wall. These pin the ring geometry contract:
 two closed vertical bands (board + gap) with per-vertex colours the renderer feeds into an
-emission shader, valid face indices, and the board sitting outside the pitch lines.
+emission shader, valid face indices, the board sitting outside the pitch lines, the per-loop
+UVs that wrap the measured sponsor strip around the ring, and the robust fit the strip
+extractor uses to ride over goalposts/players crossing the boards.
 """
 
 from __future__ import annotations
@@ -11,7 +13,12 @@ from __future__ import annotations
 import numpy as np
 
 from pitch3d.adapters.blender.anim_contract import required_keys_for
-from pitch3d.core.scene.stadium import FieldDimensions, adboard_ring_geometry
+from pitch3d.adapters.render.stadium_backdrop import _robust_quadfit
+from pitch3d.core.scene.stadium import (
+    FieldDimensions,
+    adboard_loop_uvs,
+    adboard_ring_geometry,
+)
 
 
 def test_boards_are_a_known_contract_artifact():
@@ -52,3 +59,32 @@ def test_ring_sits_outside_the_pitch():
     assert np.all((x >= dims.length / 2 - 1e-6) | (y >= dims.width / 2 - 1e-6))
     assert x.max() <= dims.length / 2 + offset + 1e-6
     assert y.max() <= dims.width / 2 + offset + 1e-6
+
+
+def test_loop_uvs_mirror_ring_face_order():
+    n = 16
+    verts, faces, _ = adboard_ring_geometry(height=1.0, n_around=n)
+    uv = adboard_loop_uvs(n, repeat_around=float(n))
+    assert uv.shape == (12 * n, 2)
+    board_faces = faces[: 2 * n]
+    board_uv = uv[: 6 * n].reshape(2 * n, 3, 2)
+    # v mirrors the corner height: with height=1 every loop's v equals its vertex z.
+    assert np.allclose(board_uv[..., 1], verts[board_faces][..., 2])
+    # u walks the ring position backwards (text orientation: ring order runs toward -x on the
+    # far touchline, the measured strip toward +x), one repeat per segment at repeat_around=n...
+    expect_u = float(n) - (board_faces // 2).astype(np.float32)
+    # ...except the closing segment, which wraps down to u=0 instead of rewinding to n.
+    expect_u[-2:][expect_u[-2:] == float(n)] = 0.0
+    assert np.allclose(board_uv[..., 0], expect_u)
+    # Walkway loops pin a constant UV so their near-black vertex tint owns the colour.
+    assert np.all(uv[6 * n :] == 0.5)
+
+
+def test_robust_quadfit_rejects_goalpost_outliers():
+    t = np.linspace(0.0, 1.0, 400).astype(np.float32)
+    y = 40.0 + 30.0 * t - 18.0 * t**2
+    y_noisy = y + np.sin(np.arange(400)).astype(np.float32) * 0.7
+    y_noisy[120:160] = 5.0  # a goalpost slicing through the band
+    coef, keep = _robust_quadfit(t, y_noisy, np.ones(400, dtype=bool))
+    assert float(np.abs(np.polyval(coef, t) - y).max()) < 2.0
+    assert int(keep[120:160].sum()) == 0
