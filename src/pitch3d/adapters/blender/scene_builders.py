@@ -16,8 +16,8 @@ from __future__ import annotations
 import math
 
 
-GRASS_DARK_RGB = (0.292, 0.42, 0.102)
-GRASS_LIGHT_RGB = (0.346, 0.495, 0.121)
+GRASS_DARK_RGB = (0.311, 0.446, 0.109)
+GRASS_LIGHT_RGB = (0.327, 0.469, 0.114)
 
 
 def build_grass_material(
@@ -34,8 +34,10 @@ def build_grass_material(
     ``dark_rgb``/``light_rgb`` are the two stripe albedos (linear). Defaults are matched to the
     target clip (2026-07-04, 4 measured render→grade iterations): the old emerald pair (hue ≈115°)
     rendered acid-green through the night grade; the clip's night-graded grass is yellow-green —
-    post-grade medians H 81.9° S 0.663 match the clip exactly, V within 6%, stripe contrast
-    softened (ratio 1.4→1.18: the clip's mowing bands are barely apart)."""
+    post-grade medians H 81.9° S 0.663 match the clip exactly, V within 6%. Stripe contrast is
+    measured end-to-end (p90/p10 of the detrended grass-luma profile): the clip's bands are nearly
+    flat at 1.015 while albedo ratio 1.18 rendered 1.089 post-grade (~6×) and 1.03 vanished into
+    the denoiser floor (1.003) — ratio 1.05 around the same per-channel mean lands at 1.019."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree

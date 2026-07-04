@@ -39,9 +39,12 @@
   TEXT landed same day (§6): measured «BANK OF AMERICA» strip cut from the clip (grass-boundary
   anchor; the aggregated camera is CONSTANT — projection only picks the run) and wrapped around
   the ring (optional tile/uv in boards.npz, normalize=False emission, u AGAINST ring order);
-  local 1-frame render verified — brightest band, forward text, red logo, dark walkway. Next:
-  POD E2E BATCH (boards text + crowd grain together), then pick the next lever BY EYE
-  (candidates: player face/limb fidelity; stripe-contrast residual). Pipeline overview:
+  local 1-frame render verified — brightest band, forward text, red logo, dark walkway. STRIPE
+  CONTRAST landed same day (§6): measured end-to-end clip 1.015 vs control 1.089 → albedo ratio
+  1.18→1.05 lands 1.019 (1.03 vanished into the denoiser floor). Next: POD E2E BATCH #1 (boards
+  text + crowd grain; RUNNING 2026-07-04 in `out/boards_pod`, v2v stage) — eye-verify, then
+  stripes ride batch #2; next lever BY EYE (candidate: player face/limb fidelity — judge on the
+  fresh boards_pod final). Pipeline overview:
   `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -263,6 +266,19 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04** — **STRIPE CONTRAST: mowing bands softened to the clip's measured near-flat
+  level (v2 lever, local).** Metric: p90/p10 of the detrended smoothed grass-luma column profile
+  (grass = uint8-HSV H 30–70, S>60, V>50; middle half of grass rows; 9-px smooth vs len/12
+  trend). Measured: clip f100 = **1.015** (bands barely apart), graded control = **1.089**
+  (~6× the clip's modulation), previous final `out/struct_pod/tail1_pinned2.mp4` = 1.060 (the
+  generative tail preserves most of it). Albedo ratio (light/dark in `scene_builders.py`)
+  1.18 → **1.05** around the SAME per-channel means (hue/value already clip-matched, §6
+  grass-tone): 1.03 overshot to 1.003 — sub-denoiser-floor, stripes gone — so the tract is
+  ~ratio^0.61 in ln-space, and 1.05 lands **1.019 ≈ clip's 1.015**, faint-but-there by eye
+  (`out/stripes_tex/frame0_grade3.png`). Unit 618 pass. Renderer shares the constants via
+  `scene_builders` — no other edit. Pod E2E: rides batch #2 (batch #1 `out/boards_pod` was
+  already past its render stage with the old pair).
 
 - **2026-07-04** — **BOARDS TEXT: the real "BANK OF AMERICA" LED strip, cut from the clip and
   wrapped around the ad-board ring (v2 lever).** The ring was flat white; the clip boards carry
