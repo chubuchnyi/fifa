@@ -62,13 +62,18 @@ test -f "$SCENE_JSON" || { echo "pod_make_video: missing $SCENE_JSON" >&2; exit 
 # Kit-zone colour overrides (kit-zones lever, 2026-07-04 §6): the per-vertex sampler carries no
 # kit chroma at broadcast distance (~65% of samples are grass, the rest line/LED white), so the
 # leg-zone colours for THIS clip are measured off its closeup frames (f30 leg bands, f275 tile
-# classes): Colombia (A) white shorts + red socks; dark skin tone (both squads). Congo (B) stays
-# unset on purpose — the composer's one-colour fallback (shorts→shirt→socks) IS its azure kit.
+# classes): Colombia (A) white shorts + red socks; dark skin tone (both squads). Congo (B) must
+# be overridden TOO (azure, f275 tile class): on the full pod scene (23 subjects) the pooled
+# post-grass samples pass the 40 floor, so the polluted line-white median (batch #2 measured
+# B shorts 0.765,0.702,0.71) WINS over the shorts→shirt azure fallback that a sparse local
+# scene falls into.
 echo "== anim export: $SCENE_JSON → $OUT/mesh =="
 PITCH3D_SMPLX_MODELS="$SMPLX_MODELS" PITCH3D_SCENE_JSON="$SCENE_JSON" PITCH3D_ANIM_OUT="$OUT/mesh" \
   PITCH3D_STADIUM_VIDEO="${PITCH3D_STADIUM_VIDEO:-$CLIP}" \
   PITCH3D_SHORTS_RGB_A="${PITCH3D_SHORTS_RGB_A:-0.85,0.88,0.82}" \
   PITCH3D_SOCKS_RGB_A="${PITCH3D_SOCKS_RGB_A:-0.71,0.14,0.31}" \
+  PITCH3D_SHORTS_RGB_B="${PITCH3D_SHORTS_RGB_B:-0.189,0.52,0.688}" \
+  PITCH3D_SOCKS_RGB_B="${PITCH3D_SOCKS_RGB_B:-0.189,0.52,0.688}" \
   PITCH3D_SKIN_RGB="${PITCH3D_SKIN_RGB:-0.32,0.26,0.20}" \
   PYTHONPATH=src "$PY" scripts/anim_export.py
 
