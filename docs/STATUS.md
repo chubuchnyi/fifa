@@ -62,9 +62,11 @@
   and conditioning scale (tail5 §6: CS=1.15 drifts the whole frame bright-lime — CS leaks
   TONE, not just structure). 720p / CS=1.0 stay defaults; best FINAL still
   `out/kitzones_pod/sideline_tail3_pinned2.mp4`. GOAL CAM E2E confirmed (§6): novel-view #2
-  works from behind the left goal, BALL visible in the final (f55) — sideline no-show was
-  occlusion+size. Current: goal2 tail in flight — prompt-restore the near goal frame that
-  grade3+Wan erase (twice-measured rule: name every large surface). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  works from behind the left goal; BALL visible on BOTH cameras at proper zoom (goal f55
+  airborne, sideline f55 at feet); goal frame intact end-to-end (the "erased frame" and
+  "no sideline ball" were thumbnail-scale eye errors — zoom before verdicts). Goal-cam-only
+  residual: green half-erased player ghosts near fast clusters. Pod DOWN; picking the next
+  lever locally. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -285,6 +287,20 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **GOAL2 prompt iteration = NO-OP by design: the goal frame was
+  never erased — my "residual" was an eye-check error at thumbnail scale.** Zoomed A/B
+  (crop 550,530-1280,720, 3x) shows clean white posts+crossbar in BOTH goal1 (default prompt)
+  and goal2 (+goal-frame phrase); goal2 changed nothing meaningful → the phrase is NOT
+  promoted to DEFAULT_PROMPT (prompt saturated; unneeded terms risk bleed). REUSABLE OPS RULE
+  (R-6 applied to my own verdicts): zoom the region BEFORE declaring a residual — thin white
+  structures vanish at 320-px thumbnail scale, and this no-op cost a full tail run (~$0.25).
+  Corrections from proper zooms: **ball is visible on BOTH cameras** (goal f55: airborne white
+  ball mid-flight; sideline tail3 f55: ball at the azure player's feet — the earlier "not
+  confirmed on sideline" was the same zoom error). NEW real residual (goal cam only, absent
+  on sideline): grass-green half-erased player "ghosts" near fast clusters
+  (`goal2_ball_zoom.png` left side). Artifacts: `out/kitzones_pod/goal2_pinned2.mp4`. Pod
+  DOWN (balance $13.05); next lever being picked locally.
 
 - **2026-07-05 (night run)** — **GOAL CAMERA E2E: novel-view #2 CONFIRMED through the full
   chain; BALL VISIBLE in the final; new residual = Wan erases the near goal frame.** Full
