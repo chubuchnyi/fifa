@@ -29,11 +29,13 @@
   stands with the stand-only ROI (y .17–.27, x .35–.65) — the wide crowd ROI is ~53 % sky.
   E2E batch 2: control stand V .224 S .486 (clip family), structure reads as architecture in
   control AND final. RESIDUAL (both batches): the generative tail re-saturates the stand to
-  amber blobs (final S .94 vs control .49, clip .42); prime suspect = the v2v prompt's own
-  "warm yellow and amber shirts". **TAIL_ONLY probe with muted crowd wording IN FLIGHT**
-  (pod log `out/anim_finish/tail_prompt1.log`); after its verdict pick the next lever BY EYE
-  from `out/struct_pod/stand_b2_b1_clip.png` (candidates: crowd grain/saturation through the
-  tail; boards text; player face/limb fidelity; stripe-contrast residual). Pipeline overview:
+  amber blobs (final S .94 vs control .49, clip .42); the v2v prompt's own "warm yellow and
+  amber shirts" was the culprit. **Prompt-mute probe LANDED same day (§6): stand S .941→.737,
+  V .298→.247, LED-panel glow gone — Wan AMPLIFIES stated colour adjectives, so state colours
+  at the measured intensity. New best FINAL `out/struct_pod/tail1_pinned2.mp4`, sheet
+  `out/struct_pod/stand_tail1_b2_clip.png`.** Pick the next lever BY EYE (candidates: crowd
+  texture GRAIN — blobs still coarser than the clip's per-fan speckle; boards text; player
+  face/limb fidelity; stripe-contrast residual). Pipeline overview:
   `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -256,6 +258,22 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **STAND SATURATION FIXED IN THE TAIL (prompt-mute probe): the colour-wording
+  rule extended — Wan also AMPLIFIES the colours you state.** Batch 1/2 finals saturated the
+  stand into amber "LED panels" (S .941) over a clip-exact control (S .486): the prompt itself
+  asked for "fans in warm yellow and amber shirts". TAIL_ONLY probe reworded the crowd clause
+  to "thousands of tiny individual fans in muted dark amber and brown clothing, crowd dimly lit
+  and half in shadow" → final stand **H 46 S .737 V .247** (batch 2: H 43.8 S .941 V .298;
+  clip stand-only: S ~.42 V ~.16–.20); grass held (H 66 vs 69). Eye: the LED-panel glow is
+  GONE — the stand reads as a dark fine-speckled crowd with visible tier structure, closest to
+  the clip so far; kits/grass unaffected. **RULE (third instance, sharpened): state the
+  measured colour of every large surface AND state it at the measured intensity — Wan
+  exaggerates colour adjectives ("warm yellow amber" → neon panels; "muted dark, half in
+  shadow" → clip family).** New best FINAL: `out/struct_pod/tail1_pinned2.mp4`, 3-way sheet
+  `out/struct_pod/stand_tail1_b2_clip.png` (probe/batch2/clip), full frame
+  `out/struct_pod/tail1_full.png` (all local). Stand residual now: texture GRAIN — blobs
+  coarser than the clip's per-fan speckle (quilt/tile-resolution lever, not tone). Cost:
+  1 TAIL_ONLY ≈ $0.2; pod stopped after.
 - **2026-07-04** — **CROWD STRUCTURE LANDED (walkway/railing/aisles/top-fade overlay +
   `tile_gain`); boards-occlusion + scale-invariance findings.** Gap: tone landed but the stand
   read as uniform TV-static; the clip shows architecture — stair aisles every ~0.03–0.09 frame
