@@ -65,8 +65,10 @@
   works from behind the left goal; BALL visible on BOTH cameras at proper zoom (goal f55
   airborne, sideline f55 at feet); goal frame intact end-to-end (the "erased frame" and
   "no sideline ball" were thumbnail-scale eye errors — zoom before verdicts). Goal-cam-only
-  residual: green half-erased player ghosts near fast clusters. Pod DOWN; picking the next
-  lever locally. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  residual: green half-erased player ghosts near fast clusters. SHIRT NUMBERS (§6): unreadable
+  in this window (digits ≈ 7 px at raw 1080p) → all None honestly; `jersey_numbers.py`
+  makes per-recon assignment repeatable when a legible window exists. Pod DOWN; next lever:
+  grass tone final-vs-clip (local, pod-free). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -287,6 +289,22 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **SHIRT NUMBERS: honestly UNREADABLE in the current window —
+  all 23 stay None (R-6); repeatable assignment tool landed for future windows.** Investigation:
+  the v1 plate mechanism (subject.jersey_number → exporter back-anchor → FONT plate) is intact,
+  but v1's 4 manual reads died with the June-28 scene generation — track IDs are per-recon and
+  nothing re-assigns them. Ground truth for the CURRENT deliverable window (raw f0-59, wide
+  framing): bodies ≈ 20 px at the 720p calib (fx 772, z ≈ 70 m) → back digits ≈ 7 px at raw
+  1080p — verified unreadable TWO ways (raw-frame 6x zoom by eye; tool crops). No fabrication:
+  zero plates in the current deliverable is the honest state; the goal's "shirt numbers" is
+  bounded by source legibility here (approximations-OK clause). NEW TOOL
+  `scripts/jersey_numbers.py`: `sheets` = per-subject upscaled torso contact sheets off the
+  solved camera (same 180-roll convention as the body-texture sampler, tiles rotated back
+  upright; min-px gate correctly refuses this window at default 45); `set` = pins
+  track=number into scene.json + provenance sidecar; validated E2E to the official loader
+  (pins round-trip into subject.jersey_number). Re-assignment per recon is now a ~10-min step
+  whenever a window/clip has readable backs.
 
 - **2026-07-05 (night run)** — **GOAL2 prompt iteration = NO-OP by design: the goal frame was
   never erased — my "residual" was an eye-check error at thumbnail scale.** Zoomed A/B
