@@ -57,9 +57,10 @@
   v2v prompt (bare "jerseys" wording made Wan paint shirtless torsos; now `DEFAULT_PROMPT`);
   stripes 1.05 clip-like. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.
   Prompt polish is SATURATED (tail3 §6: colour negatives bleed across garments); stand-S
-  residual small (.576 vs clip .462). Current lever: far-body softness — v2v resolution /
-  conditioning-scale A/B (tail4 1600x900 in flight); then a second novel-view camera + ball
-  visibility check on it. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  residual small (.576 vs clip .462). Resolution lever CLOSED (tail4 §6: 1536x864 unblocked
+  via VAE tiling `a727d0e` but crispness equal + near-kit drift — 720p stays default).
+  Current lever: far-body softness via conditioning scale (tail5 CS=1.15 in flight); then a
+  second novel-view camera + ball visibility check on it. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -280,6 +281,19 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04 (night run)** — **TAIL #4: v2v resolution A/B (1536x864 vs 720p) — NO WIN,
+  720p stays the default; VAE tiling landed as the unlock.** Three launches to get it running:
+  1600x900 fails Wan's /16 check; 1600x896 and 1536x864 OOM in the **fp32 Wan VAE encode**
+  (2.86 GiB pad alloc, fragmentation already eliminated by `expandable_segments` — genuinely
+  short). Fix `a727d0e`: `vae.enable_tiling()` only above 720p (`pod_v2v_finish.py`), the
+  validated 720p path stays byte-identical. Verdict by eye (4x zoom f1/f40, tail3 vs tail4):
+  far-body crispness is **equal** — limbs/clusters resolve the same; near-body kit DRIFTED
+  (Congo near player got grey shorts on f1); gen time +50% (~37 s/step vs ~25). Resolution
+  lever closed. `out/kitzones_pod/sideline_tail4_pinned2.mp4` kept for reference. OPS lesson:
+  check the v2v log right after "generating" prints — the /16 crash burned ~20 min of idle
+  pod. Next: CS=1.15 (tail5, in flight) as the last cheap far-body lever, then a second
+  novel-view camera + ball visibility on a goal-side angle.
 
 - **2026-07-04 (night run)** — **TAIL #3: negative-prompt polish — trade confirmed, the prompt
   lever is SATURATED for kit micro-layout.** "bright white shorts" + negative "red trousers,
