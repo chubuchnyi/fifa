@@ -20,17 +20,25 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **CROWD TONE LANDED 2026-07-04 (§6): measured render knobs
-  (`PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35) + warm-crowd prompt wording.
-  Final: crowd V .161 H 52 (clip .188/48), grass held H 77.6; best FINAL:
-  `out/crowd_pod2/sideline_rgbnight_720p_pinned2.mp4`, A/B: `out/crowd_pod2/crowd_final_ab.png`.
-  TWICE-MEASURED RULE: the v2v prompt must state the measured colour of every large surface —
-  uncoloured surfaces get repainted from Wan's prior (grass emerald, crowd gray). GRASS TONE
-  landed same day (§6): albedos in `scene_builders.py` + prompt; `TAIL_ONLY=1` on
-  `pod_finish_batch.sh` = generative-stage iteration in ~15 min ≈ $0.2. Pick the next lever BY
-  EYE from the A/B sheet (candidates: crowd STRUCTURE — tiers/aisles vs today's speckle; boards
-  text; player face/limb fidelity; stripe-contrast residual). Pipeline overview with diagrams:
-  `docs/pipeline.md`.** Previous lever 2026-07-04 (§6): STADIUM PERIMETER — LED ad-board ring +
+- **NEXT ACTION:** **CROWD STRUCTURE LANDED 2026-07-04 (§6): tier walkway/railing/offset
+  aisles/top-fade overlay (`apply_stand_structure`; exporter flag `--crowd-structure` /
+  `PITCH3D_CROWD_STRUCTURE`, default on) + `tile_gain` emission compensation — the renderer's
+  unit-mean tile norm is scale-invariant, so darkening part of the texture silently BRIGHTENS
+  seated rows (×1.41 → batch-1 amber "LED panels"). Reusable findings: ads boards OCCLUDE
+  bowl-v < ~0.5 from the broadcast camera (stand features must sit at v ≥ ~0.55); measure
+  stands with the stand-only ROI (y .17–.27, x .35–.65) — the wide crowd ROI is ~53 % sky.
+  E2E batch 2: control stand V .224 S .486 (clip family), structure reads as architecture in
+  control AND final. RESIDUAL (both batches): the generative tail re-saturates the stand to
+  amber blobs (final S .94 vs control .49, clip .42); prime suspect = the v2v prompt's own
+  "warm yellow and amber shirts". **TAIL_ONLY probe with muted crowd wording IN FLIGHT**
+  (pod log `out/anim_finish/tail_prompt1.log`); after its verdict pick the next lever BY EYE
+  from `out/struct_pod/stand_b2_b1_clip.png` (candidates: crowd grain/saturation through the
+  tail; boards text; player face/limb fidelity; stripe-contrast residual). Pipeline overview:
+  `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
+  RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
+  repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
+  `TAIL_ONLY=1` on `pod_finish_batch.sh` = generative-stage iteration in ~15 min ≈ $0.2. Previous lever 2026-07-04 (§6): STADIUM PERIMETER — LED ad-board ring +
   walkway survive the whole chain; `out/boards_final/final_vs_clip.png`. Previous run 2026-07-03 (§6): fresh recon
   (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
   pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
@@ -248,6 +256,39 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **CROWD STRUCTURE LANDED (walkway/railing/aisles/top-fade overlay +
+  `tile_gain`); boards-occlusion + scale-invariance findings.** Gap: tone landed but the stand
+  read as uniform TV-static; the clip shows architecture — stair aisles every ~0.03–0.09 frame
+  width (3–5 px dark at 1080p ≈ 1.3 m), whole-rake luma fade top→bottom ~33–46 → 58–75
+  (ratio ~0.53), tier break reading mostly as a bright railing line. Fix (7570c25, e1ae588):
+  `apply_stand_structure()` in `stadium_backdrop.py` — walkway 0.28× at bowl-v 0.65 (±0.022),
+  railing lip 1.6×, per-tier offset aisles (period 0.024 u, width 0.0035, 0.50×), whole-rake
+  fade to 0.50 from v 0.20; overlaid by the EXPORTER (`--crowd-structure` /
+  `PITCH3D_CROWD_STRUCTURE`, default 1; 0 = raw quilt — auto+manual rule). **Finding 1 (boards
+  occlusion):** walkway at tier_v 0.35/0.48 never showed on screen; black-band diagnostics
+  proved the ads boards hide bowl-v 0.2–0.5 from the broadcast camera — the visible stand is
+  v ≈ 0.5–1.0, so tier features must sit at v ≥ ~0.55. Axis note: the quilt is stored
+  screen-style (row 0 = stand TOP), the renderer flips it — bowl-v = 1 − row_frac. **Finding 2
+  (scale-invariance trap):** the crowd shader normalises the tile to unit mean, so structure
+  darkening ~30 % of texture mass silently brightened seated rows ×1.41 past the tuned
+  emission — batch-1 final = oversaturated amber "LED panels" (stand S .941). Fix: exporter
+  ships `tile_gain = mean(structured)/mean(raw)` in `stadium.npz` (0.716 here), renderer
+  multiplies emission by it; unit test pins the mean-drop→tile_gain contract. **ROI hygiene:**
+  the old wide crowd ROI (y .08–.22) is ~53 % sky and its median crossed into sky blue once the
+  stand top dimmed — all stand measurements now use the stand-only ROI (y .17–.27, x .35–.65);
+  clip stand there: V ~.16–.20, S ~.42. Batch 2 E2E (tile_gain): control stand V .224 S .486 =
+  clip family (local iter6 V .235; top/bottom luma 25/86 vs clip 33–46/58–75). Eye: walkway +
+  tier segmentation + top fade read as architecture in control AND final — the structure goal
+  is met, lever CLOSED. **Residual (measured in BOTH batches): the generative tail re-saturates
+  the stand to amber blobs — final S .941 vs control .486 vs clip .42; batch 2 ≈ batch 1 in the
+  final despite the corrected control.** Prime suspect: the v2v prompt itself asks for "fans in
+  warm yellow and amber shirts" (the twice-measured colour-wording rule, third instance?) →
+  launched a TAIL_ONLY probe with muted wording ("thousands of tiny individual fans in muted
+  dark amber and brown clothing, crowd dimly lit and half in shadow") — verdict next tick.
+  Artifacts (local): 3-way sheet `out/struct_pod/stand_b2_b1_clip.png`, finals
+  `out/struct_pod/batch1_pinned2.mp4` + `out/struct_pod/sideline_rgbnight_720p_pinned2.mp4`,
+  local iters `out/struct_iter1..6/`, diagnostics `out/struct_diag*/`. Cost: 2 full batches +
+  idle ≈ $1.5–2.
 - **2026-07-04** — **CROWD TONE LANDED (render brightness/warmth + v2v prompt); the colour-wording
   rule GENERALIZED.** Gap: clip crowd is a warm amber mass (pure-crowd ROI median **V .188 H 48
   S .42**); ours was charcoal with confetti dots (V .043). Layer 1 — render (8bedf4c): the bowl
