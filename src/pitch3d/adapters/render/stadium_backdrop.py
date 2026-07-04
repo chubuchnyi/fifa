@@ -244,6 +244,7 @@ def assemble_crowd_quilt(
     width: int = 8192,
     height: int = 512,
     seed: int = 0,
+    fan_scale: float = 1.0,
 ) -> np.ndarray:
     """Stitch one large NON-repeating crowd texture from random crops of the measured tile.
 
@@ -259,17 +260,27 @@ def assemble_crowd_quilt(
     Deterministic for a given ``seed`` — the manual dial next to ``--crowd-mode`` (auto default =
     quilt, seed 0). The exporter overlays :func:`apply_stand_structure` on top (its
     ``--crowd-structure`` flag). Returns ``(height, width, 3)`` float32 RGB in ``[0, 1]``.
+
+    ``fan_scale`` is quilt-px per tile-px: at the default 1.0 the tile is stitched at NATIVE
+    resolution, so the quilt's per-fan grain equals the measured clip grain no matter the canvas
+    size. (The first cut sized patches as ``height // 2`` and UPSAMPLED the tile to fit — the
+    canvas resolution then cancelled out of the on-screen grain, measured 2026-07-04: doubling
+    the canvas left the stand marbled at 7→9 px while the clip grain is ~2.7 px.)
     """
     import cv2
 
     tile = np.asarray(tile, dtype=np.float32)
     rng = np.random.default_rng(seed)
 
-    ph = max(2, height // 2)  # two-ish patch rows up the rake
-    sh = max(ph + 1, int(round(ph * 1.4)))  # vertical slack so crops differ in spectator-row phase
-    sw = max(2, int(round(tile.shape[1] * sh / tile.shape[0])))
-    interp = cv2.INTER_AREA if sh < tile.shape[0] else cv2.INTER_LINEAR
-    scaled = cv2.resize(tile, (sw, sh), interpolation=interp)
+    sh = max(3, int(round(tile.shape[0] * fan_scale)))
+    sw = max(3, int(round(tile.shape[1] * fan_scale)))
+    if (sh, sw) != tile.shape[:2]:
+        interp = cv2.INTER_AREA if sh < tile.shape[0] else cv2.INTER_LINEAR
+        scaled = cv2.resize(tile, (sw, sh), interpolation=interp)
+    else:
+        scaled = tile
+    # Patch < scaled tile leaves vertical slack so crops differ in spectator-row phase.
+    ph = min(height, max(2, int(round(sh / 1.4))))
     pw = min(width, sw, max(2, int(round(ph * tile.shape[1] / tile.shape[0]))))
 
     win = (np.hanning(ph)[:, None] * np.hanning(pw)[None, :]).astype(np.float32) + 1e-4

@@ -56,7 +56,10 @@ from pitch3d.env import load_env
 
 STADIUM_REPEAT_AROUND = 40.0  # tile mode: crowd-tile copies laid around the loop (mirror-tiled)
 STADIUM_REPEAT_UP = 4.0       # tile mode: copies up the rake
-CROWD_QUILT_SIZE = (8192, 512)  # quilt mode: (width, height) of the one non-repeating crowd texture
+# Quilt (width, height): sized so ONE quilt texel ≈ one 720p screen pixel on the far stand.
+# Measured 2026-07-04: at 8192x512 the broadcast framing magnified the quilt ~1.75x — the
+# tile's genuine 4 px per-fan grain smeared into 7 px marble (clip: 2.7 px at 720p-equivalent).
+CROWD_QUILT_SIZE = (16384, 1024)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -83,6 +86,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--crowd-structure", type=int,
         default=int(env.get("PITCH3D_CROWD_STRUCTURE", "1")),
         help="overlay tier walkway/railing/aisles/top-fade on the quilt (0 = raw crowd)",
+    )
+    p.add_argument(
+        "--crowd-fan-scale", type=float,
+        default=float(env.get("PITCH3D_CROWD_FAN_SCALE", "1.0")),
+        help="quilt px per measured-tile px (1.0 = native clip grain)",
     )
     p.add_argument(
         "--board-height", type=float,
@@ -379,6 +387,7 @@ def _export_stadium(
     crowd_mode: str = "quilt",
     crowd_seed: int = 0,
     crowd_structure: bool = True,
+    crowd_fan_scale: float = 1.0,
 ) -> None:
     # Hybrid stadium backdrop (M2): procedural bowl + REAL appearance from THIS clip — a
     # *tinted mosaic* (crisp crowd texture x per-vertex measured tint, mirror copy-fill for the
@@ -405,7 +414,9 @@ def _export_stadium(
     tile_gain = 1.0
     if crowd_mode == "quilt":
         qw, qh = CROWD_QUILT_SIZE
-        quilt = assemble_crowd_quilt(stile, width=qw, height=qh, seed=crowd_seed)
+        quilt = assemble_crowd_quilt(
+            stile, width=qw, height=qh, seed=crowd_seed, fan_scale=crowd_fan_scale
+        )
         if crowd_structure:
             from pitch3d.adapters.render.stadium_backdrop import apply_stand_structure
 
@@ -520,6 +531,7 @@ def main(argv: list[str] | None = None) -> int:
         scene, args.out, args.source_video, source_ok, entries,
         crowd_mode=args.crowd_mode, crowd_seed=args.crowd_seed,
         crowd_structure=bool(args.crowd_structure),
+        crowd_fan_scale=args.crowd_fan_scale,
     )
     _export_boards(scene, args.out, entries, height=args.board_height, offset=args.board_offset)
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)

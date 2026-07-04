@@ -33,9 +33,11 @@
   amber shirts" was the culprit. **Prompt-mute probe LANDED same day (§6): stand S .941→.737,
   V .298→.247, LED-panel glow gone — Wan AMPLIFIES stated colour adjectives, so state colours
   at the measured intensity. New best FINAL `out/struct_pod/tail1_pinned2.mp4`, sheet
-  `out/struct_pod/stand_tail1_b2_clip.png`.** Pick the next lever BY EYE (candidates: crowd
-  texture GRAIN — blobs still coarser than the clip's per-fan speckle; boards text; player
-  face/limb fidelity; stripe-contrast residual). Pipeline overview:
+  `out/struct_pod/stand_tail1_b2_clip.png`.** CROWD GRAIN fixed at the control same day (§6):
+  quilt stitched at NATIVE tile px (`fan_scale`, default 1.0) + 16384×1024 canvas — control
+  marble 7 px → 5-px speckle (clip ~2.7); pod E2E of the grain rides the NEXT batch. Pick the
+  next lever BY EYE (candidates: boards text; player face/limb fidelity; stripe-contrast
+  residual; crowd-grain E2E confirm). Pipeline overview:
   `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -258,6 +260,23 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **CROWD GRAIN FIXED AT THE CONTROL: quilt stitched at NATIVE tile
+  resolution + 2× canvas — marble → per-fan speckle.** Gap: the clip stand is ~2.7-px per-fan
+  speckle (720p-equivalent) but our control was 7-px smooth marble; the zoom sheet proved the
+  grain dies in the CONTROL, not the tail (final 6 px ≈ control 7 px — Wan roughly preserves
+  feature scale). Two root causes: (1) canvas — at 8192×512 the broadcast framing magnifies the
+  quilt ~1.75×, so `CROWD_QUILT_SIZE` → 16384×1024 (one texel ≈ one 720p screen px); (2) the
+  assembler sized patches as `height // 2` and UPSAMPLED the tile to fit, so canvas resolution
+  cancelled out of the on-screen grain — doubling the canvas alone measured WORSE (7→9 px).
+  `assemble_crowd_quilt` now stitches the tile at native px: new `fan_scale` param (quilt-px
+  per tile-px, default 1.0 = measured clip grain; exporter `--crowd-fan-scale` /
+  `PITCH3D_CROWD_FAN_SCALE`). Local 1-frame render after grade3: grain **5 px** (was 7 before,
+  9 after the canvas-only bump), tone held (H 46 S .494 V .251 ≈ batch-2 ctrl V .224); zoom
+  sheet `out/grain_iter2/grain_clip_vs_new.png` — the stand reads as crowd speckle, not
+  marble; the residual 5 vs 2.7 px is largely 32-sample CPU denoiser smear. Unit test pins the
+  decoupling (canvas size no longer sets grain; `fan_scale` does). **Pod E2E pending — bundle
+  the grain confirmation into the NEXT batch instead of spinning the pod for one control-side
+  change.**
 - **2026-07-04** — **STAND SATURATION FIXED IN THE TAIL (prompt-mute probe): the colour-wording
   rule extended — Wan also AMPLIFIES the colours you state.** Batch 1/2 finals saturated the
   stand into amber "LED panels" (S .941) over a clip-exact control (S .486): the prompt itself

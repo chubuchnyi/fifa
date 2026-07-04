@@ -54,6 +54,31 @@ def test_quilt_is_not_periodic():
     assert not np.allclose(first, second[:, ::-1], atol=5e-2)
 
 
+def test_fan_scale_sets_the_quilt_grain():
+    # fan_scale is quilt-px per tile-px: at 1.0 the tile is stitched NATIVE (per-fan grain =
+    # measured clip grain, independent of canvas size); scaling up must coarsen the features.
+    # The first cut upsampled the tile to the canvas (patch = height//2), so doubling the
+    # canvas silently doubled the on-screen fan size — this pins the decoupling.
+    tile = _noise_tile(h=48, w=72)
+
+    def halfwidth(q: np.ndarray) -> int:
+        g = q.mean(axis=2)
+        g = g - g.mean(axis=1, keepdims=True)
+        acs = []
+        for row in g:
+            a = np.correlate(row, row, "full")[g.shape[1] - 1 :]
+            if a[0] > 1e-8:
+                acs.append(a / a[0])
+        a = np.mean(acs, axis=0)
+        return int(np.argmax(a < 0.5))
+
+    native = halfwidth(assemble_crowd_quilt(tile, width=512, height=64, seed=5))
+    coarse = halfwidth(assemble_crowd_quilt(tile, width=512, height=64, seed=5, fan_scale=3.0))
+    assert coarse >= 2 * native  # x3 upscale must clearly coarsen the stitched grain
+    big = halfwidth(assemble_crowd_quilt(tile, width=1024, height=128, seed=5))
+    assert abs(big - native) <= 1  # canvas size no longer sets the grain
+
+
 def test_quilt_adds_no_structure_on_a_flat_tile():
     # A constant tile must stay constant up to the per-patch gain jitter: the Hann feathering and
     # weight normalisation may not invent edges or darken seams.
