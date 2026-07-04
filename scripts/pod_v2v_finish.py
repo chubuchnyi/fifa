@@ -147,6 +147,11 @@ def main(argv=None):
     print(f"== loading {args.model}", flush=True)
     vae = AutoencoderKLWan.from_pretrained(args.model, subfolder="vae",
                                            torch_dtype=torch.float32)
+    if args.width * args.height > 1280 * 720:
+        # fp32 VAE encode OOMs above 720p on a 32 GiB card (2.86 GiB pad alloc,
+        # measured 2026-07-04); spatial tiling caps the peak. 720p path untouched.
+        vae.enable_tiling()
+        print("== vae tiling: on (above 720p)", flush=True)
     pipe = WanVACEPipeline.from_pretrained(args.model, vae=vae,
                                            torch_dtype=torch.bfloat16)
     pipe.scheduler = UniPCMultistepScheduler.from_config(
