@@ -145,6 +145,47 @@ def vertex_normals(vertices: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return np.divide(vn, norm, out=np.zeros_like(vn), where=norm > 1e-12)
 
 
+KIT_SKIN, KIT_SHIRT, KIT_SHORTS, KIT_SOCKS, KIT_BOOTS = 0, 1, 2, 3, 4
+
+
+def smplx_kit_zones(
+    weights: np.ndarray, j_regressor: np.ndarray, v_template: np.ndarray
+) -> np.ndarray:
+    """Football-kit zone per SMPL-X vertex: 0 skin, 1 shirt, 2 shorts, 3 socks, 4 boots.
+
+    The measured per-vertex texture is too dark/noisy at broadcast distance to carry the kit
+    LAYOUT (2026-07-04 batch #1: whole bodies rendered as team-colour morphsuits and the
+    generative tail kept them that way), so the layout comes from the body model itself: each
+    vertex's dominant LBS joint says which garment covers it. Spine/collar/neck/shoulder → shirt
+    (a short sleeve covers the deltoid), pelvis/hips → shorts (upper thigh), ankle → sock,
+    foot → boot, everything else (head, face, hands, forearms) → skin. Knee-dominated vertices
+    straddle the joint — the thigh side is the bare-skin gap below the shorts, the calf side is
+    inside the sock — so they split by template height against the knee joint (SMPL-X is Y-up).
+    Args are the raw model buffers ``(V, J)``, ``(J, V)``, ``(V, 3)`` so both the pure-numpy
+    :class:`~pitch3d.adapters.models.smplx_lbs.SmplxModel` and the torch ``smplx`` model feed it.
+    """
+    weights = np.asarray(weights, dtype=float)
+    arg = weights.argmax(axis=1)
+    joints = np.asarray(j_regressor, dtype=float) @ np.asarray(v_template, dtype=float)
+    zones = np.full(arg.shape[0], KIT_SKIN, dtype=np.uint8)
+    for j in (3, 6, 9, 12, 13, 14, 16, 17):  # spines, neck, collars, shoulders
+        zones[arg == j] = KIT_SHIRT
+    for j in (0, 1, 2):  # pelvis + hips
+        zones[arg == j] = KIT_SHORTS
+    for j in (7, 8):  # ankles
+        zones[arg == j] = KIT_SOCKS
+    for j in (10, 11):  # feet
+        zones[arg == j] = KIT_BOOTS
+    height = np.asarray(v_template, dtype=float)[:, 1]
+    for j in (4, 5):  # knees
+        zones[(arg == j) & (height < joints[j, 1])] = KIT_SOCKS
+    # Hip-dominated vertices run all the way down the thigh; shorts stop at ~55% hip→knee.
+    for hip, knee in ((1, 4), (2, 5)):
+        cut = joints[hip, 1] + 0.55 * (joints[knee, 1] - joints[hip, 1])
+        zones[(arg == hip) & (height < cut)] = KIT_SKIN
+    return zones
+
+
 def sample_vertex_colors(
     vertices_world: np.ndarray,
     normals_world: np.ndarray,

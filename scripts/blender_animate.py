@@ -159,10 +159,27 @@ for mp in mesh_files:
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if TEAM_MASK:
         team = str(d["team"]) if "team" in d.files else ""
-        code = {"A": (1.0, 0.0, 0.0, 1.0), "B": (0.0, 1.0, 0.0, 1.0)}.get(team, (0.0, 0.0, 1.0, 1.0))
+        code = {"A": (1.0, 0.0, 0.0), "B": (0.0, 1.0, 0.0)}.get(team, (0.0, 0.0, 1.0))
         bsdf.inputs["Base Color"].default_value = (0.0, 0.0, 0.0, 1.0)
-        bsdf.inputs["Emission Color"].default_value = code
         bsdf.inputs["Emission Strength"].default_value = 1.0
+        if "zones" in d.files:
+            # Shirt-aware mask (kit zones, 2026-07-04): shirt vertices carry the full team code,
+            # the rest of the body a dim value — the >127 gates in control_kit_inject.py /
+            # hue_pin.py then key SHIRTS only instead of repainting the whole silhouette flat
+            # (the batch-#1 "morphsuit"). zones: 1 = avatar.KIT_SHIRT. The attribute reads back
+            # LINEAR here (measured 2026-07-04: writing 0.35 rendered ~160 = srgb_encode(0.35),
+            # leaking past the gate), so dim = 0.1 → displays ≈ 89, safely under 127.
+            w = np.where(np.asarray(d["zones"]) == 1, 1.0, 0.1).astype(np.float32)
+            rgba = np.concatenate(
+                [w[:, None] * np.asarray(code, dtype=np.float32)[None, :],
+                 np.ones((w.shape[0], 1), dtype=np.float32)], axis=1)
+            attr = me.color_attributes.new(name="ZoneMask", type="BYTE_COLOR", domain="POINT")
+            attr.data.foreach_set("color", rgba.reshape(-1).tolist())
+            vcol = mat.node_tree.nodes.new("ShaderNodeVertexColor")
+            vcol.layer_name = "ZoneMask"
+            mat.node_tree.links.new(vcol.outputs["Color"], bsdf.inputs["Emission Color"])
+        else:
+            bsdf.inputs["Emission Color"].default_value = (*code, 1.0)
     elif vcolor is not None:
         # BYTE_COLOR (sRGB) → Base Color, lit by the scene sun. Unmeasured verts were filled
         # with the flat kit colour upstream (R-6), so the body is opaque-coloured, never black.

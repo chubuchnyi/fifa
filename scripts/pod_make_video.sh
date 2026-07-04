@@ -59,9 +59,17 @@ test -f "$SCENE_JSON" || { echo "pod_make_video: missing $SCENE_JSON" >&2; exit 
 # The staged clip doubles as the MEASURED-appearance source (stadium crowd, per-vertex body
 # texture, floodlight colour): without it anim_export silently skips all three, so default it to
 # the clip we just reconstructed from.
+# Kit-zone colour overrides (kit-zones lever, 2026-07-04 §6): the per-vertex sampler carries no
+# kit chroma at broadcast distance (~65% of samples are grass, the rest line/LED white), so the
+# leg-zone colours for THIS clip are measured off its closeup frames (f30 leg bands, f275 tile
+# classes): Colombia (A) white shorts + red socks; dark skin tone (both squads). Congo (B) stays
+# unset on purpose — the composer's one-colour fallback (shorts→shirt→socks) IS its azure kit.
 echo "== anim export: $SCENE_JSON → $OUT/mesh =="
 PITCH3D_SMPLX_MODELS="$SMPLX_MODELS" PITCH3D_SCENE_JSON="$SCENE_JSON" PITCH3D_ANIM_OUT="$OUT/mesh" \
   PITCH3D_STADIUM_VIDEO="${PITCH3D_STADIUM_VIDEO:-$CLIP}" \
+  PITCH3D_SHORTS_RGB_A="${PITCH3D_SHORTS_RGB_A:-0.85,0.88,0.82}" \
+  PITCH3D_SOCKS_RGB_A="${PITCH3D_SOCKS_RGB_A:-0.71,0.14,0.31}" \
+  PITCH3D_SKIN_RGB="${PITCH3D_SKIN_RGB:-0.32,0.26,0.20}" \
   PYTHONPATH=src "$PY" scripts/anim_export.py
 
 # 3) ensure Blender (bpy module, or a tarball binary) + ffmpeg, then render the cameras

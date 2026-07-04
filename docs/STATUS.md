@@ -44,11 +44,17 @@
   1.18→1.05 lands 1.019 (1.03 vanished into the denoiser floor). POD E2E BATCH #1 CONFIRMED
   same day (§6): boards text (readable "BANk … america" + red logo in the FINAL) and crowd
   grain (per-fan speckle, no marble) both survive the generative chain; new best FINAL
-  `out/boards_pod/sideline_rgbnight_720p_pinned2.mp4`; pod DOWN. Next: NEXT LEVER BY EYE off
-  the fresh final (candidates: player face/limb fidelity — bodies still watercolour-smeary;
-  stand saturation residual S .63 vs clip .42); stripes E2E rides pod batch #2 whenever the
-  next pod run happens. Pipeline overview:
-  `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  `out/boards_pod/sideline_rgbnight_720p_pinned2.mp4`; pod DOWN. KIT ZONES landed same day
+  (§6): the whole-body team-colour "morphsuit" is gone — SMPL-X LBS-derived garment zones
+  (shirt/shorts/socks/boots/skin) + measured zone colours (per-team pooled medians with a
+  grass gate + hue-mode estimator; REUSABLE NEGATIVE: the per-vertex sampler carries NO leg-kit
+  chroma at broadcast distance, so THIS clip's shorts/socks/skin ride closeup-measured env
+  overrides in `pod_make_video.sh`) + shirt-only TEAM_MASK (colour attribute reads back LINEAR
+  → dim 0.1; >127 gates in kit-inject/hue-pin become shirt-only with zero consumer changes).
+  Local render eye-verified: Colombia yellow/white/red + skin, Congo all-azure. Next: POD
+  BATCH #2 — stripes 1.05 + kit zones E2E through the full generative chain
+  (`pod_finish_batch.sh`), then eye verdict vs clip (remaining candidate: stand saturation
+  residual S .63 vs clip .42). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -269,6 +275,38 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04** — **KIT ZONES: players get a real football kit — shirt/shorts/socks/skin/boots
+  zones instead of the whole-body team-colour "morphsuit" (v2 face/limb lever, local).** Root
+  cause of batch-#1's watercolour bodies: the measured per-vertex texture carries no kit LAYOUT
+  at broadcast distance, and the flat fallback painted 90 % of vertices one colour — Wan then
+  kept the morphsuit. Layout now comes from the body model itself: `smplx_kit_zones` (avatar.py)
+  = dominant-LBS-joint per vertex → zone (spines/collars/shoulders→shirt; pelvis/hips→shorts
+  with a 55 % hip→knee thigh cut; knee verts split by template height; ankles→socks; feet→boots;
+  rest skin; real-model counts 6980/1890/715/632/258). Colours: exporter (`anim_export.py`) is
+  now two-pass (pose+sample all → compose+write) so zone colours can pool PER TEAM.
+  **Measured finding (kills naive auto): the vertex sampler carries NO kit chroma for legs at
+  this distance** — raw pooled zone medians = grass green (0.43,0.57,0.24) for every zone of
+  BOTH teams (legs are 20–40 px; a couple px of projection error lands on the lawn); after the
+  grass gate they = line/LED white (~0.53–0.73 neutral); even the SHIRT zone's saturated-hue
+  histogram is noise (team-A top bins 340°/190°/250° — no yellow mode). Auto estimator
+  (`_zone_color_estimate`: grass gate → hue-mode among saturated, neutral-median branch) stays
+  as the honest fallback chain (shorts→shirt, socks→shorts, skin→tan), and the designed manual
+  override carries THIS clip: `PITCH3D_SHORTS_RGB_A=0.85,0.88,0.82` `PITCH3D_SOCKS_RGB_A=
+  0.71,0.14,0.31` `PITCH3D_SKIN_RGB=0.32,0.26,0.20` measured off the clip's closeups (f30 leg
+  bands, f275 tile classes) and defaulted in `pod_make_video.sh`; B unset on purpose — the
+  one-colour fallback IS Congo's azure kit. **KIT CORRECTION: Colombia wears WHITE shorts + RED
+  socks in this match** (earlier "navy shorts" note was a misread of trim/another player).
+  Renderer: `--team-mask` is now SHIRT-AWARE — `zones` rides each subject npz (optional key),
+  shirt verts carry the full team code, rest dim 0.1 (attribute reads back LINEAR: 0.35
+  rendered ~160 = srgb_encode(0.35) and leaked past the >127 gates; 0.1 → ~89), so
+  `control_kit_inject`/`hue_pin` key SHIRTS only with zero consumer changes. Local validation:
+  1-frame broadcast render — yellow/white/red Colombia, all-azure Congo, dark skin heads/arms/
+  thigh gap (`out/kitzones_diag/render_zoom.png`); eroded mask gate lands on shirts (beauty
+  median under gate A=(0.875,0.886,0.137) yellow, B=(0.522,0.757,0.776) azure, off-body
+  >127 px = 0). `PITCH3D_KIT_ZONES=0` restores the old fill. Tests: `test_kit_zones.py` (7 —
+  synthetic-rig zone splits, real-model anatomy, grass/line pollution, fallbacks, env
+  overrides). Pod E2E: rides batch #2 together with stripes.
 
 - **2026-07-04** — **POD E2E BATCH #1 CONFIRMED BY EYE: boards text + crowd grain both survive
   the full chain** (fresh recon → export → GPU render → grade3 → mask → kit-inject → Wan-VACE

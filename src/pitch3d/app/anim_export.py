@@ -152,6 +152,143 @@ def _boost_rgb(rgb, sat: float, val: float) -> np.ndarray:
     )
 
 
+#: Fallback skin albedo when a team's skin was never measured (broadcast-distance tan).
+_TAN_SKIN_RGB = (0.70, 0.52, 0.38)
+
+
+def _env_rgb(name: str) -> np.ndarray | None:
+    """Parse env var ``name`` as ``r,g,b`` floats in [0,1]; None when unset/empty."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return None
+    r, g, b = (float(x) for x in raw.replace(",", " ").split())
+    return np.asarray((r, g, b), dtype=np.float32)
+
+
+def _rgb_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Vectorised RGB→(hue deg, sat, val) for float samples in [0,1]."""
+    rgb = np.asarray(rgb, dtype=float).reshape(-1, 3)
+    mx, mn = rgb.max(1), rgb.min(1)
+    d = mx - mn
+    r, g, b = rgb[:, 0], rgb[:, 1], rgb[:, 2]
+    h = np.zeros(len(rgb))
+    nz = d > 1e-12
+    for i, (num, off) in enumerate(((g - b, 0.0), (b - r, 2.0), (r - g, 4.0))):
+        pick = nz & (rgb.argmax(1) == i)
+        h[pick] = (num[pick] / d[pick] + off) * 60.0
+    s = np.divide(d, mx, out=np.zeros_like(d), where=mx > 1e-12)
+    return h % 360.0, s, mx
+
+
+def _zone_color_estimate(samples: np.ndarray) -> np.ndarray | None:
+    """Robust kit colour from mis-projection-polluted vertex samples (None = too few clean).
+
+    A broadcast-distance player is 20–40 px tall, so a couple of px of camera/mesh error land
+    many leg vertices on the background — measured 2026-07-04 on the target clip: raw pooled
+    medians were grass-green for EVERY zone of BOTH teams, and after dropping grass they were
+    line/LED white. Plain medians can't survive a >50% pollutant, so: (1) drop grass (the
+    stripe-metric gate, uint8-HSV H 30–70 ⇒ 60–140°, S>60/255, V>50/255); (2) if enough of the
+    remainder is saturated, the kit is coloured — take the hue-histogram MODE and the median of
+    its ±25° neighbourhood (the measure_team_hsv trick: white lines/glare are desaturated and
+    drop out); (3) otherwise the kit itself is neutral (white socks) — plain median, where
+    conflating it with white lines is harmless.
+    """
+    rgb = np.asarray(samples, dtype=float).reshape(-1, 3)
+    if rgb.size:
+        h, s, v = _rgb_hsv(rgb)
+        grass = (h >= 60.0) & (h <= 140.0) & (s > 60.0 / 255.0) & (v > 50.0 / 255.0)
+        rgb, h, s = rgb[~grass], h[~grass], s[~grass]
+    if rgb.shape[0] < 40:
+        return None
+    sat = s >= 0.25
+    if float(sat.mean()) >= 0.3:
+        hh = h[sat]
+        hist, edges = np.histogram(hh, bins=36, range=(0.0, 360.0))
+        peak = float(edges[int(hist.argmax())]) + 5.0
+        near = np.abs((hh - peak + 180.0) % 360.0 - 180.0) <= 25.0
+        return np.median(rgb[np.flatnonzero(sat)[near]], axis=0)
+    return np.median(rgb, axis=0)
+
+
+def _team_zone_medians(posed: list[dict], zones: np.ndarray) -> dict[str, dict[int, Any]]:
+    """Median measured RGB per (team, garment zone), pooled across every subject of the team.
+
+    One player's shorts may be occluded or a handful of noisy pixels, but a real team wears ONE
+    kit — pooling ~10 players' measured vertices through the pollution-robust
+    :func:`_zone_color_estimate` gives a stable estimate AND the faithful one. Returns
+    ``{team_key: {zone: (3,) rgb | None}}``; None where a zone never collected 40+ clean
+    samples (the composer falls back down the kit).
+    """
+    from pitch3d.adapters.models.avatar import KIT_SHORTS, KIT_SKIN, KIT_SOCKS
+
+    out: dict[str, dict[int, Any]] = {}
+    for team in {str(d["subj"].team_id or "") for d in posed}:
+        per_zone: dict[int, Any] = {}
+        for zone in (KIT_SHORTS, KIT_SOCKS, KIT_SKIN):
+            samples = [
+                d["vcolor"][d["measured"] & (zones == zone)]
+                for d in posed
+                if str(d["subj"].team_id or "") == team and d["measured"] is not None
+            ]
+            pooled = np.concatenate(samples, axis=0) if samples else np.zeros((0, 3))
+            per_zone[zone] = _zone_color_estimate(pooled)
+        out[team] = per_zone
+    return out
+
+
+def _compose_kit_vcolor(
+    zones: np.ndarray,
+    shirt_rgb: np.ndarray,
+    medians: dict[str, dict[int, Any]],
+    team_key: str,
+    kit_sat: float,
+    kit_val: float,
+) -> np.ndarray:
+    """Zone-flat kit for one subject: measured medians dressed to presentation brightness.
+
+    Shirt = the boosted team colour (the identity anchor downstream v2v pins on); shorts/socks =
+    boosted per-team measured medians, falling back DOWN the kit (shorts→shirt, socks→shorts —
+    one-colour kits are the common case); skin = value-lifted measured median (the night grade
+    crushes it) else a tan prior; boots near-black. Manual overrides (auto+manual, R-6):
+    ``PITCH3D_SHORTS_RGB_<team>`` / ``PITCH3D_SOCKS_RGB_<team>`` / ``PITCH3D_SKIN_RGB``.
+    """
+    from pitch3d.adapters.models.avatar import (
+        KIT_BOOTS,
+        KIT_SHIRT,
+        KIT_SHORTS,
+        KIT_SKIN,
+        KIT_SOCKS,
+    )
+
+    suffix = f"_{team_key}" if team_key else ""
+    med = medians.get(team_key, {})
+    shorts = _env_rgb(f"PITCH3D_SHORTS_RGB{suffix}")
+    if shorts is None:
+        m = med.get(KIT_SHORTS)
+        shorts = (
+            _boost_rgb(m, kit_sat, kit_val) if m is not None else np.asarray(shirt_rgb, np.float32)
+        )
+    socks = _env_rgb(f"PITCH3D_SOCKS_RGB{suffix}")
+    if socks is None:
+        m = med.get(KIT_SOCKS)
+        socks = _boost_rgb(m, kit_sat, kit_val) if m is not None else shorts
+    skin = _env_rgb("PITCH3D_SKIN_RGB")
+    if skin is None:
+        m = med.get(KIT_SKIN)
+        skin = _boost_rgb(m, 1.0, kit_val) if m is not None else np.asarray(_TAN_SKIN_RGB, np.float32)
+    by_zone = {
+        KIT_SKIN: skin,
+        KIT_SHIRT: np.asarray(shirt_rgb, dtype=np.float32),
+        KIT_SHORTS: shorts,
+        KIT_SOCKS: socks,
+        KIT_BOOTS: np.asarray((0.05, 0.05, 0.05), np.float32),
+    }
+    vcolor = np.empty((zones.shape[0], 3), dtype=np.float32)
+    for zone, rgb in by_zone.items():
+        vcolor[zones == zone] = rgb
+    return vcolor
+
+
 def _export_subjects(
     scene,
     *,
@@ -168,7 +305,13 @@ def _export_subjects(
     import smplx
     import torch
 
-    from pitch3d.adapters.models.avatar import measured_texture_from_clip
+    from pitch3d.adapters.models.avatar import (
+        KIT_SHORTS,
+        KIT_SKIN,
+        KIT_SOCKS,
+        measured_texture_from_clip,
+        smplx_kit_zones,
+    )
 
     # Rendered clip span = union of every present frame (subjects + ball) — the same range
     # blender_animate.py iterates. A subject touching this span's edge was clipped by the
@@ -199,7 +342,16 @@ def _export_subjects(
                   f"{np.round(_boost_rgb(rgb, kit_sat, kit_val), 3)} "
                   f"(sat x{kit_sat}, val x{kit_val})")
 
-    tracks: list[tuple[np.ndarray, np.ndarray]] = []
+    # Kit zones (v2 face/limb lever, 2026-07-04 §6): batch #1 rendered every player as a
+    # whole-body team-colour "morphsuit" — the measured texture is too dark/noisy at broadcast
+    # distance to carry the kit LAYOUT, and the flat fallback has none. The layout now comes from
+    # the body model (smplx_kit_zones), the colours stay measured (per-team zone medians) — which
+    # needs TEAM-pooled statistics, hence two passes: pose+sample everyone, then compose+write.
+    # PITCH3D_KIT_ZONES=0 restores the old whole-body fill.
+    kit_zones_on = os.environ.get("PITCH3D_KIT_ZONES", "1") != "0"
+
+    zones: np.ndarray | None = None
+    posed: list[dict[str, Any]] = []
     for i, subj in enumerate(scene.subjects):
         motion = resolve_subject_motion(subj.proposal, scene.corrections_for(subj.track_id))
         betas = np.asarray(motion.shape.betas, dtype=np.float32)
@@ -222,6 +374,10 @@ def _export_subjects(
                     np.asarray(motion.pose.body_pose).reshape(n_frames, -1), dtype=torch.float32
                 ),
             )
+        if zones is None:
+            zones = smplx_kit_zones(
+                model.lbs_weights.numpy(), model.J_regressor.numpy(), model.v_template.numpy()
+            )
         transl = np.asarray(motion.pose.transl, dtype=np.float32)  # (T,3) z-up world
         verts = out.vertices.numpy() @ rot.T + transl[:, None, :]  # (T,V,3)
         color = _boost_rgb(
@@ -230,14 +386,56 @@ def _export_subjects(
         alpha = appearance_alpha(frames, clip_first, clip_last, fade_frames)  # (T,) in [0,1]
 
         # Measured per-vertex body texture (M2-8b): sample each player's real broadcast pixels
-        # onto its posed mesh through the solved camera. Vertices never seen front-facing fall
-        # back to the flat kit colour; the measured flag is the honest R-6 channel.
+        # onto its posed mesh through the solved camera. Kept RAW here (no fallback fill) — the
+        # zone medians must pool only genuinely observed pixels; the measured flag is the honest
+        # R-6 channel either way.
         vcolor = None
         measured = None
         if source_ok:
             vcolor, measured = measured_texture_from_clip(
                 verts, model.faces, scene.camera, [int(f) for f in frames], source_video
             )
+        joints = None
+        if subj.jersey_number is not None:
+            joints = out.joints.numpy() @ rot.T + transl[:, None, :]  # (T, J, 3) z-up world
+        posed.append(
+            dict(
+                subj=subj,
+                verts=verts,
+                faces=model.faces,
+                frames=frames,
+                alpha=alpha,
+                color=color,
+                vcolor=vcolor,
+                measured=measured,
+                joints=joints,
+                transl=transl,
+            )
+        )
+
+    zone_medians: dict[str, dict[int, Any]] = {}
+    if kit_zones_on and zones is not None:
+        zone_medians = _team_zone_medians(posed, zones)
+        for team, med in sorted(zone_medians.items()):
+            pretty = {
+                name: (np.round(med[z], 3).tolist() if med[z] is not None else None)
+                for name, z in (("shorts", KIT_SHORTS), ("socks", KIT_SOCKS), ("skin", KIT_SKIN))
+            }
+            print(f"kit zones team {team or '?'}: measured medians {pretty}")
+
+    tracks: list[tuple[np.ndarray, np.ndarray]] = []
+    for d in posed:
+        subj = d["subj"]
+        verts, frames, alpha, color = d["verts"], d["frames"], d["alpha"], d["color"]
+        transl, vcolor, measured = d["transl"], d["vcolor"], d["measured"]
+        n_frames = int(frames.shape[0])
+        if kit_zones_on and zones is not None:
+            vcolor = _compose_kit_vcolor(
+                zones, color, zone_medians, str(subj.team_id or ""), kit_sat, kit_val
+            )
+            if measured is None:
+                measured = np.zeros(zones.shape[0], dtype=bool)
+        elif vcolor is not None:
             vcolor[~measured] = color
 
         # Shirt number plate (#numbers, v1): a per-frame upper-back anchor + outward "back"
@@ -246,7 +444,7 @@ def _export_subjects(
         # (SMPL-X joints 23/24 are the eyeballs, in front of the head joint 15).
         num_extra: dict[str, Any] = {}
         if subj.jersey_number is not None:
-            joints = out.joints.numpy() @ rot.T + transl[:, None, :]  # (T, J, 3) z-up world
+            joints = d["joints"]
             spine3, neck, head = joints[:, 9], joints[:, 12], joints[:, 15]
             facing = 0.5 * (joints[:, 23] + joints[:, 24]) - head
             facing[:, 2] = 0.0
@@ -269,12 +467,16 @@ def _export_subjects(
         tex_extra: dict[str, Any] = {}
         if vcolor is not None and measured is not None:
             tex_extra = dict(vcolor=vcolor.astype(np.float32), measured=measured.astype(np.uint8))
+        if zones is not None:
+            # Garment zone per vertex — lets the renderer make its team mask shirt-aware so the
+            # generative repaint keys on shirts, not whole bodies.
+            tex_extra["zones"] = zones.astype(np.uint8)
         fname = f"anim_subject_{subj.track_id}.npz"
         dst = os.path.join(out_dir, fname)
         np.savez(
             dst,
             verts=verts.astype(np.float32),
-            faces=model.faces.astype(np.int32),
+            faces=d["faces"].astype(np.int32),
             color=color,
             frames=frames.astype(np.int64),
             alpha=alpha.astype(np.float32),
