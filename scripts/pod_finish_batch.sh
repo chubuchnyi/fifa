@@ -17,7 +17,7 @@
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
 #      V2V_WIDTH=1280 V2V_HEIGHT=720 V2V_FLOW=5.0  (832x480/3.0 = the old fast-draft cell)
-#      V2V_PROMPT= (override the measured default text prompt in pod_v2v_finish.py)
+#      V2V_PROMPT= / V2V_NEGATIVE= (override the measured default prompts in pod_v2v_finish.py)
 #      KIT_INJECT=1  ALPHA=0.8  ERODE=3  CS=1.0  PIN_A=1
 #      TEAM_A_HSV/TEAM_B_HSV: unset = validated "65 0.85"/"185 0.95"; set-empty = auto-measure
 set -euo pipefail
@@ -97,6 +97,7 @@ V2V_ARGS=(--control rgb
   --width "${V2V_WIDTH:-1280}" --height "${V2V_HEIGHT:-720}" --flow-shift "${V2V_FLOW:-5.0}"
   --conditioning-scale "${CS:-1.0}")
 if [ -n "${V2V_PROMPT:-}" ]; then V2V_ARGS+=(--prompt "$V2V_PROMPT"); fi
+if [ -n "${V2V_NEGATIVE:-}" ]; then V2V_ARGS+=(--negative "$V2V_NEGATIVE"); fi
 FRAMES="$CTRL" OUT="$V2V" bash scripts/pod_v2v.sh "${V2V_ARGS[@]}"
 
 # 6) SeedVR2 720p

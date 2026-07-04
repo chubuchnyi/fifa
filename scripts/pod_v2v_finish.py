@@ -32,16 +32,20 @@ DEFAULT_PROMPT = (
     "Professional television broadcast of a floodlit night football match. "
     "Dark stadium bowl at night, bright white floodlights, muted yellow-green "
     "night grass with faint mowing stripes, one team in yellow short-sleeved "
-    "shirts with white shorts and deep red socks, the other team in an all "
+    "shirts with bright white shorts and deep red socks, the other team in an all "
     "sky-blue kit with sky-blue shirts, sky-blue shorts and sky-blue socks, "
     "dark-skinned players, distant dark stands densely packed with "
     "thousands of tiny individual fans in muted dark amber and brown clothing, "
     "crowd dimly lit and half in shadow behind advertising boards, long-lens "
     "broadcast camera, photorealistic, sharp, high detail."
 )
+# "red trousers / shirtless" = batch #2 tail-1 failure modes (socks smeared into trousers,
+# torsos painted as bare skin). No "yellow …" terms here — negatives bleed compositionally
+# and would dim the yellow shirts.
 DEFAULT_NEGATIVE = (
     "cartoon, anime, illustration, CGI render, video game, daylight, blue sky, "
     "vivid emerald grass, oversaturated colors, "
+    "red trousers, red leggings, shirtless players, bare chest, "
     "blurry, low quality, distorted bodies, extra limbs, merged players, "
     "text, watermark, static image"
 )
