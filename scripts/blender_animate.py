@@ -321,6 +321,12 @@ def _add_stadium_mesh(name, verts, faces, tint, uv=None, tile=None, *, tile_ext=
         til = til.astype(np.float32) / 255.0 if til.dtype == np.uint8 else til.astype(np.float32)
         mean = np.clip(til.reshape(-1, 3).mean(axis=0), 1e-3, None)
         norm = (til / mean)[::-1]  # unit-mean detail map; flip to Blender's bottom-left origin
+        # Clip crowds read as a WARM mass varying in luma, not hue confetti: pull the tile's
+        # per-pixel colour toward its luma so the measured tint owns the hue (0 = pure luma).
+        chroma = float(os.environ.get("PITCH3D_CROWD_CHROMA", "0.15"))
+        if chroma < 1.0:
+            luma = norm @ np.float32([0.2126, 0.7152, 0.0722])
+            norm = luma[..., None] + (norm - luma[..., None]) * chroma
         hh, ww = norm.shape[:2]
         img = bpy.data.images.new(name + "_tile", width=ww, height=hh, float_buffer=True)
         img.colorspace_settings.name = "Non-Color"  # raw values, matching the linear vertex tint
@@ -362,11 +368,25 @@ if pitch_npz is not None:
 stadium_path = os.path.join(IN, "stadium.npz")
 if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollute the mask
     sd = np.load(stadium_path)
+    # Crowd emission boost: the tint is measured from the RAW clip (already a dark night
+    # broadcast), then grade3 darkens the render AGAIN — the same double-grade trap as the
+    # grass albedo. Boost so the post-grade crowd V matches the clip's. The tint saturation
+    # is pre-compensated too: AgX desaturates bright emission toward gray, and grade3 then
+    # paints dark gray with its blue shadow cast — the measured warmth needs headroom.
+    # Defaults measured 2026-07-04 (5 render→grade iterations, pure-crowd ROI): E 3.6 +
+    # chroma 0.15 + tint_sat 1.35 → post-grade V .184 H 69 S .58 vs clip V .188 H 48 S .42
+    # (V exact, hue = the tint's own yellow — reads right by eye, the fans ARE in yellow).
+    _crowd_tint = np.asarray(sd["colors"], dtype=np.float32).reshape(-1, 3)
+    _tsat = float(os.environ.get("PITCH3D_CROWD_TINT_SAT", "1.35"))
+    if _tsat != 1.0:
+        _lum = _crowd_tint @ np.float32([0.2126, 0.7152, 0.0722])
+        _crowd_tint = np.clip(_lum[:, None] + (_crowd_tint - _lum[:, None]) * _tsat, 0.0, None)
     _add_stadium_mesh(
-        "stadium", sd["verts"], sd["faces"], sd["colors"],
+        "stadium", sd["verts"], sd["faces"], _crowd_tint,
         uv=sd["uv"] if "uv" in sd.files else None,
         tile=sd["tile"] if "tile" in sd.files else None,
         tile_ext=str(sd["tile_ext"]) if "tile_ext" in sd.files else "MIRROR",
+        emission_strength=float(os.environ.get("PITCH3D_CROWD_EMISSION", "3.6")),
     )
 
 # LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): flat
