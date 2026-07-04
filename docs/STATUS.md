@@ -57,10 +57,12 @@
   v2v prompt (bare "jerseys" wording made Wan paint shirtless torsos; now `DEFAULT_PROMPT`);
   stripes 1.05 clip-like. New best FINAL `out/kitzones_pod/sideline_tail2_pinned2.mp4`.
   Prompt polish is SATURATED (tail3 §6: colour negatives bleed across garments); stand-S
-  residual small (.576 vs clip .462). Resolution lever CLOSED (tail4 §6: 1536x864 unblocked
-  via VAE tiling `a727d0e` but crispness equal + near-kit drift — 720p stays default).
-  Current lever: far-body softness via conditioning scale (tail5 CS=1.15 in flight); then a
-  second novel-view camera + ball visibility check on it. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  residual small (.576 vs clip .462). Far-body softness PARKED — both levers lost: resolution
+  (tail4 §6: 1536x864 unblocked via VAE tiling `a727d0e`, crispness equal + near-kit drift)
+  and conditioning scale (tail5 §6: CS=1.15 drifts the whole frame bright-lime — CS leaks
+  TONE, not just structure). 720p / CS=1.0 stay defaults; best FINAL still
+  `out/kitzones_pod/sideline_tail3_pinned2.mp4`. Current: goal-camera run in flight
+  (novel-view #2 + ball visibility; mount auto-sits behind the action-side goal). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -281,6 +283,18 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **TAIL #5: conditioning-scale A/B (CS=1.15 vs 1.0) — LOSES;
+  far-body-softness lever PARKED, second novel-view camera started.** By eye (4x zoom f1/f40
+  vs tail3): far-body crispness unchanged, but the whole frame drifted BRIGHTER/lime — pitch
+  tone moved away from the clip's dark floodlit night, and yellow shirts separate WORSE from
+  the lighter grass. REUSABLE: CS also leaks TONE adherence, not just structure — raising it
+  is not a free crispness dial. CS=1.0 stays default; `sideline_tail3_pinned2.mp4` remains
+  best FINAL; `sideline_tail5_pinned2.mp4` kept for reference. Far-body softness: both
+  mechanisms (resolution tail4, CS tail5) exhausted with no win — parked; at broadcast
+  distance the clip itself is equally soft. NEXT: goal-camera run (full per-camera chain,
+  REUSE_SCENE=1, `out/kitzones_goal.log`) — novel-view #2 + ball visibility (mount sits
+  behind the action-side goal = left, where ball.npz ends).
 
 - **2026-07-04 (night run)** — **TAIL #4: v2v resolution A/B (1536x864 vs 720p) — NO WIN,
   720p stays the default; VAE tiling landed as the unlock.** Three launches to get it running:
