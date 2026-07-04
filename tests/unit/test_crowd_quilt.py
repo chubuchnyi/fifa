@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import numpy as np
 
-from pitch3d.adapters.render.stadium_backdrop import assemble_crowd_quilt
+from pitch3d.adapters.render.stadium_backdrop import (
+    apply_stand_structure,
+    assemble_crowd_quilt,
+)
 from pitch3d.core.scene.stadium import bowl_tile_loop_uvs, stadium_bowl_geometry
 
 
@@ -58,6 +61,40 @@ def test_quilt_adds_no_structure_on_a_flat_tile():
     q = assemble_crowd_quilt(tile, width=128, height=32, seed=1)
     assert float(q.min()) >= 0.5 * 0.92 - 1e-3
     assert float(q.max()) <= 0.5 * 1.08 + 1e-3
+
+
+def test_stand_structure_carves_walkway_aisles_and_top_fade():
+    # Bowl-v runs 0 at the BOTTOM row but the quilt is stored screen-style (numpy row 0 = top),
+    # so the walkway (bowl-v 0.65) must land in the LOWER half of the array and the top fade
+    # must darken the FIRST rows. structure=False in the assembler stays the raw stitch.
+    flat = np.full((256, 1024, 3), 0.5, dtype=np.float32)
+    s = apply_stand_structure(flat)
+    h = flat.shape[0]
+
+    def row_of(bowl_v: float) -> int:
+        return int(round((1.0 - bowl_v) * h - 0.5))
+
+    walk = s[row_of(0.65)].mean()
+    crowd_below = s[row_of(0.10)].mean()  # below fade_start: untouched seated rows
+    assert walk < 0.5 * crowd_below  # concourse clearly darker than seated rows
+
+    rail = s[row_of(0.65 + 0.03) - 1].mean()
+    assert rail > crowd_below  # bright railing lip just above the walkway
+
+    top, mid_upper = s[0].mean(), s[row_of(0.85)].mean()
+    assert top < mid_upper < crowd_below  # fade grows toward the top of the stand
+
+    row = s[row_of(0.10)]  # a plain seated row: only aisle dips act on it
+    dips = (row.mean(axis=1) < 0.9 * np.median(row.mean(axis=1))).sum()
+    expected = int(1024 * (0.0035 / 0.024))  # aisle columns = width * duty cycle
+    assert 0 < dips <= expected + 24  # periodic aisles present, not flooding the row
+
+    tile = _noise_tile()
+    raw = assemble_crowd_quilt(tile, width=128, height=32, seed=2)
+    off = assemble_crowd_quilt(tile, width=128, height=32, seed=2, structure=False)
+    on = assemble_crowd_quilt(tile, width=128, height=32, seed=2, structure=True)
+    assert np.array_equal(raw, off)  # default = raw stitch (exporter flips it on)
+    assert not np.allclose(on, off)
 
 
 def test_unwrap_uvs_span_zero_one_and_lift_the_wrap_seam():

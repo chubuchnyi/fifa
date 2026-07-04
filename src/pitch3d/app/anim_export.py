@@ -80,6 +80,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--crowd-seed", type=int, default=int(env.get("PITCH3D_CROWD_SEED", "0"))
     )
     p.add_argument(
+        "--crowd-structure", type=int,
+        default=int(env.get("PITCH3D_CROWD_STRUCTURE", "1")),
+        help="overlay tier walkway/railing/aisles/top-fade on the quilt (0 = raw crowd)",
+    )
+    p.add_argument(
         "--board-height", type=float,
         default=float(env.get("PITCH3D_BOARD_HEIGHT", "1.0")),
         help="LED ad-board ring height in metres (0 disables the ring)",
@@ -373,6 +378,7 @@ def _export_stadium(
     *,
     crowd_mode: str = "quilt",
     crowd_seed: int = 0,
+    crowd_structure: bool = True,
 ) -> None:
     # Hybrid stadium backdrop (M2): procedural bowl + REAL appearance from THIS clip — a
     # *tinted mosaic* (crisp crowd texture x per-vertex measured tint, mirror copy-fill for the
@@ -398,7 +404,9 @@ def _export_stadium(
     stile = extract_crowd_tile(scene.camera, sv, sp, scov, source_video)
     if crowd_mode == "quilt":
         qw, qh = CROWD_QUILT_SIZE
-        quilt = assemble_crowd_quilt(stile, width=qw, height=qh, seed=crowd_seed)
+        quilt = assemble_crowd_quilt(
+            stile, width=qw, height=qh, seed=crowd_seed, structure=crowd_structure
+        )
         tex = (quilt * 255.0 + 0.5).astype(np.uint8)
         suv = bowl_tile_loop_uvs(sf, sp, repeat_around=1.0, repeat_up=1.0)
         tile_ext = "REPEAT"
@@ -500,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     _export_stadium(
         scene, args.out, args.source_video, source_ok, entries,
         crowd_mode=args.crowd_mode, crowd_seed=args.crowd_seed,
+        crowd_structure=bool(args.crowd_structure),
     )
     _export_boards(scene, args.out, entries, height=args.board_height, offset=args.board_offset)
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)

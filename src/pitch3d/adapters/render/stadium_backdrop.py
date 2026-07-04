@@ -180,12 +180,71 @@ def extract_crowd_tile(
     return _busiest_window(rgb[ya : yb + 1, xa : xb + 1], tile_frac[0], tile_frac[1])
 
 
+def apply_stand_structure(
+    quilt: np.ndarray,
+    *,
+    tier_v: float = 0.65,
+    tier_halfwidth_v: float = 0.022,
+    aisle_period_u: float = 0.024,
+    aisle_width_u: float = 0.0035,
+    fade_start_v: float = 0.20,
+    top_fade: float = 0.50,
+) -> np.ndarray:
+    """Overlay stand ARCHITECTURE onto the crowd quilt so it reads as stadium tiers, not TV
+    static: a dark concourse walkway with a bright railing lip between lower and upper tier
+    (``tier_v`` up the rake), dark aisle stairways every ``aisle_period_u`` around the bowl,
+    and a fade toward the top rows. All pure luma multipliers on the measured pixels — the
+    crowd texture itself stays real.
+
+    Calibrated on the night clip (2026-07-04): stair aisles read 3–5 px dark at 1080p (≈1.3 m
+    wide, sub-metre ones vanish after projection+filtering), the stand's vertical luma profile
+    dims steadily from bottom (~65–75) to roofline (~33–41) — a whole-rake fade to ~0.55, not a
+    mid-rake-only one. IMPORTANT: from a broadcast camera the ads boards occlude the lower HALF
+    of the far-stand rake (measured: a black band at bowl-v 0.2–0.5 is invisible; the on-screen
+    stand is v≈0.5–1.0), so the tier break must sit in the visible upper half — v 0.65 puts it
+    in the lower third of what the camera actually sees, matching the clip.
+
+    v axis: 0 = bottom row of the bowl, 1 = top. The quilt is stored screen-style (numpy row 0
+    = top of the stand — the renderer flips it to UV space), so bowl-v = 1 - row_frac. Defaults
+    in bowl metres: walkway ≈1.2 m tall, aisles ≈1.3 m wide every ≈9 m (perimeter ≈375 m,
+    rake ≈24 m).
+    """
+    q = np.asarray(quilt, dtype=np.float32).copy()
+    h, w = q.shape[:2]
+    v = 1.0 - (np.arange(h, dtype=np.float32) + 0.5) / h
+    u = (np.arange(w, dtype=np.float32) + 0.5) / w
+
+    gain_v = np.ones(h, dtype=np.float32)
+    walk = np.abs(v - tier_v) < tier_halfwidth_v
+    gain_v[walk] = 0.28
+    # The clip's tier break reads mostly as the continuous BRIGHT railing line, so the lip is
+    # wide/strong enough to survive grazing-angle texture filtering (a 1-px line would smear away).
+    rail = (v - (tier_v + tier_halfwidth_v) >= 0.0) & (v - (tier_v + tier_halfwidth_v) < 4.0 / h)
+    gain_v[rail] = 1.6
+    upper = v > fade_start_v
+    gain_v[upper] *= 1.0 + (top_fade - 1.0) * (v[upper] - fade_start_v) / max(
+        1e-6, 1.0 - fade_start_v
+    )
+
+    gain = np.repeat(gain_v[:, None], w, axis=1)
+    # Stairways stop at the concourse: the upper tier's run offset half a period so the two
+    # tiers don't line up into a see-through grid (they don't in the clip either).
+    aisle_lo = np.mod(u, aisle_period_u) < aisle_width_u
+    aisle_hi = np.mod(u + aisle_period_u / 2.0, aisle_period_u) < aisle_width_u
+    lower = v < tier_v
+    gain[np.ix_(lower, aisle_lo)] *= 0.40
+    gain[np.ix_(~lower, aisle_hi)] *= 0.40
+
+    return np.clip(q * gain[..., None], 0.0, 1.0)
+
+
 def assemble_crowd_quilt(
     tile: np.ndarray,
     *,
     width: int = 8192,
     height: int = 512,
     seed: int = 0,
+    structure: bool = False,
 ) -> np.ndarray:
     """Stitch one large NON-repeating crowd texture from random crops of the measured tile.
 
@@ -199,7 +258,8 @@ def assemble_crowd_quilt(
     matches the bowl's perimeter:rake aspect (~375 m : 24 m at default geometry).
 
     Deterministic for a given ``seed`` — the manual dial next to ``--crowd-mode`` (auto default =
-    quilt, seed 0). Returns ``(height, width, 3)`` float32 RGB in ``[0, 1]``.
+    quilt, seed 0). ``structure=True`` overlays :func:`apply_stand_structure` (the exporter's
+    ``--crowd-structure`` flag). Returns ``(height, width, 3)`` float32 RGB in ``[0, 1]``.
     """
     import cv2
 
@@ -232,4 +292,7 @@ def assemble_crowd_quilt(
             cols = (x + np.arange(pw)) % width  # wrap around the bowl
             acc[y : y + ph, cols] += patch * win[..., None]
             wsum[y : y + ph, cols] += win
-    return np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
+    out = np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
+    if structure:
+        out = apply_stand_structure(out)
+    return out
