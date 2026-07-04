@@ -20,7 +20,14 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **FULL FINISHING CHAIN RUN E2E ON THE POD 2026-07-03 (§6): fresh recon
+- **NEXT ACTION:** **STADIUM PERIMETER LANDED 2026-07-04 (§6): LED ad-board ring (white
+  emissive band + dark walkway) now separates grass from crowd in the render AND survives the
+  whole generative chain; the reordered one-command `pod_finish_batch.sh` VALIDATED E2E the same
+  run (recon→…→pins, single invocation). Best FINAL:
+  `out/boards_final/sideline_rgbnight_720p_pinned2.mp4`, judged vs clip in
+  `out/boards_final/final_vs_clip.png`. Next lever by eye: GRASS TONE — render/final grass is
+  neon acid-green, the clip's is muted dark broadcast green. Pipeline overview with diagrams:
+  `docs/pipeline.md`.** Previous run 2026-07-03 (§6): fresh recon
   (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
   pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
   final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
@@ -31,8 +38,8 @@
   team-mask AOV (grade3 was erasing kit identity in tight clusters → Wan hallucinated white/
   orange shirts) + a second hue-pin for team A (yellow) — both now defaults in
   `pod_finish_batch.sh` (mask pass moved before v2v).
-  Best FINAL: `out/anim_finish/sideline_rgbnight_kitinj_720p_pinned2.mp4`** (local). Next: user
-  eye-judgement of the final vs the GOAL + pick the next photoreal lever.** Historical context
+  That run's FINAL: `out/anim_finish/sideline_rgbnight_kitinj_720p_pinned2.mp4`** (local).
+  Historical context
   of the recipe: kit-boost at source +
   night-graded rgb control = team identity AND floodlit-night tone survive Wan-VACE in one pass**
   (yellow team locks hard, cyan reads as the second team with a cyan→blue hue drift; night look kept
@@ -237,6 +244,30 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **STADIUM PERIMETER LANDED: LED ad-board ring + dark walkway band; reordered
+  one-command wrapper VALIDATED E2E.** Gap (clip vs render): the clip reads grass → bright white
+  LED boards ("BANK OF AMERICA") → dark walkway → dense speckled crowd; our render ran grass
+  straight into a pastel crowd wall. Fix is a geometric PRIOR (no clip measurement):
+  `adboard_ring_geometry()` in `core/scene/stadium.py` — white emissive band (1 m) + dark
+  walkway band (2.2 m) at +5 m outside the lines, exported as `boards.npz`
+  (`--board-height/--board-offset`, `PITCH3D_BOARD_HEIGHT/OFFSET`, 0 disables), rendered as
+  flat vertex-colour emission (`PITCH3D_BOARD_EMISSION`, default 4.0 — saturates the PNG so
+  grade3 keeps the boards the brightest band in frame: 255→161 vs 30–90 neighbours). Local CPU
+  eyeball validated geometry + post-grade brightness hierarchy BEFORE pod spend. First pod E2E
+  died in `write_manifest`: `boards.npz` wasn't registered in the contract's `REQUIRED_KEYS`
+  (the local eyeball synthesized the npz by hand and skipped exactly that path — lesson: local
+  pre-checks must run the exporter, not hand-craft its outputs); fixed + contract test.
+  **Batch: `BATCH_FINISH_OK` from ONE invocation of `pod_finish_batch.sh`** — first single-command
+  run of the 2026-07-03 reorder (recon → export(+boards) → render → grade3 → mask AOV →
+  kit-inject → v2v 720p → SeedVR2 → pin B → pin A auto-targets 46.6°→69.2°). Verdict
+  (`out/boards_final/final_vs_clip.png`, f10/f30/f55 vs clip): the white LED strip reads along
+  the perimeter and around the bend, the dark walkway separates the (now dark, speckled-yellow)
+  crowd from the pitch — the broadcast-frame structure matches the clip; boards survive
+  Wan+SeedVR2 intact. **Next gap by eye: GRASS TONE — ours is neon acid-green, the clip's is
+  muted dark green.** Also: `docs/pipeline.md` added (the whole clip→final pipeline with mermaid
+  diagrams, per user request). Artifacts local: `out/boards_final/` (FINAL + beauty + judged
+  sheet), `out/boards_eyeball/` (local render + grade checks). Pod session ~55 min ≈ $0.7,
+  **pod STOPPED**. Commits 7538e0a (ring), c8b0484 (contract fix).
 - **2026-07-03** — **PLAYER-CLUSTER SMEAR FIXED: kit-colour re-injection into the v2v control
   (+ team-A hue pin).** Diagnosis (`out/clusters/control_vs_output_f10.png`): in tight clusters
   the night-graded control keeps clean separable geometry but grade3 all but erases kit colour —
