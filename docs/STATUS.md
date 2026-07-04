@@ -41,10 +41,13 @@
   the ring (optional tile/uv in boards.npz, normalize=False emission, u AGAINST ring order);
   local 1-frame render verified — brightest band, forward text, red logo, dark walkway. STRIPE
   CONTRAST landed same day (§6): measured end-to-end clip 1.015 vs control 1.089 → albedo ratio
-  1.18→1.05 lands 1.019 (1.03 vanished into the denoiser floor). Next: POD E2E BATCH #1 (boards
-  text + crowd grain; RUNNING 2026-07-04 in `out/boards_pod`, v2v stage) — eye-verify, then
-  stripes ride batch #2; next lever BY EYE (candidate: player face/limb fidelity — judge on the
-  fresh boards_pod final). Pipeline overview:
+  1.18→1.05 lands 1.019 (1.03 vanished into the denoiser floor). POD E2E BATCH #1 CONFIRMED
+  same day (§6): boards text (readable "BANk … america" + red logo in the FINAL) and crowd
+  grain (per-fan speckle, no marble) both survive the generative chain; new best FINAL
+  `out/boards_pod/sideline_rgbnight_720p_pinned2.mp4`; pod DOWN. Next: NEXT LEVER BY EYE off
+  the fresh final (candidates: player face/limb fidelity — bodies still watercolour-smeary;
+  stand saturation residual S .63 vs clip .42); stripes E2E rides pod batch #2 whenever the
+  next pod run happens. Pipeline overview:
   `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -266,6 +269,19 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-04** — **POD E2E BATCH #1 CONFIRMED BY EYE: boards text + crowd grain both survive
+  the full chain** (fresh recon → export → GPU render → grade3 → mask → kit-inject → Wan-VACE
+  720p → SeedVR2 → hue-pins; ~46 min pod ≈ $0.57, `out/boards_pod/batch.log`). **Boards:** the
+  exporter reproduced the measured strip on the FRESH pod recon (939×48 ×19 — identical to the
+  local adr11 run: the extractor is calib-run-robust), and the FINAL keeps a readable sponsor
+  rhythm — "BANk … america" + red logo strokes on the far band
+  (`out/boards_pod/final_f30_boardzone.png` vs beauty `beauty_f30_boardzone.png`; band zone =
+  grass-boundary anchor, same trick as the extractor). **Crowd grain:** per-fan ~3 px speckle
+  with dark aisles in the final stand ROI (`out/boards_pod/stand_final.png`) — no marble.
+  Kit-pins worked (team A 63.5°→79.1°). **Residual:** final stand S 0.63 vs clip ≈0.42 (better
+  than the amber-blob 0.94 and the mute-probe 0.74, still warmer than the clip) — keep on the
+  candidate list. FINAL: `out/boards_pod/sideline_rgbnight_720p_pinned2.mp4` (local). Pod DOWN.
 
 - **2026-07-04** — **STRIPE CONTRAST: mowing bands softened to the clip's measured near-flat
   level (v2 lever, local).** Metric: p90/p10 of the detrended smoothed grass-luma column profile
