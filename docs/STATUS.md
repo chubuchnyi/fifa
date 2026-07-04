@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-03 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-04 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -20,14 +20,17 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **STADIUM PERIMETER LANDED 2026-07-04 (§6): LED ad-board ring (white
-  emissive band + dark walkway) now separates grass from crowd in the render AND survives the
-  whole generative chain; the reordered one-command `pod_finish_batch.sh` VALIDATED E2E the same
-  run (recon→…→pins, single invocation). Best FINAL:
-  `out/boards_final/sideline_rgbnight_720p_pinned2.mp4`, judged vs clip in
-  `out/boards_final/final_vs_clip.png`. Next lever by eye: GRASS TONE — render/final grass is
-  neon acid-green, the clip's is muted dark broadcast green. Pipeline overview with diagrams:
-  `docs/pipeline.md`.** Previous run 2026-07-03 (§6): fresh recon
+- **NEXT ACTION:** **GRASS TONE LANDED 2026-07-04 (§6): clip-measured stripe albedos in
+  `scene_builders.py` + the v2v prompt fix (it said "deep green pitch" — Wan was repainting the
+  clip-exact control back to emerald). Final grass now H 73.4 (clip 81.9, was 120);
+  `out/grass_pod2/grass_prompt_ab.png` is the A/B/C sheet, best FINAL:
+  `out/grass_pod2/sideline_rgbnight_720p_pinned2.mp4`. `TAIL_ONLY=1` on `pod_finish_batch.sh`
+  reruns only v2v→SeedVR2→pins over reused control frames (~15 min ≈ $0.2/iteration) — use it
+  for all generative-stage sweeps. Pick the next lever BY EYE from the sheet (candidates:
+  stripe contrast/saturation residual, crowd texture realism, player face/limb fidelity,
+  boards text). Pipeline overview with diagrams: `docs/pipeline.md`.** Previous lever
+  2026-07-04 (§6): STADIUM PERIMETER — LED ad-board ring + walkway survive the whole chain;
+  `out/boards_final/final_vs_clip.png`. Previous run 2026-07-03 (§6): fresh recon
   (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
   pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
   final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
@@ -244,6 +247,30 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **GRASS TONE LANDED (two-layer fix: albedo at source + v2v prompt); TAIL_ONLY
+  iteration mode for the generative stage.** Gap: render/final grass was neon emerald; clip's
+  night-graded grass measures **H 81.9° S 0.651 V 0.557** (median HSV, pitch ROI, green gate).
+  **Layer 1 — source albedo (44b2d83):** old emerald stripe pair (hue ≈115° linear) + grade3's
+  gamma 0.75 (inflates S by crushing weak channels) → 4 measured render→grade iterations landed
+  `GRASS_DARK/LIGHT_RGB = (0.292,0.42,0.102)/(0.346,0.495,0.121)` in `scene_builders.py`
+  (post-grade H exact, V within 6%, stripe ratio softened 1.4→1.18); env override
+  `PITCH3D_GRASS_DARK/LIGHT` in `blender_animate.py`. **BUT the pod E2E came back H 120 S 1.00
+  V 0.85 — brighter emerald than before the fix:** control frames were clip-exact, so the
+  generative stage repainted them. **Layer 2 — the v2v text prompt was the culprit (ea422e3):**
+  `DEFAULT_PROMPT` in `pod_v2v_finish.py` literally asked for a "deep green pitch". Reworded to
+  "muted yellow-green night grass with faint mowing stripes", pushed "vivid emerald grass,
+  oversaturated colors" into the negative, added `V2V_PROMPT` env override in the batch
+  (auto+manual rule). Rerun final measures **H 73.4 S 0.933 V 0.494** (Δhue vs clip −8.5° instead
+  of +38°; V within 0.06) — by eye the neon is gone, grass reads as believable night turf; A/B/C
+  sheet `out/grass_pod2/grass_prompt_ab.png`, FINAL
+  `out/grass_pod2/sideline_rgbnight_720p_pinned2.mp4` (local). Residual: stripe contrast slightly
+  stronger than clip, S still rich (0.93 vs 0.65) — park until a bigger lever demands it.
+  **Lesson (pin the pattern): a measured control fix can be silently overridden by the
+  generative stage — always re-measure AFTER Wan/SeedVR2, and check the text prompt for colour
+  words before blaming the model.** **TAIL_ONLY=1 (ea422e3):** `pod_finish_batch.sh` now skips
+  steps 1–4 and reuses a previous run's beauty/masks/control from the same `$OUT` — a
+  prompt/CS/seed iteration is ~15 min ≈ $0.2 instead of ~55 min (validated by this very rerun:
+  v2v 10 min + SeedVR2 + pins on 60 reused control frames; pins B 232.9→183.5, A 70.6→79.1).
 - **2026-07-04** — **STADIUM PERIMETER LANDED: LED ad-board ring + dark walkway band; reordered
   one-command wrapper VALIDATED E2E.** Gap (clip vs render): the clip reads grass → bright white
   LED boards ("BANK OF AMERICA") → dark walkway → dense speckled crowd; our render ran grass
