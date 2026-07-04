@@ -61,8 +61,10 @@
   (tail4 §6: 1536x864 unblocked via VAE tiling `a727d0e`, crispness equal + near-kit drift)
   and conditioning scale (tail5 §6: CS=1.15 drifts the whole frame bright-lime — CS leaks
   TONE, not just structure). 720p / CS=1.0 stay defaults; best FINAL still
-  `out/kitzones_pod/sideline_tail3_pinned2.mp4`. Current: goal-camera run in flight
-  (novel-view #2 + ball visibility; mount auto-sits behind the action-side goal). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  `out/kitzones_pod/sideline_tail3_pinned2.mp4`. GOAL CAM E2E confirmed (§6): novel-view #2
+  works from behind the left goal, BALL visible in the final (f55) — sideline no-show was
+  occlusion+size. Current: goal2 tail in flight — prompt-restore the near goal frame that
+  grade3+Wan erase (twice-measured rule: name every large surface). Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -283,6 +285,20 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **GOAL CAMERA E2E: novel-view #2 CONFIRMED through the full
+  chain; BALL VISIBLE in the final; new residual = Wan erases the near goal frame.** Full
+  per-camera chain (REUSE_SCENE=1, ~50 min ≈ $0.6): behind-goal mount (auto-placed at the
+  action-side/left goal, 9 m up 5 m back) renders the same episode coherently — clusters,
+  kits (Congo azure / Colombia yellow), stands, night tone all hold from the second angle.
+  **Ball:** clear white round ball on the pitch at f55 (`goal_ball_zoom.png` recipe: crop
+  700,350-1150,600); intermittent/dark-smudged mid-flight (heuristic heights, conf 0 — Wan
+  repaints the flying ball inconsistently). The sideline "no ball" worry was occlusion+4px,
+  as suspected. **Residual:** the beauty pass shows white posts+crossbar in the foreground;
+  grade3+Wan REMOVE the goal frame entirely (thin near-camera structure, unnamed in the
+  prompt). Iteration in flight (goal2, TAIL_ONLY): prompt gains measured-true "a football
+  goal with thin white posts, white crossbar and a white net in the near foreground" per the
+  twice-measured rule. Artifacts local: `out/kitzones_pod/goal_pinned2.mp4`, `goal_beauty.mp4`.
 
 - **2026-07-05 (night run)** — **TAIL #5: conditioning-scale A/B (CS=1.15 vs 1.0) — LOSES;
   far-body-softness lever PARKED, second novel-view camera started.** By eye (4x zoom f1/f40
