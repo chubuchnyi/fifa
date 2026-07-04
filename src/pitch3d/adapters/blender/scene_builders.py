@@ -16,14 +16,26 @@ from __future__ import annotations
 import math
 
 
-def build_grass_material(bpy, name="grass", stripe_scale=0.1):  # pragma: no cover - needs bpy
+GRASS_DARK_RGB = (0.292, 0.42, 0.102)
+GRASS_LIGHT_RGB = (0.346, 0.495, 0.121)
+
+
+def build_grass_material(
+    bpy, name="grass", stripe_scale=0.1, dark_rgb=GRASS_DARK_RGB, light_rgb=GRASS_LIGHT_RGB
+):  # pragma: no cover - needs bpy
     """Procedural grass for the pitch plane: banded mowing stripes (the iconic look) drive the base
     colour, a fine noise drives a subtle bump for blade micro-texture, and a high roughness keeps it
     matte. Built purely from generator nodes — no image texture to ship.
 
     ``stripe_scale`` is the wave Scale on the plane's Object coords (metres): ~0.1 gives ≈5 m mowing
     bands that read at broadcast distance — the original M2-9 Scale 6 averages to flat green on a
-    full 105 m pitch."""
+    full 105 m pitch.
+
+    ``dark_rgb``/``light_rgb`` are the two stripe albedos (linear). Defaults are matched to the
+    target clip (2026-07-04, 4 measured render→grade iterations): the old emerald pair (hue ≈115°)
+    rendered acid-green through the night grade; the clip's night-graded grass is yellow-green —
+    post-grade medians H 81.9° S 0.663 match the clip exactly, V within 6%, stripe contrast
+    softened (ratio 1.4→1.18: the clip's mowing bands are barely apart)."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -37,8 +49,8 @@ def build_grass_material(bpy, name="grass", stripe_scale=0.1):  # pragma: no cov
     ramp = nt.nodes.new("ShaderNodeValToRGB")
     ramp.color_ramp.interpolation = "CONSTANT"
     dark, light = ramp.color_ramp.elements
-    dark.position, dark.color = 0.0, (0.045, 0.20, 0.035, 1.0)
-    light.position, light.color = 0.5, (0.075, 0.28, 0.055, 1.0)
+    dark.position, dark.color = 0.0, (*dark_rgb, 1.0)
+    light.position, light.color = 0.5, (*light_rgb, 1.0)
     nt.links.new(coord.outputs["Object"], wave.inputs["Vector"])
     nt.links.new(wave.outputs["Fac"], ramp.inputs["Fac"])
     nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])

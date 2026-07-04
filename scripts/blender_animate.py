@@ -236,7 +236,20 @@ if os.path.exists(ball_path):
 # Grass PBR (v2 lever 2): the procedural mowing-stripe + bump material shared with the formal Cycles
 # path via scene_builders, so the deliverable pitch is no longer a flat green plane.
 bpy.ops.mesh.primitive_plane_add(size=max(120.0, span * 3), location=(ctr[0], ctr[1], 0.0))
-bpy.context.active_object.data.materials.append(scene_builders.build_grass_material(bpy))
+
+
+def _env_rgb(name, default):
+    raw = os.environ.get(name, "")
+    return tuple(float(v) for v in raw.split(",")) if raw else default
+
+
+bpy.context.active_object.data.materials.append(
+    scene_builders.build_grass_material(
+        bpy,
+        dark_rgb=_env_rgb("PITCH3D_GRASS_DARK", scene_builders.GRASS_DARK_RGB),
+        light_rgb=_env_rgb("PITCH3D_GRASS_LIGHT", scene_builders.GRASS_LIGHT_RGB),
+    )
+)
 
 
 def _add_static_mesh(name, verts, faces, rgb, roughness):
