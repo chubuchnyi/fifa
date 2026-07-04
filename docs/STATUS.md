@@ -20,17 +20,18 @@
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **GRASS TONE LANDED 2026-07-04 (§6): clip-measured stripe albedos in
-  `scene_builders.py` + the v2v prompt fix (it said "deep green pitch" — Wan was repainting the
-  clip-exact control back to emerald). Final grass now H 73.4 (clip 81.9, was 120);
-  `out/grass_pod2/grass_prompt_ab.png` is the A/B/C sheet, best FINAL:
-  `out/grass_pod2/sideline_rgbnight_720p_pinned2.mp4`. `TAIL_ONLY=1` on `pod_finish_batch.sh`
-  reruns only v2v→SeedVR2→pins over reused control frames (~15 min ≈ $0.2/iteration) — use it
-  for all generative-stage sweeps. Pick the next lever BY EYE from the sheet (candidates:
-  stripe contrast/saturation residual, crowd texture realism, player face/limb fidelity,
-  boards text). Pipeline overview with diagrams: `docs/pipeline.md`.** Previous lever
-  2026-07-04 (§6): STADIUM PERIMETER — LED ad-board ring + walkway survive the whole chain;
-  `out/boards_final/final_vs_clip.png`. Previous run 2026-07-03 (§6): fresh recon
+- **NEXT ACTION:** **CROWD TONE LANDED 2026-07-04 (§6): measured render knobs
+  (`PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35) + warm-crowd prompt wording.
+  Final: crowd V .161 H 52 (clip .188/48), grass held H 77.6; best FINAL:
+  `out/crowd_pod2/sideline_rgbnight_720p_pinned2.mp4`, A/B: `out/crowd_pod2/crowd_final_ab.png`.
+  TWICE-MEASURED RULE: the v2v prompt must state the measured colour of every large surface —
+  uncoloured surfaces get repainted from Wan's prior (grass emerald, crowd gray). GRASS TONE
+  landed same day (§6): albedos in `scene_builders.py` + prompt; `TAIL_ONLY=1` on
+  `pod_finish_batch.sh` = generative-stage iteration in ~15 min ≈ $0.2. Pick the next lever BY
+  EYE from the A/B sheet (candidates: crowd STRUCTURE — tiers/aisles vs today's speckle; boards
+  text; player face/limb fidelity; stripe-contrast residual). Pipeline overview with diagrams:
+  `docs/pipeline.md`.** Previous lever 2026-07-04 (§6): STADIUM PERIMETER — LED ad-board ring +
+  walkway survive the whole chain; `out/boards_final/final_vs_clip.png`. Previous run 2026-07-03 (§6): fresh recon
   (PHYSICS=1, DEMO_EDITS=0) → quilt export → render → night-grade → Wan-VACE → SeedVR2 → mask
   pass → hue-pin, one command (`pod_finish_batch.sh`), all three levers eye-verified in the
   final: crowd non-periodic through the whole generative chain, kits pinned azure (this run's
@@ -247,6 +248,28 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-04** — **CROWD TONE LANDED (render brightness/warmth + v2v prompt); the colour-wording
+  rule GENERALIZED.** Gap: clip crowd is a warm amber mass (pure-crowd ROI median **V .188 H 48
+  S .42**); ours was charcoal with confetti dots (V .043). Layer 1 — render (8bedf4c): the bowl
+  tint is measured from the RAW clip (already a dark night broadcast) and grade3 darkens it AGAIN
+  (the grass double-grade trap, same shape); on top, AgX desaturates bright emission to gray and
+  grade3's `colorbalance bs=.12` paints dark gray blue. Three knobs in `blender_animate.py`,
+  defaults measured over 5 local render→grade iterations: **`PITCH3D_CROWD_EMISSION=3.6`**
+  (post-grade V .184 vs clip .188), **`PITCH3D_CROWD_CHROMA=0.15`** (tile hue-confetti → luma
+  detail; real crowds vary in luma, not hue), **`PITCH3D_CROWD_TINT_SAT=1.35`** (headroom to
+  survive AgX+grade). Grass bounce from the brighter bowl: none (H 81.9, ΔV .007). Pod E2E
+  (REUSE_SCENE=1) confirmed the control exactly (V .184 H 69) — **but Wan output H 200 cold
+  gray: second instance of the prompt-colour failure** (uncoloured "packed crowd" = prior wins,
+  exactly like "deep green pitch"). Layer 2 — prompt (e5f6c9e): "stands densely packed with fans
+  in warm yellow and amber shirts"; TAIL_ONLY rerun (~15 min) → **crowd V .161 H 52.2 S .57 vs
+  clip .188/48/.42; grass held H 77.6**. Eye verdict: warm amber crowd in the clip's family,
+  next to the prev gray-noise version the difference is night-and-day; A/B sheet
+  `out/crowd_pod2/crowd_final_ab.png`, FINAL `out/crowd_pod2/sideline_rgbnight_720p_pinned2.mp4`
+  (local). **RULE (now twice-measured): state the measured colour of EVERY large surface in the
+  v2v prompt — any surface left uncoloured gets repainted from Wan's prior, overriding a
+  clip-exact control. Check the prompt for colour words BEFORE blaming the model/control.**
+  Residual: crowd reads as speckle, not a structured human mass (no tiers/aisles); V still ~.03
+  under clip. Cost: 1 full REUSE_SCENE run + 1 TAIL_ONLY ≈ $0.9.
 - **2026-07-04** — **GRASS TONE LANDED (two-layer fix: albedo at source + v2v prompt); TAIL_ONLY
   iteration mode for the generative stage.** Gap: render/final grass was neon emerald; clip's
   night-graded grass measures **H 81.9° S 0.651 V 0.557** (median HSV, pitch ROI, green gate).
