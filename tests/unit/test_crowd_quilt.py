@@ -89,12 +89,10 @@ def test_stand_structure_carves_walkway_aisles_and_top_fade():
     expected = int(1024 * (0.0035 / 0.024))  # aisle columns = width * duty cycle
     assert 0 < dips <= expected + 24  # periodic aisles present, not flooding the row
 
-    tile = _noise_tile()
-    raw = assemble_crowd_quilt(tile, width=128, height=32, seed=2)
-    off = assemble_crowd_quilt(tile, width=128, height=32, seed=2, structure=False)
-    on = assemble_crowd_quilt(tile, width=128, height=32, seed=2, structure=True)
-    assert np.array_equal(raw, off)  # default = raw stitch (exporter flips it on)
-    assert not np.allclose(on, off)
+    raw = assemble_crowd_quilt(_noise_tile(), width=128, height=32, seed=2)
+    on = apply_stand_structure(raw)
+    assert not np.allclose(on, raw)  # the exporter's overlay actually changes the stitch
+    assert float(on.mean()) < float(raw.mean())  # mean drops -> exporter must ship tile_gain
 
 
 def test_unwrap_uvs_span_zero_one_and_lift_the_wrap_seam():

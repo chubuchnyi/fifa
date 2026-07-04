@@ -381,12 +381,17 @@ if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollu
     if _tsat != 1.0:
         _lum = _crowd_tint @ np.float32([0.2126, 0.7152, 0.0722])
         _crowd_tint = np.clip(_lum[:, None] + (_crowd_tint - _lum[:, None]) * _tsat, 0.0, None)
+    # tile_gain: the exporter's structured quilt (walkway/aisles/top-fade) lowered the tile
+    # mean; the unit-mean norm below is scale-invariant, so without this the seated rows would
+    # render brighter than the tuned emission (measured 2026-07-04: x1.41 -> oversaturated
+    # amber panels after the night grade).
+    _tgain = float(sd["tile_gain"]) if "tile_gain" in sd.files else 1.0
     _add_stadium_mesh(
         "stadium", sd["verts"], sd["faces"], _crowd_tint,
         uv=sd["uv"] if "uv" in sd.files else None,
         tile=sd["tile"] if "tile" in sd.files else None,
         tile_ext=str(sd["tile_ext"]) if "tile_ext" in sd.files else "MIRROR",
-        emission_strength=float(os.environ.get("PITCH3D_CROWD_EMISSION", "3.6")),
+        emission_strength=float(os.environ.get("PITCH3D_CROWD_EMISSION", "3.6")) * _tgain,
     )
 
 # LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): flat

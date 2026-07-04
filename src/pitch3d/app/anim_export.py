@@ -402,11 +402,19 @@ def _export_stadium(
     scolors, scov = bake_backdrop_colors(scene.camera, sv, source_video)
     sfilled, _ = fill_holes_by_copy(sv, scolors, scov)
     stile = extract_crowd_tile(scene.camera, sv, sp, scov, source_video)
+    tile_gain = 1.0
     if crowd_mode == "quilt":
         qw, qh = CROWD_QUILT_SIZE
-        quilt = assemble_crowd_quilt(
-            stile, width=qw, height=qh, seed=crowd_seed, structure=crowd_structure
-        )
+        quilt = assemble_crowd_quilt(stile, width=qw, height=qh, seed=crowd_seed)
+        if crowd_structure:
+            from pitch3d.adapters.render.stadium_backdrop import apply_stand_structure
+
+            raw_mean = float(quilt.mean())
+            quilt = apply_stand_structure(quilt)
+            # The renderer normalises the tile to unit mean (scale-invariant), so darkening
+            # part of the texture would silently BRIGHTEN the seated rows past the tuned
+            # emission. tile_gain hands the renderer the mean drop to compensate with.
+            tile_gain = float(quilt.mean()) / max(raw_mean, 1e-6)
         tex = (quilt * 255.0 + 0.5).astype(np.uint8)
         suv = bowl_tile_loop_uvs(sf, sp, repeat_around=1.0, repeat_up=1.0)
         tile_ext = "REPEAT"
@@ -425,8 +433,11 @@ def _export_stadium(
         uv=suv.astype(np.float32),
         tile=tex,
         tile_ext=tile_ext,
+        tile_gain=np.float32(tile_gain),
     )
-    entries["stadium.npz"] = ["colors", "faces", "tile", "tile_ext", "uv", "verts"]
+    entries["stadium.npz"] = [
+        "colors", "faces", "tile", "tile_ext", "tile_gain", "uv", "verts",
+    ]
     print(
         f"stadium: {sv.shape[0]} verts {sf.shape[0]} tris; covered "
         f"{int(scov.sum())}/{scov.size} ({scov.mean() * 100:.0f}%); "

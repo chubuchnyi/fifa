@@ -232,8 +232,8 @@ def apply_stand_structure(
     aisle_lo = np.mod(u, aisle_period_u) < aisle_width_u
     aisle_hi = np.mod(u + aisle_period_u / 2.0, aisle_period_u) < aisle_width_u
     lower = v < tier_v
-    gain[np.ix_(lower, aisle_lo)] *= 0.40
-    gain[np.ix_(~lower, aisle_hi)] *= 0.40
+    gain[np.ix_(lower, aisle_lo)] *= 0.50
+    gain[np.ix_(~lower, aisle_hi)] *= 0.50
 
     return np.clip(q * gain[..., None], 0.0, 1.0)
 
@@ -244,7 +244,6 @@ def assemble_crowd_quilt(
     width: int = 8192,
     height: int = 512,
     seed: int = 0,
-    structure: bool = False,
 ) -> np.ndarray:
     """Stitch one large NON-repeating crowd texture from random crops of the measured tile.
 
@@ -258,7 +257,7 @@ def assemble_crowd_quilt(
     matches the bowl's perimeter:rake aspect (~375 m : 24 m at default geometry).
 
     Deterministic for a given ``seed`` — the manual dial next to ``--crowd-mode`` (auto default =
-    quilt, seed 0). ``structure=True`` overlays :func:`apply_stand_structure` (the exporter's
+    quilt, seed 0). The exporter overlays :func:`apply_stand_structure` on top (its
     ``--crowd-structure`` flag). Returns ``(height, width, 3)`` float32 RGB in ``[0, 1]``.
     """
     import cv2
@@ -292,7 +291,4 @@ def assemble_crowd_quilt(
             cols = (x + np.arange(pw)) % width  # wrap around the bowl
             acc[y : y + ph, cols] += patch * win[..., None]
             wsum[y : y + ph, cols] += win
-    out = np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
-    if structure:
-        out = apply_stand_structure(out)
-    return out
+    return np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
