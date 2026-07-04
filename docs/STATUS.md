@@ -263,7 +263,8 @@ fabricate or silently hide.
   stand into amber "LED panels" (S .941) over a clip-exact control (S .486): the prompt itself
   asked for "fans in warm yellow and amber shirts". TAIL_ONLY probe reworded the crowd clause
   to "thousands of tiny individual fans in muted dark amber and brown clothing, crowd dimly lit
-  and half in shadow" → final stand **H 46 S .737 V .247** (batch 2: H 43.8 S .941 V .298;
+  and half in shadow" (now the `DEFAULT_PROMPT` in `pod_v2v_finish.py`) → final stand
+  **H 46 S .737 V .247** (batch 2: H 43.8 S .941 V .298;
   clip stand-only: S ~.42 V ~.16–.20); grass held (H 66 vs 69). Eye: the LED-panel glow is
   GONE — the stand reads as a dark fine-speckled crowd with visible tier structure, closest to
   the clip so far; kits/grass unaffected. **RULE (third instance, sharpened): state the
