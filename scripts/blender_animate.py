@@ -356,6 +356,17 @@ if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollu
         tile_ext=str(sd["tile_ext"]) if "tile_ext" in sd.files else "MIRROR",
     )
 
+# LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): flat
+# vertex-colour emission. Boards saturate the PNG (strength >1) so the night grade still
+# leaves them the brightest element — matching the clip, where the LED strip glows.
+boards_path = os.path.join(IN, "boards.npz")
+if os.path.exists(boards_path) and not TEAM_MASK:
+    bdz = np.load(boards_path)
+    _add_stadium_mesh(
+        "adboards", bdz["verts"], bdz["faces"], bdz["colors"],
+        emission_strength=float(os.environ.get("PITCH3D_BOARD_EMISSION", "4.0")),
+    )
+
 # Floodlit-NIGHT lighting (v2 lever 3) with BOTH auto-detect and manual override. AUTO baseline:
 # anim_export.py measured the floodlight colour (+ night-model defaults) into lighting.npz. MANUAL:
 # any --light-* flag wins over that. Fallback when neither exists: the measured night defaults baked

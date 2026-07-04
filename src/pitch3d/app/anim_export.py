@@ -47,6 +47,7 @@ from pitch3d.core.scene.cameras import plan_virtual_cameras
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.core.scene.stadium import (
+    adboard_ring_geometry,
     bowl_tile_loop_uvs,
     fill_holes_by_copy,
     stadium_bowl_geometry,
@@ -78,6 +79,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--crowd-seed", type=int, default=int(env.get("PITCH3D_CROWD_SEED", "0"))
     )
+    p.add_argument(
+        "--board-height", type=float,
+        default=float(env.get("PITCH3D_BOARD_HEIGHT", "1.0")),
+        help="LED ad-board ring height in metres (0 disables the ring)",
+    )
+    p.add_argument(
+        "--board-offset", type=float,
+        default=float(env.get("PITCH3D_BOARD_OFFSET", "5.0")),
+        help="ad-board distance outside the touch/goal lines, metres",
+    )
     p.add_argument("--fade-frames", type=int, default=int(env.get("PITCH3D_FADE_FRAMES", "4")))
     p.add_argument(
         "--canonical-up",
@@ -108,7 +119,7 @@ def _purge_stale(out_dir: str) -> None:
     """
     stale = glob.glob(os.path.join(out_dir, "anim_subject_*.npz")) + [
         os.path.join(out_dir, name)
-        for name in ("ball.npz", "pitch.npz", "stadium.npz", "lighting.npz",
+        for name in ("ball.npz", "pitch.npz", "stadium.npz", "boards.npz", "lighting.npz",
                      "cameras.npz", MANIFEST_NAME)
     ]
     for path in stale:
@@ -415,6 +426,29 @@ def _export_stadium(
     )
 
 
+def _export_boards(
+    scene, out_dir: str, entries: dict[str, list[str]], *, height: float, offset: float
+) -> None:
+    # Broadcast perimeter furniture (v2 lever, 2026-07-03): grass → white LED boards → dark
+    # walkway → crowd is the night-broadcast silhouette the finisher knows; without it the
+    # grass runs straight into the crowd wall and Wan paints mush at the boundary. A geometric
+    # PRIOR (not measured), so it needs no clip; --board-height 0 / PITCH3D_BOARD_HEIGHT=0
+    # disables it.
+    if height <= 0.0:
+        print("boards: --board-height 0, skipping boards.npz")
+        return
+    bv, bf, bc = adboard_ring_geometry(scene.field.dimensions, offset=offset, height=height)
+    np.savez(
+        os.path.join(out_dir, "boards.npz"),
+        verts=bv.astype(np.float32),
+        faces=bf.astype(np.int32),
+        colors=bc.astype(np.float32),
+    )
+    entries["boards.npz"] = ["colors", "faces", "verts"]
+    print(f"boards: ring {bv.shape[0]} verts {bf.shape[0]} tris "
+          f"(h={height} m at +{offset} m) -> boards.npz")
+
+
 def _export_lighting(
     scene, out_dir: str, source_video: str, source_ok: bool, entries: dict[str, list[str]]
 ) -> None:
@@ -467,6 +501,7 @@ def main(argv: list[str] | None = None) -> int:
         scene, args.out, args.source_video, source_ok, entries,
         crowd_mode=args.crowd_mode, crowd_seed=args.crowd_seed,
     )
+    _export_boards(scene, args.out, entries, height=args.board_height, offset=args.board_offset)
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)
 
     write_manifest(args.out, entries)

@@ -132,6 +132,56 @@ def stadium_bowl_geometry(
     return verts, np.asarray(faces, dtype=int), param
 
 
+def adboard_ring_geometry(
+    dimensions: FieldDimensions | None = None,
+    *,
+    offset: float = 5.0,
+    height: float = 1.0,
+    gap: float = 2.2,
+    n_around: int = 240,
+    corner_radius: float = 14.0,
+    board_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
+    gap_color: tuple[float, float, float] = (0.02, 0.02, 0.03),
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The broadcast pitch-perimeter furniture: LED ad-board ring + dark walkway band behind it.
+
+    Measured gap in the target clip (2026-07-03): grass runs straight into the crowd wall in our
+    render, while a real night broadcast reads grass → bright white LED boards → dark walkway →
+    crowd. Two vertical quad strips on a rounded-rectangle loop ``offset`` metres outside the
+    lines: boards ``z ∈ [0, height]`` in ``board_color``, the walkway band
+    ``z ∈ [height, height+gap]`` in ``gap_color``. Vertices are NOT shared across the two strips
+    so per-vertex colours stay crisp at the boundary. Faces wind to face the pitch, matching
+    :func:`stadium_bowl_geometry`. Returns ``(verts (M, 3), faces (F, 3), colors (M, 3))``.
+    """
+    dims = dimensions or FieldDimensions()
+    hx = dims.length / 2.0 + offset
+    hy = dims.width / 2.0 + offset
+    loop, _ = _rounded_rect_loop(hx, hy, corner_radius, n_around)
+
+    def band(z0: float, z1: float, base: int, color) -> tuple[list, list, list]:
+        verts, faces, colors = [], [], []
+        for i in range(n_around):
+            verts.append((loop[i, 0], loop[i, 1], z0))
+            verts.append((loop[i, 0], loop[i, 1], z1))
+            colors.extend([color, color])
+        for i in range(n_around):
+            j = (i + 1) % n_around
+            a, d = base + 2 * i, base + 2 * i + 1
+            b, c = base + 2 * j, base + 2 * j + 1
+            # same winding as the bowl: CW seen from outside ⇒ normal faces the pitch
+            faces.append([a, c, b])
+            faces.append([a, d, c])
+        return verts, faces, colors
+
+    bv, bf, bc = band(0.0, height, 0, board_color)
+    wv, wf, wc = band(height, height + gap, len(bv), gap_color)
+    return (
+        np.asarray(bv + wv, dtype=float),
+        np.asarray(bf + wf, dtype=int),
+        np.asarray(bc + wc, dtype=float),
+    )
+
+
 def bowl_tile_loop_uvs(
     faces: np.ndarray, param: np.ndarray, *, repeat_around: float, repeat_up: float
 ) -> np.ndarray:
