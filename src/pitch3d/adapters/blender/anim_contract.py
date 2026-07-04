@@ -37,6 +37,7 @@ REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
     "ball.npz": ("frames", "positions_3d", "height_confidence"),
     "pitch.npz": ("pitch_verts", "pitch_faces", "goal_verts", "goal_faces"),
     "stadium.npz": ("verts", "faces", "colors", "uv", "tile"),
+    "boards.npz": ("verts", "faces", "colors"),
     "lighting.npz": ("light_rgb",),
     "cameras.npz": ("names", "frames"),
 }

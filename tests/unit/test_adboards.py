@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import numpy as np
 
+from pitch3d.adapters.blender.anim_contract import required_keys_for
 from pitch3d.core.scene.stadium import FieldDimensions, adboard_ring_geometry
+
+
+def test_boards_are_a_known_contract_artifact():
+    # write_manifest rejects unknown artifacts, so the export dies on the pod if this pattern
+    # is ever dropped from REQUIRED_KEYS (2026-07-03: exactly that happened on first E2E).
+    assert set(required_keys_for("boards.npz")) == {"verts", "faces", "colors"}
 
 
 def test_ring_counts_and_validity():
