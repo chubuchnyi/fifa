@@ -87,9 +87,12 @@
   profile now inside the clip's own pan-swing, fan-band frac .173 dead-on clip); pod infra
   hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
   `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
-  NEW BEST FINALS `out/kitzones_pod/sideline_t10_pinned5_xflat.mp4` (crowd-contrast +
-  stands-V override + xflat) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened too);
-  fresh sheets `out/kitzones_pod/final_vs_clip_t10.png` + `goal_vs_clip_t10.png`.
+  BOARDS TEXT fixed at source next morning (§6): per-strip emission calibration (npz
+  `emission`, x1.08 here) + time-dominant ad frame pick + walkway compensation — "BANK OF
+  AMERICA" readable in the final. NEW BEST FINALS
+  `out/kitzones_pod/sideline_t12_pinned4_boards.mp4` (t10 recipe + boards calibration) +
+  `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
+  sheets `out/kitzones_pod/final_vs_clip_t12.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -311,6 +314,36 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (morning)** — **LED BOARDS text legibility at source: per-strip emission
+  calibration + time-dominant ad frame choice (`b27eee3`, walkway compensation `0a36948`);
+  new best sideline final.** Investigation first KILLED the "polarity inverted" hypothesis by
+  zooming the RIGHT band: the clip's pitch-side LED boards (y .40-.47, grass-anchored — what
+  `extract_board_strip` cuts) show white BANK OF AMERICA with dark text through the WHOLE
+  window; the dark FIFA/GUADALAJARA panels live on the upper-tier fascia (y .345-.40) — a
+  different element (we model it as the dark walkway; its texture = future polish). The strip
+  cut was right all along — the killer was the fixed `emission_strength=4.0`: under the
+  Standard view transform the letter edges (V .26 ×4 = 1.04) clipped to PNG white together
+  with the background, eroding text to thin ghosts (beauty band frac(V>.9) .267). Fix at
+  source, auto+manual: (1) the exporter calibrates strength off the strip itself —
+  `strip_emission` = 1.05/p90(V), clamp [1, 4] → x1.08 for this white ad (bg still saturates,
+  letters keep V .28) — saved as npz `emission`; `PITCH3D_BOARD_EMISSION` still overrides;
+  (2) frame choice is time-dominant, not widest-span (`dominant_strip_index`: median panel V
+  across ≤9 evenly-sampled candidates — guards against LED ad rotation mid-window;
+  `PITCH3D_BOARD_FRAME` pins an exact clip frame); pure math unit-tested
+  (`tests/unit/test_board_strip.py`). t11 E2E exposed a coupling: the walkway band SHARES the
+  boards material, so x4→x1.08 crushed its tuned grey back to the dead-black stripe (final
+  band p50 .20→.01) — the exporter now scales the walkway tint by 4.0/emission (emitted level
+  held at the validated .40); t12 E2E clean. Numbers (band y .41-.475): beauty frac(V>.9)
+  .267→.185; final p10/50/90 t10 .18/.20/.75 → t12 .18/.21/.64 vs clip .18/.58/.97;
+  stands/grass unchanged vs t10 (med .29 / p90 .58; grass H 78). Eye: letters READABLE in the
+  final ("BANK OF AMERICA" + red logo mark), walkway grey, no regressions. Honest residuals:
+  our board background dims through grade3 (p90 .64 vs the clip's glowing .97 — broadcast
+  boards bloom above everything; would need a boards-band brightness pin or grade exclusion);
+  letter crispness capped by the v2v repaint; the upper fascia band (dark FIFA panels, gold
+  text) is not modelled. NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t12_pinned4_boards.mp4` (same name on the pod volume); sheet
+  `final_vs_clip_t12.png`.
 
 - **2026-07-05 (night run)** — **STANDS HOT LEFT EDGE flattened (`--flatten-val-x`, stage-10
   option): the bowl's left stands render ~1.9× brighter than mid while the clip's edge is its
