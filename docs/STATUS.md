@@ -92,10 +92,13 @@
   AMERICA" readable in the final. WALKWAY→FASCIA midday (§6): the flat grey band now wears
   the measured window above the boards (vertical atlas in `boards.npz`; fascia emission
   calibrated median→0.40, `PITCH3D_FASCIA_EMISSION` overrides) — the clip's
-  boards→walkway→crowd sandwich reads in the final. NEW BEST FINALS
-  `out/kitzones_pod/sideline_t14_pinned4_fascia.mp4` (t10 recipe + boards + fascia) +
+  boards→walkway→crowd sandwich reads in the final. PANEL ROW afternoon (§6): band gap
+  2.2→4.6 m — the same window now also catches the gold FIFA/GUADALAJARA panel row under
+  the crowd (hedge+walkway exact, gold fraction .18≈clip .21; panel row ~1.5× hot = next
+  polish). NEW BEST FINALS
+  `out/kitzones_pod/sideline_t15_pinned4_panels.mp4` (t10 recipe + boards + fascia + panels) +
   `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
-  sheets `out/kitzones_pod/final_vs_clip_t14.png` + `goal_vs_clip_t10.png`.
+  sheets `out/kitzones_pod/final_vs_clip_t15.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -317,6 +320,32 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (afternoon)** — **BAND GAP 2.2 → 4.6 m: THE MEASURED WINDOW NOW CATCHES THE
+  GOLD FIFA/GUADALAJARA PANEL ROW (`d8e6194`); new best sideline final (t15).** Closing the
+  t14 residual: the clip's lit gold-text panel row (FIFA WORLD CUP 2026 / GUADALAJARA /
+  #FIFAWorldCup, gold-on-dark-green) sat ABOVE our 2.2 m band. Probes at `gap_rel` 4.2/6.0
+  located it at ≈3.4–4.6 board heights above the board top (hedge below, bowl crowd directly
+  above; at 5.5–6 h the crowd's yellow shirts contaminate the gold gate — so 4.6 is the
+  ceiling). Fix = NO new geometry: the existing band grows to 4.6 m, and the same
+  physical-window fascia cut catches walkway+hedge+panels in one atlas (269×939, fascia rows
+  221, emission ×1.97 median→.40); `_cut_run_strip` headroom now scales with `gap_rel`.
+  t15 E2E per-zone vs clip (each in its own screen coords — h_band differs: ours ≈.023,
+  clip ≈.029): hedge+walkway Vmed .23 p90 .53 vs clip .21/.51 — exact; panel zone gold-pixel
+  fraction .18 vs clip .21 — the row is there; panel Vmed .42 vs clip .27 — ours ~1.5× hot
+  (the single per-window emission is walkway-anchored; the pipeline's tone stages amplify
+  intra-tile brights). Eye (f56 sandwich A/B): crowd → gold panel row (GUADALAJARA fragments
+  read) → green hedge → dark walkway → BANK OF AMERICA → grass — the clip's full stack in
+  order; t14 lacked the panel row entirely. Stands (H 42 S .54 V .17) and grass (H 81 S .71
+  V .46) unchanged vs t14; whole-frame diff at v2v-noise level. Honest residuals: panel-row
+  brightness ~1.5× (candidate: per-row emission profile inside the fascia window); window
+  repetition ×19 visible in the panel row (clip's run is continuous unique content); board
+  bg glow gap and v2v letter-crispness cap unchanged. Watcher fix baked in: poll
+  `BATCH_FINISH_OK` in the log / `pgrep -f "[p]od_"` — plain `pgrep -f` matched its own ssh
+  command line and both t13/t14 watchers spun forever. NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t15_pinned4_panels.mp4` (pod volume
+  `v2v/sideline_t15_pinned4_panels.mp4`); sheet `final_vs_clip_t15.png`; t14 preserved both
+  sides for the A/B.
 
 - **2026-07-05 (midday)** — **WALKWAY BAND WEARS THE MEASURED FASCIA WINDOW (vertical atlas,
   `b3b266f`; emitted-level calibration `1893d8d`); new best sideline final.** The t12
