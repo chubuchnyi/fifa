@@ -681,7 +681,7 @@ def _export_boards(
         return
     walkway = _env_rgb("PITCH3D_WALKWAY_RGB")  # manual override of the dark-grey default
     ring_kwargs = {} if walkway is None else {"gap_color": tuple(float(c) for c in walkway)}
-    gap = 2.2  # walkway band height (m); mirrors the adboard_ring_geometry default
+    gap = 4.6  # band height (m): walkway+hedge+panel row; mirrors adboard_ring_geometry
     bv, bf, bc = adboard_ring_geometry(
         scene.field.dimensions, offset=offset, height=height, gap=gap, **ring_kwargs
     )

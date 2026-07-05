@@ -137,23 +137,26 @@ def adboard_ring_geometry(
     *,
     offset: float = 5.0,
     height: float = 1.0,
-    gap: float = 2.2,
+    gap: float = 4.6,
     n_around: int = 240,
     corner_radius: float = 14.0,
     board_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
     gap_color: tuple[float, float, float] = (0.10, 0.10, 0.115),
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """The broadcast pitch-perimeter furniture: LED ad-board ring + dark walkway band behind it.
+    """The broadcast pitch-perimeter furniture: LED ad-board ring + the band behind it.
 
     Measured gap in the target clip (2026-07-03): grass runs straight into the crowd wall in our
     render, while a real night broadcast reads grass → bright white LED boards → dark walkway →
     crowd. Two vertical quad strips on a rounded-rectangle loop ``offset`` metres outside the
     lines: boards ``z ∈ [0, height]`` in ``board_color``, the walkway band
-    ``z ∈ [height, height+gap]`` in ``gap_color``. ``gap_color`` is dark-grey, not near-black
-    (0.02 rendered V .39 and the generative tail crushed that to a dead V 0.00 stripe; the clip's
-    walkway is V .16-.22 with visible texture — measured 2026-07-05). Vertices are NOT shared
-    across the two strips so per-vertex colours stay crisp at the boundary. Faces wind to face
-    the pitch, matching :func:`stadium_bowl_geometry`. Returns
+    ``z ∈ [height, height+gap]`` in ``gap_color``. The default ``gap`` covers the clip's FULL
+    sandwich above the boards — walkway, hedge, and the gold-text FIFA/GUADALAJARA panel row
+    ending ~4.6 board heights up, with the crowd right above (measured 2026-07-05); the band
+    normally wears that measured window (see the exporter), ``gap_color`` is the no-clip
+    fallback — dark-grey, not near-black (0.02 rendered V .39 and the generative tail crushed
+    that to a dead V 0.00 stripe; the clip's walkway is V .16-.22 with visible texture).
+    Vertices are NOT shared across the two strips so per-vertex colours stay crisp at the
+    boundary. Faces wind to face the pitch, matching :func:`stadium_bowl_geometry`. Returns
     ``(verts (M, 3), faces (F, 3), colors (M, 3))``.
     """
     dims = dimensions or FieldDimensions()

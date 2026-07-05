@@ -241,7 +241,7 @@ def extract_board_strip(
     *,
     strip_height: int = 48,
     frame_override: int | None = None,
-    gap_rel: float = 2.2,
+    gap_rel: float = 4.6,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """Cut the LED ad-board run from the clip to wrap around the ring: ``(strip_height, W, 3)``.
 
@@ -392,7 +392,9 @@ def _cut_run_strip(
 
     # Window: headroom above the prior line, then all the way down to the frame bottom — the
     # grass boundary is found inside it, wherever the aggregated camera's residual pushed it.
-    up = int(round(6.0 * h_prior))
+    # The fascia cut reaches gap_rel band heights above the fitted centre, so the headroom
+    # grows with it (the prior usually sits above the real band, but don't rely on that).
+    up = int(round(max(6.0, gap_rel + 1.5) * h_prior))
     down = int(np.ceil(float(dh - 1 - y_mid.min())))
     offs = np.arange(-up, max(down, up) + 1, dtype=np.float32)  # 1 px row spacing
     map_y = y_mid[None, :] + offs[:, None]
