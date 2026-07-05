@@ -477,6 +477,51 @@ def _cut_run_strip(
     return strip.astype(np.float32), fascia.astype(np.float32)
 
 
+def fascia_pool_keep(pool: Sequence[np.ndarray]) -> list[int]:
+    """Indices of fascia candidates whose lower-band colours agree with the pool.
+
+    A candidate window can catch a foreground object crossing the band (t19 batch: a red/white
+    flag in 4 of the 9 late frames quilted into eye-visible pink blocks around the ring — the
+    clip's band has no pink there). Luma consensus misses this: with 4/9 contaminated the
+    consensus drifts toward the contaminated look, and a minority of foreign pixels barely
+    moves a whole-window luma diff. Colour of the LOWER 2/3 rows is the honest tell —
+    panels/hedge/walkway are hue-stable across the pan, while the top rows are real crowd that
+    legitimately holds red sections. Feature: hue-sat histogram (12x4 bins, V>0.1 pixels) of
+    the lower rows, L1 distance to the per-bin pool median, drop >1.25x the median distance
+    (measured 2026-07-05: clean 0.07-0.13, contaminated 0.19-0.44 — 1.25x cuts at 0.167 in
+    the gap; quilt lower-band pink 0.048 unpruned -> 0.008 = the clean-candidate floor).
+    Always keeps at least half the pool (variety is the point), and any pool of <3 as-is.
+    """
+    if len(pool) < 3:
+        return list(range(len(pool)))
+    hists = []
+    for f in pool:
+        rgb = np.asarray(f, dtype=np.float32)
+        sub = rgb[rgb.shape[0] // 3 :].reshape(-1, 3)
+        mx = sub.max(axis=1)
+        c = mx - sub.min(axis=1)
+        safe_c = np.maximum(c, 1e-8)
+        r, g, b = sub[:, 0], sub[:, 1], sub[:, 2]
+        h = 60.0 * np.where(
+            mx == r,
+            ((g - b) / safe_c) % 6.0,
+            np.where(mx == g, (b - r) / safe_c + 2.0, (r - g) / safe_c + 4.0),
+        )
+        h = np.where(c < 1e-8, 0.0, h)
+        s = np.where(mx > 1e-8, c / np.maximum(mx, 1e-8), 0.0)
+        m = mx > 0.1
+        hist, _, _ = np.histogram2d(
+            h[m], s[m], bins=[12, 4], range=[[0.0, 360.0], [0.0, 1.0]]
+        )
+        hists.append(hist.ravel() / max(1.0, float(hist.sum())))
+    dist = np.abs(np.stack(hists) - np.median(hists, axis=0)).sum(axis=1)
+    cut = 1.25 * float(np.median(dist))
+    keep = [i for i in range(len(pool)) if dist[i] <= cut]
+    if len(keep) < max(2, len(pool) // 2):
+        keep = [int(i) for i in np.argsort(dist)[: max(2, len(pool) // 2)]]
+    return sorted(keep)
+
+
 def assemble_fascia_quilt(
     fascias: Sequence[np.ndarray], n_windows: int, *, seed: int = 0
 ) -> np.ndarray:
@@ -494,8 +539,10 @@ def assemble_fascia_quilt(
     interior seam. Every pixel stays measured; only the horizontal arrangement is synthetic.
 
     With a single candidate (pinned ``frame_override``) it degrades to phase-jittered crops of
-    that window — periodicity breaks even then. Deterministic per ``seed``. Returns float32
-    ``(rows, n_windows · width, 3)``.
+    that window — periodicity breaks even then. Candidates that disagree with the pool
+    consensus are dropped first (:func:`fascia_pool_keep` — a crossing flag/player in one
+    frame must not be quilted around the whole ring). Deterministic per ``seed``. Returns
+    float32 ``(rows, n_windows · width, 3)``.
     """
     pool = [np.asarray(f, dtype=np.float32) for f in fascias]
     rows = min(f.shape[0] for f in pool)
@@ -503,6 +550,7 @@ def assemble_fascia_quilt(
     pool = [f[:rows, :w] for f in pool]
     if n_windows <= 1 and len(pool) >= 1:
         return pool[0]
+    pool = [pool[i] for i in fascia_pool_keep(pool)]
     rng = np.random.default_rng(seed)
     out_w = n_windows * w
     pw = max(16, w // 3)
@@ -524,9 +572,9 @@ def scatter_fan_recolor(
     quilt: np.ndarray,
     *,
     frac: float = 0.04,
-    rgb: tuple[float, float, float] = (0.45, 0.10, 0.10),
+    rgb: tuple[float, float, float] = (0.50, 0.08, 0.08),
     seed: int = 0,
-    diam_range: tuple[int, int] = (12, 56),
+    diam_range: tuple[int, int] = (48, 120),
 ) -> np.ndarray:
     """Recolour scattered fan-sized spots of the crowd quilt to the clip's minority shirt colour.
 
@@ -535,10 +583,14 @@ def scatter_fan_recolor(
     measured crowd tile already carries 3.2% red, but the rendered stands show 0.0%: the specks
     are single-fan sized, and texture minification (bowl at long range) averages them into the
     amber surround before the tint multiply is even a factor. Wan then paints red back only
-    where prompted (~1%, t18). So the red must enter the quilt at *cluster* scale — spot
-    diameters here map to the clip's blob-cluster range scaled to the quilt's taller rake — and
+    where prompted (~1%, t18). So the red must enter the quilt at *cluster* scale and
     saturated (default ``rgb`` sims to rendered S≈.89 through the stands tint, surviving the
-    downscale average).
+    downscale average). Cluster scale is anchored to the NOVEL VIEW, not the clip's framing:
+    the sideline camera shows the visible stand band ~35 px tall (720p) over the quilt's upper
+    ~512 rows — vertical minification ≈0.07, so the t19 batch's 12–56 px spots rendered
+    0.4–2 px and averaged away (measured: beauty red 0.0% at every gate). Defaults draw
+    48–120 px → 3–8 px on screen: small knots of red-shirted fans, matching the clip's
+    cluster tail rather than its (sub-pixel here) single fans.
 
     Spots keep the quilt's own luma texture (per-pixel V is preserved; only chroma is replaced)
     and get a feathered edge, so they read as fans in red shirts under the same light, not

@@ -14,6 +14,7 @@ import numpy as np
 
 from pitch3d.adapters.render.stadium_backdrop import (
     assemble_fascia_quilt,
+    fascia_pool_keep,
     scatter_fan_recolor,
 )
 
@@ -75,6 +76,28 @@ def test_fascia_quilt_trims_pool_to_common_size():
     pool = [_striped_candidate(0, rows=20, w=60), _striped_candidate(1, rows=19, w=57)]
     q = assemble_fascia_quilt(pool, 2)
     assert q.shape == (19, 114, 3)
+
+
+def test_pool_keep_drops_the_contaminated_candidate():
+    # t19 batch: one candidate caught a red/white flag crossing the band and the quilt spread
+    # it into pink blocks around the ring. Consensus pruning must drop it and keep the rest.
+    pool = [_striped_candidate(s) for s in range(5)]
+    bad = pool[3].copy()
+    bad[5:15, 10:50] = np.float32([0.9, 0.3, 0.4])  # big foreign blob
+    pool[3] = bad
+    keep = fascia_pool_keep(pool)
+    assert 3 not in keep
+    assert len(keep) >= 3
+    q = assemble_fascia_quilt(pool, 4)
+    # nothing in the quilt reaches the blob's magenta signature
+    magenta = (q[..., 0] > 0.8) & (q[..., 1] < 0.45) & (q[..., 2] > 0.3)
+    assert not magenta.any()
+
+
+def test_pool_keep_passes_small_and_consistent_pools():
+    pool = [_striped_candidate(s) for s in range(4)]
+    assert fascia_pool_keep(pool) == [0, 1, 2, 3]  # consistent pool: nobody dropped
+    assert fascia_pool_keep(pool[:2]) == [0, 1]    # <3: no consensus to test against
 
 
 def test_scatter_red_fraction_luma_and_determinism():
