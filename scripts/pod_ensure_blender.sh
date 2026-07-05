@@ -6,7 +6,7 @@
 #      (bpy ships wheels for specific versions, e.g. 3.11; our pod venv is 3.12 → no wheel, so this
 #      path is usually skipped here, but kept for pods on a compatible Python).
 #   2) a standalone Blender binary downloaded once to the persistent /workspace volume (default the
-#      4.2 LTS build from the official release server; override with PITCH3D_BLENDER_TARBALL_URL).
+#      4.5 LTS build from the official release server; override with PITCH3D_BLENDER_TARBALL_URL).
 # Also ensures ffmpeg + the X/GL shared libs Blender links even under --background.
 #
 # Emits EXACTLY ONE line on stdout for the caller to consume (all chatter goes to stderr):
@@ -14,7 +14,9 @@
 #   BLENDER_MODE=binary:/path/blender  → run: /path/blender --background --python ... --
 set -euo pipefail
 PY="${PITCH3D_PY:-/workspace/.venv/bin/python}"
-TARBALL_URL="${PITCH3D_BLENDER_TARBALL_URL:-https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz}"
+# 4.5 LTS: 4.2 predates Blackwell (sm_120) — on an RTX PRO 4500 pod BOTH OptiX and CUDA kernel
+# loads hung indefinitely at "Loading render kernels" (2026-07-05); 4.5 ships sm_120 kernels.
+TARBALL_URL="${PITCH3D_BLENDER_TARBALL_URL:-https://download.blender.org/release/Blender4.5/blender-4.5.11-linux-x64.tar.xz}"
 BLENDER_DIR=/workspace/blender
 
 log(){ echo "[ensure] $*" >&2; }
