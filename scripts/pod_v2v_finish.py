@@ -33,6 +33,10 @@ import sys
 # "green" -> 72, "dull green" -> olive 69 — intensity words carry their own hue prior) and
 # saturation never drops below ~0.85 no matter the wording. Wording gets the tone CLOSE;
 # exact tone is the deterministic grass pin's job (scripts/grass_pin.py, batch stage 9).
+# Crowd composition (measured 2026-07-05 f12/f28/f56): clip stands = 33-51% yellow-shirted
+# pixels (more on the left) + 3-5% scattered red, ours rendered 25-33% yellow / 1% red with
+# "amber and brown" wording — so the yellow/red are STATED but kept muted/dark (the S blowout
+# trap above); the stands pin (stage 10) re-anchors the global tone after.
 DEFAULT_PROMPT = (
     "Professional television broadcast of a floodlit night football match. "
     "Dark stadium bowl at night, bright white floodlights, muted green "
@@ -40,7 +44,8 @@ DEFAULT_PROMPT = (
     "shirts with bright white shorts and deep red socks, the other team in an all "
     "sky-blue kit with sky-blue shirts, sky-blue shorts and sky-blue socks, "
     "dark-skinned players, distant dark stands densely packed with "
-    "thousands of tiny individual fans in muted dark amber and brown clothing, "
+    "thousands of tiny individual fans, most in muted dark yellow and amber "
+    "shirts, some in brown, a few scattered fans in dark red, "
     "crowd dimly lit and half in shadow behind advertising boards, long-lens "
     "broadcast camera, photorealistic, sharp, high detail."
 )
