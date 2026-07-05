@@ -555,7 +555,10 @@ if DEVICE == "gpu":
     try:
         prefs = bpy.context.preferences.addons["cycles"].preferences
         chosen = ""
-        for backend in ("OPTIX", "CUDA"):
+        # PITCH3D_GPU_BACKEND=CUDA skips OPTIX: on a Blackwell card (RTX PRO 4500, 2026-07-05)
+        # OptiX kernel JIT hung >14 min at "Loading render kernels"; CUDA compiles fine.
+        _forced = os.environ.get("PITCH3D_GPU_BACKEND", "").strip().upper()
+        for backend in ((_forced,) if _forced else ("OPTIX", "CUDA")):
             prefs.compute_device_type = backend
             prefs.get_devices()
             if any(getattr(dev, "type", "") == backend for dev in prefs.devices):
