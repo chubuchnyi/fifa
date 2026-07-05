@@ -81,7 +81,9 @@
   default + `PITCH3D_WALKWAY_RGB` override → t9 final band V .16-.23 ≈ clip .16-.22); pod
   infra hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
   `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs). NEW BEST
-  FINALS `out/kitzones_pod/sideline_t9_pinned4.mp4` + `goal_pinned3.mp4`.
+  FINALS `out/kitzones_pod/sideline_t9_pinned4.mp4` + `goal3_pinned3.mp4` (walkway fix on
+  BOTH views); fresh sheets `out/kitzones_pod/final_vs_clip_t9.png` +
+  `goal_vs_clip_t9night.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -331,7 +333,16 @@ fabricate or silently hide.
   clip (V med .73 vs .57) and slightly green-tinged, crowd blob colour vs the clip's yellow
   fan block, and distant-player fidelity (generative smear) — the first is a candidate
   `PITCH3D_BOARD_EMISSION` tune, the last is the SAM-3D-Body/LHM++ track, not a tonight
-  lever.
+  lever. **Fix PROPAGATED to the goal view (same night, goal3):** the old `goal_pinned3` hid
+  the same defect (thin dead band y≈.08, V .02 between crowd and boards); rerun with the
+  blessed goal recipe (`REUSE_SCENE=1 ANIM_CAMERAS=goal STANDS_PIN=0` — one variable: the
+  walkway fix) → beauty band V .71, final band V .18-.24 p10 .16-.21 (f0/f28/f55), crowd
+  .36-.38 above it, grass-pin delta shrank to +4.2°. Clip-band clarification (boards
+  residual, twice-measured on f1/f150/f300): the clip's LED band is HIGH-CONTRAST (med
+  .35-.60, p90 .95) vs our uniform glow (med .73, p10 .5+) — the gap is contrast/text
+  crispness more than brightness, so an emission cut risks the text-legibility win; parked
+  with the knob documented. New best goal FINAL `out/kitzones_pod/goal3_pinned3.mp4`; sheets
+  `final_vs_clip_t9.png` + `goal_vs_clip_t9night.png` (both in `out/kitzones_pod/`).
 
 - **2026-07-05 (night run)** — **BATCH STAGES 9-10 VALIDATED E2E ON CLEAN DEFAULTS (tail8):
   one command, zero env overrides → grass + stands pins auto-target correctly from
