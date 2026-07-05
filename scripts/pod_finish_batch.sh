@@ -18,6 +18,10 @@
 #  10) stands tone pin: warm band (15-80) in the top-third ROI back to the clip crowd's
 #      darker+yellower tone (H+8.5 S x1.22 V x0.70 measured 2026-07-05) — STANDS_PIN=0 skips;
 #      STANDS_ROI is tuned for the SIDELINE framing, override it for other cameras
+#  11) boards white pin: LED whites (desaturated gate, S<=0.35 V>=0.35 in the boards ROI)
+#      back to the clip's glow — t15 measured Vmed .64 vs clip .93-.96, letters (V<.35) stay
+#      dark, kits are saturated i.e. outside the gate — BOARDS_PIN=0 skips; BOARDS_ROI is
+#      tuned for the SIDELINE framing (boards y .43-.47)
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -159,6 +163,23 @@ if [ "${STANDS_PIN:-1}" = "1" ]; then
   if [ -n "${STANDS_XFLAT_BINS:-}" ]; then SPIN+=(--flatten-val-x "$STANDS_XFLAT_BINS"); fi
   "$PY" scripts/grass_pin.py "${SPIN[@]}"
   FINAL="$SFINAL"
+fi
+
+# 11) boards white pin (see header; LED whites back to the clip's glow, letters untouched)
+if [ "${BOARDS_PIN:-1}" = "1" ]; then
+  BFINAL="${V2V720%.mp4}_pinned5.mp4"
+  BPIN=(--video "$FINAL" --mask-dir "$MASKS" --out "$BFINAL" --dilate "${DILATE:-15}"
+        --roi ${BOARDS_ROI:-0.42 0.48 0.0 1.0} --hue-band 0 360 --sat-min 0
+        --sat-max "${BOARDS_SAT_MAX:-0.35}" --val-min 0.35 --pin-val)
+  if [ -n "${BOARDS_TARGET_VAL:-}" ]; then
+    BPIN+=(--target-hue "${BOARDS_TARGET_HUE:-0}" --target-sat "${BOARDS_TARGET_SAT:-0.07}"
+           --target-val "$BOARDS_TARGET_VAL")
+  else
+    BPIN+=(--target-from-image "${BOARDS_REF:-out/v2v/ref_night.png}"
+           --target-roi ${BOARDS_TARGET_ROI:-0.417 0.450 0.05 0.95})
+  fi
+  "$PY" scripts/grass_pin.py "${BPIN[@]}"
+  FINAL="$BFINAL"
 fi
 
 echo "BATCH_FINISH_OK"

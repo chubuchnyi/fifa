@@ -58,3 +58,22 @@ def test_field_is_identity_outside_roi_and_feathered_inside():
     assert core[:10].mean() < 0.8 < core[60:].mean() <= 1.31
     edge_in = f[21]  # feather row: closer to 1 than the core is
     assert abs(edge_in[:10].mean() - 1.0) < abs(core[:10].mean() - 1.0)
+
+
+def test_sat_max_gate_selects_board_whites_only():
+    # One row: glowing white LED (S~0, V hi), dark letter (V lo), yellow kit (S hi, V hi).
+    img = np.zeros((4, 3, 3), dtype=np.uint8)
+    img[:, 0] = (245, 245, 245)   # board white
+    img[:, 1] = (20, 20, 20)      # letter
+    img[:, 2] = (0, 220, 235)     # saturated yellow kit (BGR)
+    _, gate = gp._gate(img, None, (0.0, 360.0), 0.0, 0.35, sat_max=0.35)
+    assert gate[:, 0].all()        # whites pinned
+    assert not gate[:, 1].any()    # letters stay dark
+    assert not gate[:, 2].any()    # kits outside the desaturated gate
+
+
+def test_sat_max_default_keeps_legacy_gate():
+    img = np.zeros((2, 2, 3), dtype=np.uint8)
+    img[:] = (40, 200, 90)  # saturated green
+    _, legacy = gp._gate(img, None, (55.0, 140.0), 0.25, 0.10)
+    assert legacy.all()

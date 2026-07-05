@@ -42,13 +42,14 @@ def _gate(
     sat_min: float,
     val_min: float,
     roi: tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0),
+    sat_max: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV_FULL).astype(np.float32)
     hue = hsv[..., 0] * (360.0 / 255.0)
     sat = hsv[..., 1] / 255.0
     val = hsv[..., 2] / 255.0
     lo, hi = hue_band
-    gate = (hue >= lo) & (hue <= hi) & (sat >= sat_min) & (val >= val_min)
+    gate = (hue >= lo) & (hue <= hi) & (sat >= sat_min) & (sat <= sat_max) & (val >= val_min)
     y0, y1, x0, x1 = roi
     if (y0, y1, x0, x1) != (0.0, 1.0, 0.0, 1.0):
         h, w = img_bgr.shape[:2]
@@ -74,11 +75,13 @@ def _kit_mask(mask_path: str, shape: tuple[int, int], dilate: int) -> np.ndarray
     return any_kit.astype(bool)
 
 
-def measure_image(path: str, hue_band, sat_min, val_min, roi) -> tuple[float, float, float]:
+def measure_image(
+    path: str, hue_band, sat_min, val_min, roi, sat_max: float = 1.0
+) -> tuple[float, float, float]:
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     if img is None:
         raise SystemExit(f"cannot read --target-from-image {path}")
-    hsv, gate = _gate(img, None, hue_band, sat_min, val_min, roi)
+    hsv, gate = _gate(img, None, hue_band, sat_min, val_min, roi, sat_max)
     if gate.sum() < 500:
         raise SystemExit(f"target-from-image: only {int(gate.sum())} gated pixels in {path}")
     return (
@@ -127,6 +130,11 @@ def main() -> int:
     p.add_argument("--target-val", type=float, help="manual target override, 0-1 (with --pin-val)")
     p.add_argument("--hue-band", type=float, nargs=2, default=(55.0, 140.0))
     p.add_argument("--sat-min", type=float, default=0.25)
+    p.add_argument(
+        "--sat-max", type=float, default=1.0,
+        help="upper saturation gate: pin DESATURATED regions (LED board whites) with "
+        "--hue-band 0 360 --sat-min 0 --sat-max ~0.35",
+    )
     p.add_argument("--val-min", type=float, default=0.10)
     p.add_argument("--dilate", type=int, default=15)
     p.add_argument(
@@ -153,7 +161,9 @@ def main() -> int:
     t_hue, t_sat, t_val = args.target_hue, args.target_sat, args.target_val
     if args.target_from_image and (t_hue is None or t_sat is None or (args.pin_val and t_val is None)):
         troi = tuple(args.target_roi) if args.target_roi else roi
-        mh, ms, mv = measure_image(args.target_from_image, band, args.sat_min, args.val_min, troi)
+        mh, ms, mv = measure_image(
+            args.target_from_image, band, args.sat_min, args.val_min, troi, args.sat_max
+        )
         t_hue = mh if t_hue is None else t_hue
         t_sat = ms if t_sat is None else t_sat
         t_val = mv if t_val is None else t_val
@@ -194,7 +204,7 @@ def main() -> int:
     for frame, km in frames():
         n_frames += 1
         h, w = frame.shape[:2]
-        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi)
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi, args.sat_max)
         if gate.any():
             hs.append(hsv[..., 0][gate] * (360.0 / 255.0))
             ss.append(hsv[..., 1][gate] / 255.0)
@@ -228,7 +238,7 @@ def main() -> int:
 
     writer = cv2.VideoWriter(args.out, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
     for frame, km in frames():
-        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi)
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi, args.sat_max)
         hue = hsv[..., 0] * (360.0 / 255.0)
         hue[gate] = np.mod(hue[gate] + delta_h, 360.0)
         hsv[..., 0] = hue * (255.0 / 360.0)

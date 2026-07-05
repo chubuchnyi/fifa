@@ -95,10 +95,12 @@
   boards→walkway→crowd sandwich reads in the final. PANEL ROW afternoon (§6): band gap
   2.2→4.6 m — the same window now also catches the gold FIFA/GUADALAJARA panel row under
   the crowd (hedge+walkway exact, gold fraction .18≈clip .21; panel row ~1.5× hot = next
-  polish). NEW BEST FINALS
-  `out/kitzones_pod/sideline_t15_pinned4_panels.mp4` (t10 recipe + boards + fascia + panels) +
-  `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
-  sheets `out/kitzones_pod/final_vs_clip_t15.png` + `goal_vs_clip_t10.png`.
+  polish). BOARDS GLOW late afternoon (§6): stage-11 white pin (`--sat-max` desaturated
+  gate) lands board whites on the clip's glow (Vmed .93-.95 vs clip .93-.96) — letters
+  darker-crisper, $0 local iteration. NEW BEST FINALS
+  `out/kitzones_pod/sideline_t16_pinned5_boardglow.mp4` (t10 recipe + boards + fascia +
+  panels + board glow) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
+  sheets `out/kitzones_pod/final_vs_clip_t16.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -320,6 +322,27 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (late afternoon)** — **LED BOARDS GLOW: boards white pin (stage 11,
+  `grass_pin.py --sat-max`); new best sideline final (t16) — $0, no pod run.** The
+  longest-documented residual: clip LED board whites GLOW (Vmed .93-.96, p90 .98) while
+  ours came out matte (t15 Vmed .63-.64, p90 .72) — the night grade + v2v eat the emitted
+  level and no pin owned the whites (all pins gate on `sat >= min`, whites need `sat <=
+  max`). Fix, auto+manual: `--sat-max` upper saturation gate in `grass_pin.py` (default 1.0
+  = legacy no-op) + batch stage 11 — desaturated gate (S≤.35, V≥.35) in the boards ROI
+  (y .42-.48 sideline), target auto-measured from the clip reference with the same gate
+  (`BOARDS_TARGET_VAL/_SAT/_HUE` manual override, `BOARDS_PIN=0` skips). Letters (V<.35)
+  stay dark — contrast INCREASES like real LED; kits are saturated i.e. outside the gate;
+  ball sits below the ROI. Applied locally to the pod-produced t15 final (the pin is the
+  chain's last stage, so local application = the true tail): V .64 → ×1.49, S .13 → ×0.56
+  (purer white), result Vmed .93-.95 p90 1.00 vs clip .93-.96/.98 — dead-on. Collateral
+  surgical: frame diff concentrates in y .44-.48 (boards rows, 19-42); walkway above
+  (.24→.23) and grass below (.49→.48) at re-encode-noise level; kits/letters intact in the
+  zoom. 6 unit tests green (sat-max selects board whites only / legacy default unchanged);
+  `bash -n` on the batch. The next full batch exercises stage 11 in-batch (wiring is the
+  same one-command pattern as stages 9-10). NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t16_pinned5_boardglow.mp4` (t15 + boards pin; on-pod pinned5
+  reproduces it next batch); sheet `final_vs_clip_t16.png`.
 
 - **2026-07-05 (afternoon)** — **BAND GAP 2.2 → 4.6 m: THE MEASURED WINDOW NOW CATCHES THE
   GOLD FIFA/GUADALAJARA PANEL ROW (`d8e6194`); new best sideline final (t15).** Closing the
