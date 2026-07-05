@@ -702,6 +702,10 @@ def _export_boards(
                 frame_override=int(frame_env) if frame_env else None,
             )
             emission = strip_emission(strip)
+            # The walkway band shares the boards material (same tile x strength); its grey was
+            # tuned under the old fixed x4, so hold its emitted level constant — else the
+            # calibrated strength crushes it back to the dead-black stripe (regression t11).
+            payload["colors"][bc.shape[0] // 2 :] *= np.float32(4.0 / emission)
             bottoms = band.reshape(-1, 2, 3)[:, 0, :]
             hops = np.diff(np.vstack([bottoms, bottoms[:1]]), axis=0)
             perim = float(np.linalg.norm(hops, axis=1).sum())
