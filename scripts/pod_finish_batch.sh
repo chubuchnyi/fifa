@@ -156,6 +156,7 @@ if [ "${STANDS_PIN:-1}" = "1" ]; then
     SPIN+=(--target-from-image "${STANDS_REF:-out/v2v/ref_night.png}"
            --target-roi ${STANDS_TARGET_ROI:-0.05 0.26 0.05 0.95})
   fi
+  if [ -n "${STANDS_XFLAT_BINS:-}" ]; then SPIN+=(--flatten-val-x "$STANDS_XFLAT_BINS"); fi
   "$PY" scripts/grass_pin.py "${SPIN[@]}"
   FINAL="$SFINAL"
 fi

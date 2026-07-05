@@ -14,6 +14,13 @@ saturation scale over the grass band, targets auto-measured from a clip frame (m
 pin A parks the yellow kit at H≈70, inside the grass band — without the mask gate the grass
 pin would drag the shirts green.
 
+--flatten-val-x BINS (stands): kills hot-edge lighting — our floodlit bowl renders the LEFT
+stands ~1.9x brighter than mid (t9/t10 measured .51 vs .27; the clip's own edge is the DIM
+end, .22-.26). The clip's x-profile wanders with the pan (.22-.35), so the framing-independent
+target is FLAT: per-column-bin gated V medians -> gain = band-median / bin-median (clamped,
+smoothed), applied to ALL pixels in the ROI band (the blowout is partly desaturated, i.e.
+outside the gate) except kit masks, feathered vertically so no seam.
+
 usage (pod, after the kit pins):
   python scripts/grass_pin.py --video pinned2.mp4 --mask-dir MASKS \
       --target-from-image out/v2v/ref_night.png --out pinned3.mp4
@@ -81,6 +88,34 @@ def measure_image(path: str, hue_band, sat_min, val_min, roi) -> tuple[float, fl
     )
 
 
+def xflat_gains(bin_medians: np.ndarray, lo: float = 0.55, hi: float = 1.3) -> np.ndarray:
+    """Per-bin V gains that flatten the band's x-profile to its own global median."""
+    med = float(np.median(bin_medians))
+    g = np.clip(med / np.maximum(bin_medians, 1e-6), lo, hi)
+    return np.convolve(np.pad(g, 1, mode="edge"), np.ones(3) / 3.0, "valid")
+
+
+def xflat_field(
+    shape: tuple[int, int], roi: tuple[float, float, float, float], gains: np.ndarray
+) -> np.ndarray:
+    """Full-frame multiplicative V field: gains interpolated across the ROI x-span, feathered
+    vertically inside the ROI band (no horizontal seam), 1.0 everywhere else."""
+    h, w = shape
+    y0, y1, x0, x1 = roi
+    ya, yb, xa, xb = int(y0 * h), int(y1 * h), int(x0 * w), int(x1 * w)
+    nb = len(gains)
+    centers = xa + (np.arange(nb) + 0.5) * (xb - xa) / nb
+    gx = np.interp(np.arange(w), centers, gains).astype(np.float32)
+    gx[:xa] = 1.0
+    gx[xb:] = 1.0
+    vmask = np.zeros(h, dtype=np.float32)
+    vmask[ya:yb] = 1.0
+    f = max(4, int(0.15 * (yb - ya)))
+    vmask[ya : ya + f] = np.linspace(0.0, 1.0, f)
+    vmask[yb - f : yb] = np.linspace(1.0, 0.0, f)
+    return 1.0 + vmask[:, None] * (gx[None, :] - 1.0)
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--video", required=True)
@@ -105,6 +140,11 @@ def main() -> int:
     p.add_argument(
         "--pin-val", action="store_true",
         help="also scale V to the target (stands: the clip crowd is darker than the finisher's)",
+    )
+    p.add_argument(
+        "--flatten-val-x", type=int, default=0, metavar="BINS",
+        help="flatten the band's V x-profile to its own median over BINS columns "
+        "(hot-edge fix; all ROI pixels except kit masks, vertical feather)",
     )
     args = p.parse_args()
 
@@ -147,6 +187,8 @@ def main() -> int:
     cap.release()
 
     hs, ss, vs = [], [], []
+    nb = args.flatten_val_x
+    xbin_vals: list[list[np.ndarray]] = [[] for _ in range(nb)]
     n_frames = 0
     w = h = 0
     for frame, km in frames():
@@ -157,6 +199,12 @@ def main() -> int:
             hs.append(hsv[..., 0][gate] * (360.0 / 255.0))
             ss.append(hsv[..., 1][gate] / 255.0)
             vs.append(hsv[..., 2][gate] / 255.0)
+            if nb:
+                xs = np.nonzero(gate)[1]
+                xa, xb = int(roi[2] * w), int(roi[3] * w)
+                bins = np.clip((xs - xa) * nb // max(xb - xa, 1), 0, nb - 1)
+                for k in np.unique(bins):
+                    xbin_vals[k].append(vs[-1][bins == k])
     if not hs:
         raise SystemExit("no gated pixels in any frame")
     before_h = float(np.median(np.concatenate(hs)))
@@ -165,6 +213,18 @@ def main() -> int:
     delta_h = t_hue - before_h
     scale_s = t_sat / max(before_s, 1e-6)
     scale_v = (t_val / max(before_v, 1e-6)) if args.pin_val else 1.0
+
+    gain_field = None
+    if nb:
+        meds = np.array([
+            float(np.median(np.concatenate(v))) if v else before_v for v in xbin_vals
+        ])
+        gains = xflat_gains(meds)
+        gain_field = xflat_field((h, w), roi, gains)
+        print(
+            f"XFLAT bins={nb} gains {gains.min():.2f}..{gains.max():.2f} "
+            f"profile {' '.join(f'{m:.2f}' for m in meds)}"
+        )
 
     writer = cv2.VideoWriter(args.out, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
     for frame, km in frames():
@@ -175,6 +235,9 @@ def main() -> int:
         hsv[..., 1][gate] = np.clip(hsv[..., 1][gate] * scale_s, 0.0, 255.0)
         if scale_v != 1.0:
             hsv[..., 2][gate] = np.clip(hsv[..., 2][gate] * scale_v, 0.0, 255.0)
+        if gain_field is not None:
+            gf = gain_field if km is None else np.where(km, 1.0, gain_field)
+            hsv[..., 2] = np.clip(hsv[..., 2] * gf, 0.0, 255.0)
         writer.write(cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR_FULL))
     writer.release()
     print(

@@ -74,7 +74,7 @@
   69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
   promoted «muted green». STANDS TONE pinned same night (§6): pin generalized to region tone
   pin (`--roi`/`--pin-val`, stage 10) — clip crowd is darker+yellower (V×0.70 the main knob);
-  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×3):
+  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×4):
   stages 9-10 validated E2E on CLEAN DEFAULTS (tail8 — auto-targets from `ref_night.png` match
   hand-measured clip tones, ref-orientation caveat closed); WALKWAY BAND fixed at source (the
   final's dead-black stripe was our own `gap_color` 0.02 crushed by the tail; dark-grey 0.10
@@ -82,10 +82,13 @@
   BIMODALITY closed (quilt `contrast` knob — the Hann blend ate the bright-fan tail —
   `PITCH3D_CROWD_CONTRAST=1.35`, plus stands-pin override `STANDS_TARGET_VAL=0.31` for this
   clip's center-bright stands: final fan band p90 .51 / tail .159 vs clip .50-.52 /
-  .165-.171); pod infra hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang
-  on sm_120; `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
-  NEW BEST FINALS `out/kitzones_pod/sideline_t10_pinned4_tv031.mp4` (crowd-contrast +
-  stands-V override) + `goal3_pinned3.mp4`; fresh sheets
+  .165-.171); STANDS HOT LEFT EDGE flattened (bowl renders its left stands 1.9× mid, clip's
+  edge is DIM — new `grass_pin.py --flatten-val-x` / `STANDS_XFLAT_BINS=16`, full-width ROI;
+  profile now inside the clip's own pan-swing, fan-band frac .173 dead-on clip); pod infra
+  hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
+  `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
+  NEW BEST FINALS `out/kitzones_pod/sideline_t10_pinned5_xflat.mp4` (crowd-contrast +
+  stands-V override + xflat) + `goal3_pinned3.mp4`; fresh sheets
   `out/kitzones_pod/final_vs_clip_t10.png` + `goal_vs_clip_t9night.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
@@ -308,6 +311,32 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **STANDS HOT LEFT EDGE flattened (`--flatten-val-x`, stage-10
+  option): the bowl's left stands render ~1.9× brighter than mid while the clip's edge is its
+  DIM end; new best sideline final.** Found by x-profile measurement right after the tv-sweep
+  (8-bin gated V medians, f28): ours .51 .40 .30 .27 .27 .27 .30 .31 — IDENTICAL shape in
+  t9/t10/tv031, i.e. upstream of the pins (the floodlit-bowl light rig favours the left
+  corner); clip f30 .26 .33 .33 .32 .31 .29 .24 .24 vs f150 .22 .25 .29 .29 .35 .32 .34 .32 —
+  the clip's profile WANDERS with the pan (swing up to 1.6×), so the framing-independent
+  target is FLAT, not "match the clip's hump". Zoom on the hot corner: the blowout is partly
+  DESATURATED (S<.15 → outside the tone-pin gate — a gated global V pin can never reach it).
+  New `grass_pin.py --flatten-val-x BINS` (default off): per-x-bin gated V medians over all
+  frames → gain = band-median / bin-median (clamp [.55, 1.3], 3-tap smooth), applied to ALL
+  pixels in the ROI band except kit masks, vertically feathered (no seam); pure math
+  unit-tested (`tests/unit/test_tone_pin_xflat.py`: flat = no-op, hot-edge inversion about a
+  stable median, clamp, field identity outside the ROI). Batch hook: `STANDS_XFLAT_BINS=16`
+  (unset = off). Applied to tv031 with FULL-WIDTH ROI (`--roi 0.08 0.32 0.0 1.0` — the
+  default x .02 margin left an untouched hot sliver at the frame edge): left bin .51→.35
+  (ratio 1.25 = inside the clip's own swing), center untouched or better — frac(V>.45) .173 vs
+  clip .165-.171 (dead-on), p90 .53; full-frame eye A/B: the left corner no longer pulls the
+  eye, the bowl reads evenly floodlit, no regressions (players/boards/grass outside the
+  band). Honest residuals: blown-patch TEXTURE remains (chroma died in the generative tail —
+  at-source follow-up: reduce the stands' response to the key light or the rig's left bias in
+  the render); a clip-profile-matched prototype dimmed further (.29) but chases a
+  framing-dependent target — flat chosen. NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t10_pinned5_xflat.mp4` (reproducible via the committed script:
+  tv031 input + `--flatten-val-x 16`); sheet `final_vs_clip_t10.png` rebuilt.
 
 - **2026-07-05 (night run)** — **CROWD BIMODALITY closed (both halves measured): quilt
   `contrast` knob restores the bright-fan tail the Hann blend eats, and the stands-pin V
