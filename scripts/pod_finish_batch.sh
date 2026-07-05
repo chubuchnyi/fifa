@@ -22,6 +22,10 @@
 #      back to the clip's glow — t15 measured Vmed .64 vs clip .93-.96, letters (V<.35) stay
 #      dark, kits are saturated i.e. outside the gate — BOARDS_PIN=0 skips; BOARDS_ROI is
 #      tuned for the SIDELINE framing (boards y .43-.47)
+#  12) panel-row V pin: the fascia panel band (crowd->panels->hedge sandwich) rendered ~1.5x
+#      hot (t16 Vmed .42 vs clip .27-.31) — V-ONLY pin (--val-only: the zone mixes gold
+#      panels + green hedge + crowd bottom, matching its MEDIAN hue would repaint the
+#      minority materials) — PANELS_PIN=0 skips; PANELS_ROI tuned for the SIDELINE framing
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -180,6 +184,22 @@ if [ "${BOARDS_PIN:-1}" = "1" ]; then
   fi
   "$PY" scripts/grass_pin.py "${BPIN[@]}"
   FINAL="$BFINAL"
+fi
+
+# 12) panel-row V pin (see header; mixed-material zone -> V only)
+if [ "${PANELS_PIN:-1}" = "1" ]; then
+  PFINAL="${V2V720%.mp4}_pinned6.mp4"
+  PPIN=(--video "$FINAL" --mask-dir "$MASKS" --out "$PFINAL" --dilate "${DILATE:-15}"
+        --roi ${PANELS_ROI:-0.335 0.385 0.0 1.0} --hue-band 0 360 --sat-min 0
+        --val-min 0.05 --val-only)
+  if [ -n "${PANELS_TARGET_VAL:-}" ]; then
+    PPIN+=(--target-val "$PANELS_TARGET_VAL")
+  else
+    PPIN+=(--target-from-image "${PANELS_REF:-out/v2v/ref_night.png}"
+           --target-roi ${PANELS_TARGET_ROI:-0.286 0.320 0.05 0.95})
+  fi
+  "$PY" scripts/grass_pin.py "${PPIN[@]}"
+  FINAL="$PFINAL"
 fi
 
 echo "BATCH_FINISH_OK"

@@ -97,10 +97,12 @@
   the crowd (hedge+walkway exact, gold fraction .18≈clip .21; panel row ~1.5× hot = next
   polish). BOARDS GLOW late afternoon (§6): stage-11 white pin (`--sat-max` desaturated
   gate) lands board whites on the clip's glow (Vmed .93-.95 vs clip .93-.96) — letters
-  darker-crisper, $0 local iteration. NEW BEST FINALS
-  `out/kitzones_pod/sideline_t16_pinned5_boardglow.mp4` (t10 recipe + boards + fascia +
-  panels + board glow) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
-  sheets `out/kitzones_pod/final_vs_clip_t16.png` + `goal_vs_clip_t10.png`.
+  darker-crisper, $0 local iteration. PANEL TONE evening (§6): stage-12 V-only pin
+  (`--val-only`) cools the hot panel band to the clip's level (Vmed .27 vs .30) — second
+  $0 lever. NEW BEST FINALS
+  `out/kitzones_pod/sideline_t17_pinned6_paneltone.mp4` (t10 recipe + boards + fascia +
+  panels + board glow + panel tone) + `goal3_pinned4_xflat.mp4` (goal stands
+  pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t17.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -322,6 +324,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (evening)** — **PANEL ROW TONE: V-only pin (stage 12, `grass_pin.py
+  --val-only`); new best sideline final (t17) — second $0 lever in a row.** The t15/t16
+  residual: the gold panel band rendered ~1.5× hot (Vmed .42-.44 vs clip .27-.31). Root:
+  one scalar fascia emission is walkway-anchored and the tone stages amplify intra-tile
+  brights. Deterministic post fix instead of at-source pipeline-curve guessing: pin the
+  panel zone's V to the clip's (auto from the reference with `PANELS_TARGET_ROI`, manual
+  `PANELS_TARGET_VAL`; `PANELS_PIN=0` skips). NEW `--val-only` mode because the zone mixes
+  materials (our zone median hue is GREEN 76-86 — hedge+bg — while the clip's is warm 47-48;
+  matching the median hue would repaint the minority materials, so hue/sat stay untouched).
+  Applied locally to t16: V .41 → ×0.67 → panel Vmed .27 vs clip .30, p90 .43 vs .51 (base
+  right, accents slightly soft — same signature as the walkway calibration); crowd-bottom
+  above (.46) and hedge below (.21) untouched, no ROI seam. Eye (f28 sandwich): the panel
+  band now reads as the clip's understated lit strip between crowd and hedge instead of
+  popping. Honest residuals: panel accents p90 soft; ×19 window repetition; v2v letter
+  crispness. NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t17_pinned6_paneltone.mp4` (t16 + panel pin; on-pod pinned6
+  next batch); sheet `final_vs_clip_t17.png`.
 
 - **2026-07-05 (late afternoon)** — **LED BOARDS GLOW: boards white pin (stage 11,
   `grass_pin.py --sat-max`); new best sideline final (t16) — $0, no pod run.** The

@@ -150,6 +150,11 @@ def main() -> int:
         help="also scale V to the target (stands: the clip crowd is darker than the finisher's)",
     )
     p.add_argument(
+        "--val-only", action="store_true",
+        help="pin V and leave hue/sat alone (mixed-material zones like the fascia panel row, "
+        "where matching the zone's MEDIAN hue would repaint the minority materials)",
+    )
+    p.add_argument(
         "--flatten-val-x", type=int, default=0, metavar="BINS",
         help="flatten the band's V x-profile to its own median over BINS columns "
         "(hot-edge fix; all ROI pixels except kit masks, vertical feather)",
@@ -171,7 +176,12 @@ def main() -> int:
             f"TONE_PIN_TARGET H={t_hue:.1f} S={t_sat:.2f} V={t_val:.2f} "
             f"from {args.target_from_image}"
         )
-    if t_hue is None or t_sat is None or (args.pin_val and t_val is None):
+    if args.val_only:
+        args.pin_val = True
+        t_hue, t_sat = None, None
+        if t_val is None:
+            raise SystemExit("--val-only needs --target-val or --target-from-image")
+    elif t_hue is None or t_sat is None or (args.pin_val and t_val is None):
         raise SystemExit("need --target-from-image or explicit --target-hue/--target-sat(/--target-val)")
 
     def frames():
@@ -220,8 +230,8 @@ def main() -> int:
     before_h = float(np.median(np.concatenate(hs)))
     before_s = float(np.median(np.concatenate(ss)))
     before_v = float(np.median(np.concatenate(vs)))
-    delta_h = t_hue - before_h
-    scale_s = t_sat / max(before_s, 1e-6)
+    delta_h = (t_hue - before_h) if t_hue is not None else 0.0
+    scale_s = (t_sat / max(before_s, 1e-6)) if t_sat is not None else 1.0
     scale_v = (t_val / max(before_v, 1e-6)) if args.pin_val else 1.0
 
     gain_field = None
@@ -251,8 +261,8 @@ def main() -> int:
         writer.write(cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR_FULL))
     writer.release()
     print(
-        f"TONE_PIN_OK frames={n_frames} H {before_h:.1f} -> {t_hue:.1f} (delta {delta_h:+.1f}) "
-        f"S {before_s:.2f} -> {t_sat:.2f} (x{scale_s:.2f}) "
+        f"TONE_PIN_OK frames={n_frames} H {before_h:.1f} (delta {delta_h:+.1f}) "
+        f"S {before_s:.2f} (x{scale_s:.2f}) "
         f"V {before_v:.2f} -> x{scale_v:.2f} masks={'yes' if args.mask_dir else 'NO'} -> {args.out}"
     )
     return 0
