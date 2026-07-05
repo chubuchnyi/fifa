@@ -26,6 +26,9 @@
 #      hot (t16 Vmed .42 vs clip .27-.31) — V-ONLY pin (--val-only: the zone mixes gold
 #      panels + green hedge + crowd bottom, matching its MEDIAN hue would repaint the
 #      minority materials) — PANELS_PIN=0 skips; PANELS_ROI tuned for the SIDELINE framing
+#  13) stands red-scatter pin: scattered dark-red fans at SCREEN scale (quilt-space red dies
+#      in the render, Wan re-adds only ~0.8% vs clip 3.6% — t19 measured twice) —
+#      STANDS_RED=0 skips; STANDS_RED_ROI matches the stands pin's SIDELINE framing
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -200,6 +203,21 @@ if [ "${PANELS_PIN:-1}" = "1" ]; then
   fi
   "$PY" scripts/grass_pin.py "${PPIN[@]}"
   FINAL="$PFINAL"
+fi
+
+# 13) stands red-scatter pin: the clip's 3.6% scattered dark-red fans re-enter at SCREEN
+#     scale — texture-space red dies upstream (render minification+denoise -> beauty 0.001,
+#     Wan re-adds only ~0.8%; measured twice, t19). Runs last: the tone pins (10-12) would
+#     re-amber the specks. STANDS_RED=0 skips.
+if [ "${STANDS_RED:-1}" = "1" ]; then
+  RFINAL="${V2V720%.mp4}_pinned7.mp4"
+  RPIN=(--video "$FINAL" --out "$RFINAL"
+        --roi ${STANDS_RED_ROI:-0.08 0.32 0.0 1.0}
+        --target "${STANDS_RED_TARGET:-0.036}"
+        --seed "${STANDS_RED_SEED:-0}")
+  [ -n "${STANDS_RED_FRAC:-}" ] && RPIN+=(--frac "$STANDS_RED_FRAC")
+  "$PY" scripts/stands_red_pin.py "${RPIN[@]}"
+  FINAL="$RFINAL"
 fi
 
 echo "BATCH_FINISH_OK"

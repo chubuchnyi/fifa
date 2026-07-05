@@ -101,10 +101,18 @@
   (`--val-only`) cools the hot panel band to the clip's level (Vmed .27 vs .30) — second
   $0 lever. CROWD COMPOSITION late evening (§6): measured yellow/red fan fractions stated
   in the v2v prompt — yellow half-way to the clip (.39 vs .51 left sector), left>right
-  gradient appears; stages 11-12 verified in-batch. NEW BEST FINALS
-  `out/kitzones_pod/sideline_t18_pinned6_crowdmix.mp4` (t10 recipe + boards + fascia +
-  panels + board glow + panel tone + crowd mix) + `goal3_pinned4_xflat.mp4` (goal stands
-  pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t18.png` + `goal_vs_clip_t10.png`.
+  gradient appears; stages 11-12 verified in-batch. STANDS LEVERS t19 night (§6): the ×19
+  fascia repetition broken — 4-window measured quilt (`PITCH3D_FASCIA_WINDOWS=4`) + hue-sat
+  pool pruning (a crossing flag in 4/9 candidates quilted pink around the ring in round 1;
+  lower-band pink now at the clean-candidate floor 0.006); the clip's 3.6% scattered
+  dark-red fans land via NEW stage-13 screen-space `stands_red_pin.py` (texture-space red
+  measured dead TWICE — render minify+denoise → beauty 0.001, Wan re-adds ~0.8% only; pin
+  auto-targets `STANDS_RED_TARGET=0.036`, landed 0.030, `luma_cap` keeps specks dark-red).
+  NEW BEST FINALS
+  `out/kitzones_pod/sideline_t19b_pinned7.mp4` (t18 + fascia quilt + red pin; pod volume
+  `v2v/sideline_t19b_pinned6.mp4`, pinned7 in-batch next run) + `goal3_pinned4_xflat.mp4`
+  (goal stands pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t18.png` +
+  `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -326,6 +334,46 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night)** — **STANDS LEVERS t19: multi-window fascia quilt + scattered red —
+  two rounds + a screen-space pin; new best sideline final.** Lever A (the ×19 fascia window
+  repetition, t18 residual): the aggregated camera is CONSTANT, so the broadcast pan slides
+  clip content UNDER the fixed rectified window — the strip cut's up-to-9 candidate frames
+  each hold a different stretch (measured: ±70 px @512 aligned shifts, luma diff to 0.16).
+  `assemble_fascia_quilt` stitches full-height Hann-feathered crops of those candidates into
+  a 4-window canvas (`--fascia-windows` / `PITCH3D_FASCIA_WINDOWS=4`; strip repeat ×19→×5;
+  x-blend only — the band is vertically layered; never flipped — panel text). Round-1 batch
+  (~$0.45, `17cf6ae`): variety lands at beauty (band autocorr at the window period
+  +0.216/+0.189 → +0.139/+0.127) and by eye, BUT a red/white flag crossing the band in 4 of
+  9 candidates quilted into pink blocks around the ring — luma-consensus pruning dropped
+  only the worst (with 4/9 contaminated the consensus drifts toward them; minority-pixel
+  contamination barely moves a whole-window luma diff). Round 2 (`88c4985`):
+  `fascia_pool_keep` prunes on the LOWER-2/3-rows hue-sat histogram (12×4 bins, V>0.1, L1 to
+  the per-bin pool median, cut 1.25×median — panels/hedge/walkway are hue-stable across the
+  pan while crowd-top red is legit): drops all 4 (keeps f0–f24), quilt lower-band pink
+  0.048→0.006 = the clean-candidate floor; batch atlas eye-clean, variety kept. Lever B
+  (clip stands = 3.6% scattered dark-red fans, strict-red): texture-space red is a measured
+  DEAD END — round-1's 12–56 px spots minified to 0.0 at every gate (the isotropic 0.18× sim
+  was the misprediction; honest sim is ANISOTROPIC — visible band 512×5460 → 35×1280,
+  vertical ≈0.07), and round-2's 48–120 px clusters at honest-sim 5.4% STILL landed 0.001 at
+  beauty (Cycles minification+denoise) with Wan re-adding only ~0.8% from the prompt. So the
+  red enters at SCREEN scale after every gate: NEW stage 13 `scripts/stands_red_pin.py` —
+  `scatter_fan_recolor` on the stands ROI of the finished video, speck positions static
+  across frames (fixed deliverable camera), auto-measures the band's strict-red (0.009) and
+  scatters the shortfall to the clip target (`STANDS_RED_TARGET=0.036`, `STANDS_RED=0`
+  skips, `STANDS_RED_FRAC` manual) → landed 0.030. Speck brightness capped (new
+  `luma_cap=0.35` scatter param): clip red V med/p75 .24/.31 but the uncapped
+  luma-preserving swap glowed .26/.48 on bright fans — capped lands .25 med, eye reads the
+  clip's dark-red pepper (clip blobs median 3.2 px @1080p → sub-pixel at our ~4×-smaller
+  framing; the FRACTION is scale-invariant, so pepper, not clusters). 10 unit tests green;
+  in-batch export = local smoke byte-for-byte (red 0.04, 4 windows, fascia ×1.88). ~$0.95
+  both rounds, pod DOWN. NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t19b_pinned7.mp4` (pod volume `v2v/sideline_t19b_pinned6.mp4`
+  + local stage-13 pin; the next batch reproduces pinned7 in-batch). Honest residuals:
+  stands red 0.030 vs clip 0.036 (specks on dark structure stay dark — luma-preserve working
+  as intended); the final-level periodicity autocorr barely moves (~0.18 — the v2v tail
+  re-regularizes and the metric is noisy) though beauty + eye clearly improved; quilt-space
+  red stays at 0.04 (harmless; leaves a hint in the rgb control).
 
 - **2026-07-05 (late evening)** — **CROWD COMPOSITION IN THE PROMPT (`b9808f8`) + stages
   11-12 verified in-batch; new best sideline final (t18, TAIL_ONLY ~$0.25).** Measured the

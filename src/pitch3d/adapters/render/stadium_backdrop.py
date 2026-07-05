@@ -575,6 +575,7 @@ def scatter_fan_recolor(
     rgb: tuple[float, float, float] = (0.50, 0.08, 0.08),
     seed: int = 0,
     diam_range: tuple[int, int] = (48, 120),
+    luma_cap: float | None = None,
 ) -> np.ndarray:
     """Recolour scattered fan-sized spots of the crowd quilt to the clip's minority shirt colour.
 
@@ -594,8 +595,12 @@ def scatter_fan_recolor(
 
     Spots keep the quilt's own luma texture (per-pixel V is preserved; only chroma is replaced)
     and get a feathered edge, so they read as fans in red shirts under the same light, not
-    painted dots. ``frac`` is the target fraction of quilt area (0 disables). Deterministic per
-    ``seed``. Returns float32, same shape.
+    painted dots. ``luma_cap`` clamps the preserved luma: on already-bright pixels a full
+    swap glows hotter than a dark-red shirt physically can (screen-space pin, measured
+    2026-07-05: clip red V p75 0.31 vs uncapped swap p75 0.48) — the quilt path leaves it
+    off because the render's tint multiply darkens everything anyway. ``frac`` is the target
+    fraction of quilt area (0 disables). Deterministic per ``seed``. Returns float32, same
+    shape.
     """
     q = np.asarray(quilt, dtype=np.float32).copy()
     if frac <= 0.0:
@@ -621,6 +626,8 @@ def scatter_fan_recolor(
         cols = (cx - d // 2 + np.arange(d)) % w
         region = q[np.ix_(rows, cols)]
         luma = region.mean(axis=2, keepdims=True)
+        if luma_cap is not None:
+            luma = np.minimum(luma, luma_cap)
         red = target[None, None, :] * (luma / max(t_luma, 1e-6))
         a = alpha[..., None]
         q[np.ix_(rows, cols)] = region * (1.0 - a) + np.clip(red, 0.0, 1.0) * a

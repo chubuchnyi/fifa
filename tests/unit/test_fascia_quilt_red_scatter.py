@@ -124,6 +124,21 @@ def test_scatter_red_fraction_luma_and_determinism():
     assert not np.allclose(out, other)
 
 
+def test_scatter_luma_cap_bounds_bright_swaps():
+    # screen-space pin: on a bright crowd pixel an uncapped luma-preserving swap glows past
+    # any dark-red shirt (clip red V p75 0.31 vs 0.48 uncapped); the cap bounds swapped luma.
+    quilt = np.full((64, 256, 3), 0.60, dtype=np.float32)
+    out = scatter_fan_recolor(quilt, frac=0.08, seed=3, diam_range=(8, 24), luma_cap=0.35)
+    core = np.abs(out - quilt).max(axis=2) > 0.15
+    assert core.any()
+    # feather rims blend back toward the bright surround, so the cap holds for the solidly
+    # swapped mass, not the max: median of core luma lands AT the cap.
+    assert float(np.median(out[core].mean(axis=1))) <= 0.35 + 1e-2
+    uncapped = scatter_fan_recolor(quilt, frac=0.08, seed=3, diam_range=(8, 24))
+    ucore = np.abs(uncapped - quilt).max(axis=2) > 0.15
+    assert float(np.median(uncapped[ucore].mean(axis=1))) > 0.45  # preserved bright luma
+
+
 def test_scatter_zero_frac_is_a_noop():
     quilt = np.full((32, 64, 3), 0.4, dtype=np.float32)
     out = scatter_fan_recolor(quilt, frac=0.0)
