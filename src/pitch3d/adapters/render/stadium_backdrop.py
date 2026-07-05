@@ -202,16 +202,21 @@ def _robust_quadfit(
 
 
 def strip_emission(
-    strip: np.ndarray, *, target: float = 1.05, lo: float = 1.0, hi: float = 4.0
+    strip: np.ndarray, *, target: float = 1.05, lo: float = 1.0, hi: float = 4.0, q: float = 90.0
 ) -> float:
-    """Emission strength that saturates the strip's own bright content and nothing else.
+    """Emission strength that puts the strip's ``q``-quantile V at ``target``.
 
-    A fixed strength inverts dark ads: x4 pushed 0.3 panels to 1.2 — clipped to PNG white right
+    Defaults calibrate an LED band — saturate its own bright content and nothing else. A fixed
+    strength inverts dark ads: x4 pushed 0.3 panels to 1.2 — clipped to PNG white right
     alongside the glowing text, so the whole band rendered as one featureless bright stripe
     (measured 2026-07-05). Scale so the strip's p90 V lands just past white; everything darker
     keeps its measured level. ``PITCH3D_BOARD_EMISSION`` stays the manual override.
+    The fascia window is NOT a glowing element — the same rule at p90→1.05 rendered the whole
+    band 1.6x brighter than the clip's dark zone (t13). It calibrates with ``q=50``,
+    ``target=0.40``: the walkway-validated emitted level that survives the night grade at the
+    clip's V≈0.2, allowed to DIM below x1 when the window catches bright content.
     """
-    v = float(np.percentile(np.asarray(strip, dtype=np.float32).max(axis=2), 90.0))
+    v = float(np.percentile(np.asarray(strip, dtype=np.float32).max(axis=2), q))
     return float(np.clip(target / max(v, 1e-6), lo, hi))
 
 

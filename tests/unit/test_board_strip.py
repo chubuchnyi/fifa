@@ -39,6 +39,16 @@ def test_pitch_black_strip_clamps():
     assert strip_emission(np.full((4, 50, 3), 0.05, np.float32)) == 4.0
 
 
+def test_fascia_calibration_targets_walkway_level():
+    # Fascia mode (q=50 -> .40): the dark walkway window emits at the grade-survival level,
+    # and a BRIGHT window dims below x1 instead of clamping at it (t13: p90->1.05 was 1.6x hot).
+    dark = _strip(bg=0.18, text=0.85, text_frac=0.1)
+    e = strip_emission(dark, target=0.40, q=50.0, lo=0.25)
+    assert abs(0.18 * e - 0.40) < 0.02
+    bright = _strip(bg=0.60, text=0.20, text_frac=0.1)
+    assert strip_emission(bright, target=0.40, q=50.0, lo=0.25) < 1.0
+
+
 def test_dominant_pick_is_the_majority_ad():
     strips = [_strip(0.95, 0.26), _strip(0.30, 0.80), _strip(0.31, 0.78), _strip(0.29, 0.82)]
     assert dominant_strip_index(strips) in {1, 2, 3}

@@ -704,7 +704,9 @@ def _export_boards(
                 gap_rel=gap / height,
             )
             emission = strip_emission(strip)
-            fascia_emission = strip_emission(fascia)
+            # Fascia: median -> the walkway-validated emitted level (0.40 survives the night
+            # grade at the clip's dark-zone V=.2); p90->1.05 overshot 1.6x (t13, 2026-07-05).
+            fascia_emission = strip_emission(fascia, target=0.40, q=50.0, lo=0.25)
             # Vertical atlas: the walkway band wears the measured fascia window instead of the
             # flat grey (2026-07-05: the clip's dark fascia/walkway sandwich with FIFA panels
             # sits right above the boards — grey read as a dead stripe). Fascia rows on top,
