@@ -74,8 +74,14 @@
   69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
   promoted «muted green». STANDS TONE pinned same night (§6): pin generalized to region tone
   pin (`--roi`/`--pin-val`, stage 10) — clip crowd is darker+yellower (V×0.70 the main knob);
-  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NEW BEST FINALS
-  `out/kitzones_pod/sideline_tail7_pinned4.mp4` + `goal_pinned3.mp4`.
+  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×3):
+  stages 9-10 validated E2E on CLEAN DEFAULTS (tail8 — auto-targets from `ref_night.png` match
+  hand-measured clip tones, ref-orientation caveat closed); WALKWAY BAND fixed at source (the
+  final's dead-black stripe was our own `gap_color` 0.02 crushed by the tail; dark-grey 0.10
+  default + `PITCH3D_WALKWAY_RGB` override → t9 final band V .16-.23 ≈ clip .16-.22); pod
+  infra hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
+  `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs). NEW BEST
+  FINALS `out/kitzones_pod/sideline_t9_pinned4.mp4` + `goal_pinned3.mp4`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -314,6 +320,18 @@ fabricate or silently hide.
   clip, walkway/crowd ratio .67 matches the clip's. Test threshold updated (walkway dark-grey
   < 0.2, not < 0.1). E2E rerun (REUSE_SCENE=1 — export re-runs, recon skipped) is the next
   pod step; verdict lands in this log.
+  **VERDICT (same night, t9 E2E): FIXED.** Full batch rerun on the fixed export
+  (`out/kitzones_pod/sideline_t9_pinned4.mp4`): beauty walkway V .71 (H 248.5 S .09; pre-fix
+  .39 — the dead-black source is gone), and through the full tail (grade3 → Wan v2v → SeedVR2
+  → 4 pins) the final's walkway band lands at **V med .16-.23, p10 .15-.20 (f0 & f28) vs clip
+  .16-.22** — t8's same rows were V .00-.02. Zoom eye check: band order now reads exactly like
+  the broadcast (crowd → textured dark walkway → LED boards with legible strip text → grass);
+  pins on this run re-confirmed auto-targets (grass H 69.2→79.1 S ×0.73; stands H 33.9→40.9
+  S ×1.40 V ×0.78). Residual gaps by eye after this lever: boards band a touch brighter than
+  clip (V med .73 vs .57) and slightly green-tinged, crowd blob colour vs the clip's yellow
+  fan block, and distant-player fidelity (generative smear) — the first is a candidate
+  `PITCH3D_BOARD_EMISSION` tune, the last is the SAM-3D-Body/LHM++ track, not a tonight
+  lever.
 
 - **2026-07-05 (night run)** — **BATCH STAGES 9-10 VALIDATED E2E ON CLEAN DEFAULTS (tail8):
   one command, zero env overrides → grass + stands pins auto-target correctly from
