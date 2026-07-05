@@ -72,8 +72,11 @@
   clip .67; «dull green» reads olive) → deterministic `grass_pin.py` = batch stage 9 (grass
   band H-delta + S-scale, auto-target from `ref_night.png`, team masks excluded; sideline
   69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
-  promoted «muted green». NEW BEST FINALS `out/kitzones_pod/sideline_tail7_pinned3.mp4` +
-  `goal_pinned3.mp4`. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  promoted «muted green». STANDS TONE pinned same night (§6): pin generalized to region tone
+  pin (`--roi`/`--pin-val`, stage 10) — clip crowd is darker+yellower (V×0.70 the main knob);
+  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NEW BEST FINALS
+  `out/kitzones_pod/sideline_tail7_pinned4.mp4` + `goal_pinned3.mp4`.
+  Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -294,6 +297,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **STANDS TONE: pin generalized to a region tone pin (stage 10)
+  — clip's darker+yellower crowd tone landed locally, free.** Fresh eye pass over the new
+  finals flagged the stands as the biggest visible gap (clip = dark crowd with bright
+  yellow-gold fan pockets; final = pale uniform amber speckle). Measured (stands band, warm
+  band 15-80 s>.15): clip H 42.2 S 0.56 V 0.23 vs final H 33.9 S 0.45 V 0.33 — smaller than
+  the eye suggested and V-dominated (final too BRIGHT, not just too brown). `grass_pin.py`
+  generalized: `--roi`/`--target-roi` (fractional spatial gates; video vs target framing
+  differ) + `--pin-val` (V scale — the missing knob) = stage 10 in the batch (`STANDS_PIN=0`
+  skips; `STANDS_ROI` is sideline-tuned, override per camera). Applied H+8.5 S×1.22 V×0.70:
+  stands land the clip family by eye (darker, golden), no ROI seam at y=.32, kits protected
+  by the ROI itself (players stay below y .32 in this window). LIMIT (honest): a median pin
+  cannot create the clip's bright-fans-on-dark bimodality — that is crowd-texture contrast
+  (`PITCH3D_CROWD_*` knobs, a render-side lever). Goal cam left at pinned3 (its stands band
+  needs its own ROI). ORIENTATION CAVEAT for the batch default: `ref_night.png` grass-measures
+  correctly (rotation-invariant for grass) but the stands `--target-roi` assumes it is
+  upright — verify at next pod-up before trusting stage 10's auto-target. NEW BEST sideline
+  FINAL: `out/kitzones_pod/sideline_tail7_pinned4.mp4`; sheet `/tmp/lv_stands_zoom3.png`.
 
 - **2026-07-05 (night run)** — **GRASS TONE CLOSED: deterministic grass pin (batch stage 9)
   lands the clip's exact tone on BOTH cameras; prompt knob measured to its limit and promoted

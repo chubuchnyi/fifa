@@ -1,5 +1,9 @@
 #!/usr/bin/env python
-"""Pin the grass tone of a finished video back to the clip's measured tone.
+"""Region tone pin: land a colour-band region of a finished video on the clip's measured tone.
+
+Default gate = the grass band (the original use); --roi/--target-roi/--pin-val turn the same
+ONE-global-delta machinery on any banded region (e.g. the stands: warm band 15-80 in the top
+third, clip crowd is darker AND yellower than the finisher's amber).
 
 Prompt wording cannot land it (measured 2026-07-05, three A/Bs: clip grass H 78.8 S 0.67;
 "muted yellow-green" -> H ~68 S ~.88, dropping "yellow-" -> H ~71.7 (1/3 of the gap, S
@@ -30,6 +34,7 @@ def _gate(
     hue_band: tuple[float, float],
     sat_min: float,
     val_min: float,
+    roi: tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0),
 ) -> tuple[np.ndarray, np.ndarray]:
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV_FULL).astype(np.float32)
     hue = hsv[..., 0] * (360.0 / 255.0)
@@ -37,6 +42,12 @@ def _gate(
     val = hsv[..., 2] / 255.0
     lo, hi = hue_band
     gate = (hue >= lo) & (hue <= hi) & (sat >= sat_min) & (val >= val_min)
+    y0, y1, x0, x1 = roi
+    if (y0, y1, x0, x1) != (0.0, 1.0, 0.0, 1.0):
+        h, w = img_bgr.shape[:2]
+        sp = np.zeros((h, w), dtype=bool)
+        sp[int(y0 * h) : int(y1 * h), int(x0 * w) : int(x1 * w)] = True
+        gate &= sp
     if kit_mask is not None:
         gate &= ~kit_mask
     return hsv, gate
@@ -56,16 +67,17 @@ def _kit_mask(mask_path: str, shape: tuple[int, int], dilate: int) -> np.ndarray
     return any_kit.astype(bool)
 
 
-def measure_image(path: str, hue_band, sat_min, val_min) -> tuple[float, float]:
+def measure_image(path: str, hue_band, sat_min, val_min, roi) -> tuple[float, float, float]:
     img = cv2.imread(path, cv2.IMREAD_COLOR)
     if img is None:
         raise SystemExit(f"cannot read --target-from-image {path}")
-    hsv, gate = _gate(img, None, hue_band, sat_min, val_min)
+    hsv, gate = _gate(img, None, hue_band, sat_min, val_min, roi)
     if gate.sum() < 500:
-        raise SystemExit(f"target-from-image: only {int(gate.sum())} grass pixels in {path}")
+        raise SystemExit(f"target-from-image: only {int(gate.sum())} gated pixels in {path}")
     return (
         float(np.median(hsv[..., 0][gate]) * (360.0 / 255.0)),
         float(np.median(hsv[..., 1][gate]) / 255.0),
+        float(np.median(hsv[..., 2][gate]) / 255.0),
     )
 
 
@@ -77,21 +89,40 @@ def main() -> int:
     p.add_argument("--target-from-image", help="clip frame to auto-measure the target from")
     p.add_argument("--target-hue", type=float, help="manual target override, degrees")
     p.add_argument("--target-sat", type=float, help="manual target override, 0-1")
+    p.add_argument("--target-val", type=float, help="manual target override, 0-1 (with --pin-val)")
     p.add_argument("--hue-band", type=float, nargs=2, default=(55.0, 140.0))
     p.add_argument("--sat-min", type=float, default=0.25)
     p.add_argument("--val-min", type=float, default=0.10)
     p.add_argument("--dilate", type=int, default=15)
+    p.add_argument(
+        "--roi", type=float, nargs=4, default=(0.0, 1.0, 0.0, 1.0), metavar=("Y0", "Y1", "X0", "X1"),
+        help="fractional spatial gate on the VIDEO (e.g. stands band 0.08 0.35 0.02 0.98)",
+    )
+    p.add_argument(
+        "--target-roi", type=float, nargs=4, default=None, metavar=("Y0", "Y1", "X0", "X1"),
+        help="fractional spatial gate on --target-from-image (its framing differs from the video)",
+    )
+    p.add_argument(
+        "--pin-val", action="store_true",
+        help="also scale V to the target (stands: the clip crowd is darker than the finisher's)",
+    )
     args = p.parse_args()
 
     band = tuple(args.hue_band)
-    t_hue, t_sat = args.target_hue, args.target_sat
-    if args.target_from_image and (t_hue is None or t_sat is None):
-        mh, ms = measure_image(args.target_from_image, band, args.sat_min, args.val_min)
+    roi = tuple(args.roi)
+    t_hue, t_sat, t_val = args.target_hue, args.target_sat, args.target_val
+    if args.target_from_image and (t_hue is None or t_sat is None or (args.pin_val and t_val is None)):
+        troi = tuple(args.target_roi) if args.target_roi else roi
+        mh, ms, mv = measure_image(args.target_from_image, band, args.sat_min, args.val_min, troi)
         t_hue = mh if t_hue is None else t_hue
         t_sat = ms if t_sat is None else t_sat
-        print(f"GRASS_PIN_TARGET H={t_hue:.1f} S={t_sat:.2f} from {args.target_from_image}")
-    if t_hue is None or t_sat is None:
-        raise SystemExit("need --target-from-image or both --target-hue and --target-sat")
+        t_val = mv if t_val is None else t_val
+        print(
+            f"TONE_PIN_TARGET H={t_hue:.1f} S={t_sat:.2f} V={t_val:.2f} "
+            f"from {args.target_from_image}"
+        )
+    if t_hue is None or t_sat is None or (args.pin_val and t_val is None):
+        raise SystemExit("need --target-from-image or explicit --target-hue/--target-sat(/--target-val)")
 
     def frames():
         cap = cv2.VideoCapture(args.video)
@@ -115,36 +146,41 @@ def main() -> int:
     fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
     cap.release()
 
-    hs, ss = [], []
+    hs, ss, vs = [], [], []
     n_frames = 0
     w = h = 0
     for frame, km in frames():
         n_frames += 1
         h, w = frame.shape[:2]
-        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min)
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi)
         if gate.any():
             hs.append(hsv[..., 0][gate] * (360.0 / 255.0))
             ss.append(hsv[..., 1][gate] / 255.0)
+            vs.append(hsv[..., 2][gate] / 255.0)
     if not hs:
-        raise SystemExit("no grass-band pixels in any frame")
+        raise SystemExit("no gated pixels in any frame")
     before_h = float(np.median(np.concatenate(hs)))
     before_s = float(np.median(np.concatenate(ss)))
+    before_v = float(np.median(np.concatenate(vs)))
     delta_h = t_hue - before_h
     scale_s = t_sat / max(before_s, 1e-6)
+    scale_v = (t_val / max(before_v, 1e-6)) if args.pin_val else 1.0
 
     writer = cv2.VideoWriter(args.out, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
     for frame, km in frames():
-        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min)
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min, roi)
         hue = hsv[..., 0] * (360.0 / 255.0)
         hue[gate] = np.mod(hue[gate] + delta_h, 360.0)
         hsv[..., 0] = hue * (255.0 / 360.0)
         hsv[..., 1][gate] = np.clip(hsv[..., 1][gate] * scale_s, 0.0, 255.0)
+        if scale_v != 1.0:
+            hsv[..., 2][gate] = np.clip(hsv[..., 2][gate] * scale_v, 0.0, 255.0)
         writer.write(cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR_FULL))
     writer.release()
     print(
-        f"GRASS_PIN_OK frames={n_frames} H {before_h:.1f} -> {t_hue:.1f} (delta {delta_h:+.1f}) "
-        f"S {before_s:.2f} -> {t_sat:.2f} (x{scale_s:.2f}) masks={'yes' if args.mask_dir else 'NO'} "
-        f"-> {args.out}"
+        f"TONE_PIN_OK frames={n_frames} H {before_h:.1f} -> {t_hue:.1f} (delta {delta_h:+.1f}) "
+        f"S {before_s:.2f} -> {t_sat:.2f} (x{scale_s:.2f}) "
+        f"V {before_v:.2f} -> x{scale_v:.2f} masks={'yes' if args.mask_dir else 'NO'} -> {args.out}"
     )
     return 0
 

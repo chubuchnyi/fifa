@@ -15,6 +15,9 @@
 #   8) hue-pin team A (yellow band 5-80, sat-min 0.35 keeps faces out) — PIN_A=0 skips
 #   9) grass pin: grass-band H+S back to the clip's measured tone (prompt wording can't land
 #      it — three A/Bs 2026-07-05, see grass_pin.py); kit masks excluded — GRASS_PIN=0 skips
+#  10) stands tone pin: warm band (15-80) in the top-third ROI back to the clip crowd's
+#      darker+yellower tone (H+8.5 S x1.22 V x0.70 measured 2026-07-05) — STANDS_PIN=0 skips;
+#      STANDS_ROI is tuned for the SIDELINE framing, override it for other cameras
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -138,6 +141,23 @@ if [ "${GRASS_PIN:-1}" = "1" ]; then
   fi
   "$PY" scripts/grass_pin.py "${GPIN[@]}"
   FINAL="$GFINAL"
+fi
+
+# 10) stands tone pin (see header; target auto-measured from the clip-derived reference)
+if [ "${STANDS_PIN:-1}" = "1" ]; then
+  SFINAL="${V2V720%.mp4}_pinned4.mp4"
+  SPIN=(--video "$FINAL" --mask-dir "$MASKS" --out "$SFINAL" --dilate "${DILATE:-15}"
+        --roi ${STANDS_ROI:-0.08 0.32 0.02 0.98} --hue-band 15 80 --sat-min 0.15
+        --val-min 0.05 --pin-val)
+  if [ -n "${STANDS_TARGET_HUE:-}" ]; then
+    SPIN+=(--target-hue "$STANDS_TARGET_HUE" --target-sat "${STANDS_TARGET_SAT:?}"
+           --target-val "${STANDS_TARGET_VAL:?}")
+  else
+    SPIN+=(--target-from-image "${STANDS_REF:-out/v2v/ref_night.png}"
+           --target-roi ${STANDS_TARGET_ROI:-0.05 0.26 0.05 0.95})
+  fi
+  "$PY" scripts/grass_pin.py "${SPIN[@]}"
+  FINAL="$SFINAL"
 fi
 
 echo "BATCH_FINISH_OK"
