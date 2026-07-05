@@ -88,11 +88,14 @@
   hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
   `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
   BOARDS TEXT fixed at source next morning (§6): per-strip emission calibration (npz
-  `emission`, x1.08 here) + time-dominant ad frame pick + walkway compensation — "BANK OF
-  AMERICA" readable in the final. NEW BEST FINALS
-  `out/kitzones_pod/sideline_t12_pinned4_boards.mp4` (t10 recipe + boards calibration) +
+  `emission`, x1.08 here) + time-dominant ad frame pick — "BANK OF
+  AMERICA" readable in the final. WALKWAY→FASCIA midday (§6): the flat grey band now wears
+  the measured window above the boards (vertical atlas in `boards.npz`; fascia emission
+  calibrated median→0.40, `PITCH3D_FASCIA_EMISSION` overrides) — the clip's
+  boards→walkway→crowd sandwich reads in the final. NEW BEST FINALS
+  `out/kitzones_pod/sideline_t14_pinned4_fascia.mp4` (t10 recipe + boards + fascia) +
   `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened);
-  sheets `out/kitzones_pod/final_vs_clip_t12.png` + `goal_vs_clip_t10.png`.
+  sheets `out/kitzones_pod/final_vs_clip_t14.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -314,6 +317,36 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (midday)** — **WALKWAY BAND WEARS THE MEASURED FASCIA WINDOW (vertical atlas,
+  `b3b266f`; emitted-level calibration `1893d8d`); new best sideline final.** The t12
+  residual: our walkway band was a FLAT GREY stripe while the clip reads boards → dark
+  walkway/fascia sandwich (people, hedge, dim panels) → crowd. Measured: our crowd mosaic met
+  the boards with only a thin line (band y .40-.45, beauty V .70 flat, p90≈med = no
+  structure); the clip's dark zone (y .344-.415) is Vmed .20 p90 .45 — dark base, bright
+  accents. Fix, auto+manual: `_cut_run_strip` cuts a SECOND window from the same rectified
+  run — the physical extent the 2.2 m band occupies (`gap_rel` board heights ending at the
+  board-top edge) — reconstructing whatever the clip has there (this stadium: walkway with
+  photographers/stewards + green hedge). The exporter stacks fascia+LED into ONE vertical
+  float atlas (npz `tile`), walkway loops get real UVs into the fascia half
+  (`adboard_loop_uvs(board_v=, walkway_v=)`, half-texel v-insets so REPEAT can't wrap grass
+  into the fascia top), walkway tint → white; per-band emission splits at render time — npz
+  `fascia_emission` folded into the float tile relative to the LED strength
+  (`PITCH3D_FASCIA_EMISSION` overrides; the tile is a float_buffer image, so >1 values
+  survive — no 8-bit clip inside the atlas). Calibration lesson (t13→t14): the LED rule
+  (p90→1.05) rendered the band 1.6× hot — final Vmed .33 vs clip .20 — because the fascia is
+  NOT a glowing ad; recalibrated to the walkway-validated emitted level (median→0.40,
+  dimming below ×1 allowed) → t14 band Vmed .20 p90 .39 vs clip .20/.45: base exact, accents
+  slightly soft. Eye (f12/f44 zooms): the sandwich reads — crowd → dark band with sparse
+  standing figures (v2v turns the measured vests into plausible walkway people) → BANK OF
+  AMERICA → grass; stands/grass/kits unchanged vs t12. 13 unit tests green (atlas UV bands
+  share u / split v; fascia calibration incl. dim-below-×1); local Blender CPU smoke-render
+  verified atlas orientation BEFORE the pod. Honest residuals: the clip's lit
+  GUADALAJARA/FIFA gold-text panel row sits ABOVE our band (crowd-bottom region — a separate
+  mosaic lever); board bg glow gap unchanged (p90 .64 vs clip .97); letter crispness still
+  v2v-capped. NEW BEST sideline FINAL: `out/kitzones_pod/sideline_t14_pinned4_fascia.mp4`
+  (pod volume `v2v/sideline_t14_pinned4_fascia.mp4`); sheet `final_vs_clip_t14.png`; t13
+  preserved both sides for the A/B.
 
 - **2026-07-05 (morning)** — **LED BOARDS text legibility at source: per-strip emission
   calibration + time-dominant ad frame choice (`b27eee3`, walkway compensation `0a36948`);
