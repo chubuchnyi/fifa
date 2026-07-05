@@ -94,6 +94,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="quilt px per measured-tile px (1.0 = native clip grain)",
     )
     p.add_argument(
+        "--crowd-contrast", type=float,
+        default=float(env.get("PITCH3D_CROWD_CONTRAST", "1.0")),
+        help="fans-vs-background luma contrast about the quilt median (1.0 = as measured)",
+    )
+    p.add_argument(
         "--board-height", type=float,
         default=float(env.get("PITCH3D_BOARD_HEIGHT", "1.0")),
         help="LED ad-board ring height in metres (0 disables the ring)",
@@ -591,6 +596,7 @@ def _export_stadium(
     crowd_seed: int = 0,
     crowd_structure: bool = True,
     crowd_fan_scale: float = 1.0,
+    crowd_contrast: float = 1.0,
 ) -> None:
     # Hybrid stadium backdrop (M2): procedural bowl + REAL appearance from THIS clip — a
     # *tinted mosaic* (crisp crowd texture x per-vertex measured tint, mirror copy-fill for the
@@ -618,7 +624,8 @@ def _export_stadium(
     if crowd_mode == "quilt":
         qw, qh = CROWD_QUILT_SIZE
         quilt = assemble_crowd_quilt(
-            stile, width=qw, height=qh, seed=crowd_seed, fan_scale=crowd_fan_scale
+            stile, width=qw, height=qh, seed=crowd_seed, fan_scale=crowd_fan_scale,
+            contrast=crowd_contrast,
         )
         if crowd_structure:
             from pitch3d.adapters.render.stadium_backdrop import apply_stand_structure
@@ -763,6 +770,7 @@ def main(argv: list[str] | None = None) -> int:
         crowd_mode=args.crowd_mode, crowd_seed=args.crowd_seed,
         crowd_structure=bool(args.crowd_structure),
         crowd_fan_scale=args.crowd_fan_scale,
+        crowd_contrast=args.crowd_contrast,
     )
     _export_boards(
         scene, args.out, entries, height=args.board_height, offset=args.board_offset,

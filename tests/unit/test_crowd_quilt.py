@@ -120,6 +120,30 @@ def test_stand_structure_carves_walkway_aisles_and_top_fade():
     assert float(on.mean()) < float(raw.mean())  # mean drops -> exporter must ship tile_gain
 
 
+def test_contrast_widens_luma_spread_about_a_stable_median():
+    # The Hann overlap-blend eats the bright-fan tail and the downstream stands pin is a
+    # MEDIAN pin (level changes cancel end-to-end) — contrast must change the distribution
+    # SHAPE only: wider luma spread, median roughly where it was, chroma direction kept.
+    tile = _noise_tile()
+    base = assemble_crowd_quilt(tile, width=128, height=32, seed=0)
+    same = assemble_crowd_quilt(tile, width=128, height=32, seed=0, contrast=1.0)
+    boost = assemble_crowd_quilt(tile, width=128, height=32, seed=0, contrast=1.5)
+    assert np.array_equal(base, same)  # 1.0 is a strict no-op
+    lb, lx = base.mean(axis=2), boost.mean(axis=2)
+
+    def spread(a: np.ndarray) -> float:
+        return float(np.percentile(a, 90) - np.percentile(a, 10))
+
+    assert spread(lx) > 1.2 * spread(lb)
+    assert abs(float(np.median(lx)) - float(np.median(lb))) < 0.02
+    assert float(boost.min()) >= 0.0 and float(boost.max()) <= 1.0
+    # Chroma preserved: per-pixel channel ordering must not flip (luma-only scaling).
+    b_order = np.argsort(base, axis=2)
+    x_order = np.argsort(boost, axis=2)
+    interior = (boost > 1e-3).all(axis=2) & (boost < 1 - 1e-3).all(axis=2)
+    assert np.array_equal(b_order[interior], x_order[interior])
+
+
 def test_unwrap_uvs_span_zero_one_and_lift_the_wrap_seam():
     # Quilt mode samples the bowl with ONE texture copy: repeat=(1, 1) must give a continuous
     # 0-1 unwrap where only the wrap-seam faces reach u = 1 (the lifted low column).

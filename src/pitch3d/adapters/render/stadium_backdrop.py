@@ -431,6 +431,7 @@ def assemble_crowd_quilt(
     height: int = 512,
     seed: int = 0,
     fan_scale: float = 1.0,
+    contrast: float = 1.0,
 ) -> np.ndarray:
     """Stitch one large NON-repeating crowd texture from random crops of the measured tile.
 
@@ -452,6 +453,12 @@ def assemble_crowd_quilt(
     size. (The first cut sized patches as ``height // 2`` and UPSAMPLED the tile to fit — the
     canvas resolution then cancelled out of the on-screen grain, measured 2026-07-04: doubling
     the canvas left the stand marbled at 7→9 px while the clip grain is ~2.7 px.)
+
+    ``contrast`` scales per-pixel luma deviation about the quilt's median (chroma preserved),
+    applied AFTER the blend: the Hann overlap-averaging measurably eats the bright-fan tail
+    (tile frac(V>med+.2) .117 → quilt .089 on this clip, 2026-07-05), and the stands tone pin
+    downstream is a *median* pin — level changes cancel, only distribution SHAPE survives to
+    the final. 1.0 = off (default; auto), >1 restores/boosts fans-vs-background contrast.
     """
     import cv2
 
@@ -488,4 +495,10 @@ def assemble_crowd_quilt(
             cols = (x + np.arange(pw)) % width  # wrap around the bowl
             acc[y : y + ph, cols] += patch * win[..., None]
             wsum[y : y + ph, cols] += win
-    return np.clip(acc / np.maximum(wsum, 1e-8)[..., None], 0.0, 1.0).astype(np.float32)
+    quilt = acc / np.maximum(wsum, 1e-8)[..., None]
+    if contrast != 1.0:
+        luma = quilt.mean(axis=2)
+        med = float(np.median(luma))
+        factor = (med + (luma - med) * contrast) / np.maximum(luma, 1e-6)
+        quilt = quilt * factor[..., None]
+    return np.clip(quilt, 0.0, 1.0).astype(np.float32)
