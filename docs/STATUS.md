@@ -118,11 +118,17 @@
   S med/p90/frac>.5 all land, red pin then hits .036 exactly pre-encode.
   Pod E2E same session: stages 9→13 replayed on the t19b intermediates WITH masks
   (~$0.10, pod DOWN) — soften/red stats identical to the local prototype.
+  LINE GLOW t21 (§6): the clip's pitch markings GLOW (V .90) vs our dim .62-.75 — at low V
+  their slight blue cast reads periwinkle (eye said "blue lines", measurement said "dim
+  lines": hue/sat match the clip). NEW stage 9b (`LINES_PIN`, existing `grass_pin.py`
+  `--val-only`, desaturated-bright gate in the pitch band) lands V .88 vs clip .90.
   NEW BEST FINALS
-  `out/kitzones_pod/sideline_t20_pinned7.mp4` (pod volume `v2v/sideline_t20_pinned7.mp4`;
-  grass H 84.7 S .722 V .502 vs clip 81.9/.663/.549, stands lc .0141≈clip .0134) +
-  `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets `/tmp/t20_final_ab.png`,
-  `/tmp/t21_{full,stands,grass}_triple.png` (old/new/clip).
+  `out/kitzones_pod/sideline_t21_pinned8.mp4` (t20 + line glow; masked in-batch reproduction
+  rides the next pod run) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets
+  `/tmp/t20_final_ab.png`, `/tmp/t21_lines_full.png`, `/tmp/t21_{full,stands,grass}_triple.png`.
+  NEXT CANDIDATE (t22, measured+eye): panel-row lime dash periodicity (ours = repeating
+  bright green LED-like segments, clip = calm dark-green panels with gold text); player
+  dark halo smears (v2v class, parked before).
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -344,6 +350,27 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (late night 2)** — **LINE GLOW t21: pitch markings brightened to the clip's
+  glow — $0, existing machinery, third eye/measure inversion in a row.** t21 zone pass on
+  the t20 final: the shadow-zone zoom showed our markings as periwinkle vs the clip's white.
+  Measured (bright desaturated px, pitch band, f28): hue/sat actually MATCH (ours H 241
+  S .09, clip H 233 S .106 — both slightly blue-white) — the whole gap is V: ours .75 med
+  (.62 at the pin gate V>.55) vs clip .90-.92; a dim near-white reads as its hue cast, a
+  BRIGHT one reads white. Same in t19b (.769) — longstanding, not a t20 regression. Fix =
+  stage-11 pattern on the pitch: NEW stage 9b `LINES_PIN` (default 1) = `grass_pin.py`
+  `--roi 0.48 1.0 0.0 1.0 --sat-max 0.35 --val-min 0.55 --val-only --target-val 0.90`,
+  team masks excluded in-batch (local prototype maskless — kit whites glow like the clip's
+  anyway); ROI starts at .48 so the boards band (.42-.48, stage 11) is never double-pinned;
+  disjoint ROIs ⇒ stage order commutes. Landed V med .882 vs clip .902 (scale ×1.46); eye:
+  lines glow white across the frame, periwinkle gone (`/tmp/t21_lines_ab.png`,
+  `/tmp/t21_lines_full.png`). No new pure code → no new unit tests; `bash -n` green. NEW
+  BEST FINAL `out/kitzones_pod/sideline_t21_pinned8.mp4` (= pod-produced t20_pinned7 + this
+  pin locally; deterministic cv2 ⇒ pod-equivalent, masked in-batch reproduction rides the
+  next pod run). Shadow-zone finding recorded: no crisp contact shadows in ours — soft dark
+  halos AROUND players instead (v2v smear class, players parked). t22 candidate: panel-row
+  lime dash periodicity (`/tmp/t21_panel_ab.png` — ours repeating bright-green LED segments
+  vs clip's calm dark panels + gold text). Commit `<t21>`.
 
 - **2026-07-05 (late night)** — **GRASS TONE + CROWD TEXTURE t20: the two biggest measured
   gaps in the final closed at $0, screen-space.** Zone-by-zone A/B eye pass on

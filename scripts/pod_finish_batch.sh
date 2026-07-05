@@ -26,6 +26,8 @@
 #      hot (t16 Vmed .42 vs clip .27-.31) — V-ONLY pin (--val-only: the zone mixes gold
 #      panels + green hedge + crowd bottom, matching its MEDIAN hue would repaint the
 #      minority materials) — PANELS_PIN=0 skips; PANELS_ROI tuned for the SIDELINE framing
+#  9b) pitch line-glow pin: markings V .62-.75 -> clip's glowing .90 (hue/sat already match;
+#      dim white reads periwinkle) — LINES_PIN=0 skips; LINES_TARGET_VAL/SAT_MAX/ROI override
 #  12.5) stands grain-soften pin: crowd-band texture stats -> the clip's (lc 2.4x, saturated
 #      confetti frac S>.5 .71 vs .43 — t20); blur-blend + S quantile map vs the raw clip —
 #      STANDS_SOFTEN=0 skips; SOFTEN_KSIZE/KEEP/ROI/REF override
@@ -161,6 +163,20 @@ if [ "${GRASS_PIN:-1}" = "1" ]; then
   fi
   "$PY" scripts/grass_pin.py "${GPIN[@]}"
   FINAL="$GFINAL"
+fi
+
+# 9b) pitch line-glow pin: the clip's markings GLOW white (V .90) vs our dim .62-.75 —
+#     at low V their slight blue cast reads periwinkle (t21 measured; hue/sat actually match
+#     the clip, brightness is the whole gap). Desaturated-bright gate inside the pitch band,
+#     V-only. LINES_PIN=0 skips.
+if [ "${LINES_PIN:-1}" = "1" ]; then
+  LFINAL="${V2V720%.mp4}_pinned3b.mp4"
+  LPIN=(--video "$FINAL" --mask-dir "$MASKS" --out "$LFINAL" --dilate "${DILATE:-15}"
+        --roi ${LINES_ROI:-0.48 1.0 0.0 1.0} --hue-band 0 360 --sat-min 0
+        --sat-max "${LINES_SAT_MAX:-0.35}" --val-min 0.55 --val-only
+        --target-val "${LINES_TARGET_VAL:-0.90}")
+  "$PY" scripts/grass_pin.py "${LPIN[@]}"
+  FINAL="$LFINAL"
 fi
 
 # 10) stands tone pin (see header; target auto-measured from the clip-derived reference)
