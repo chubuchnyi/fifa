@@ -99,6 +99,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="fans-vs-background luma contrast about the quilt median (1.0 = as measured)",
     )
     p.add_argument(
+        "--crowd-red", type=float,
+        default=float(env.get("PITCH3D_CROWD_RED", "0.04")),
+        help="fraction of the crowd quilt recoloured to scattered dark-red fan clusters "
+        "(clip-measured 0.04; 0 disables)",
+    )
+    p.add_argument(
+        "--fascia-windows", type=int,
+        default=int(env.get("PITCH3D_FASCIA_WINDOWS", "4")),
+        help="measured fascia windows quilted across the walkway band (1 = legacy single "
+        "window repeating in lockstep with the LED strip)",
+    )
+    p.add_argument(
         "--board-height", type=float,
         default=float(env.get("PITCH3D_BOARD_HEIGHT", "1.0")),
         help="LED ad-board ring height in metres (0 disables the ring)",
@@ -597,6 +609,7 @@ def _export_stadium(
     crowd_structure: bool = True,
     crowd_fan_scale: float = 1.0,
     crowd_contrast: float = 1.0,
+    crowd_red: float = 0.04,
 ) -> None:
     # Hybrid stadium backdrop (M2): procedural bowl + REAL appearance from THIS clip — a
     # *tinted mosaic* (crisp crowd texture x per-vertex measured tint, mirror copy-fill for the
@@ -627,6 +640,13 @@ def _export_stadium(
             stile, width=qw, height=qh, seed=crowd_seed, fan_scale=crowd_fan_scale,
             contrast=crowd_contrast,
         )
+        if crowd_red > 0.0:
+            from pitch3d.adapters.render.stadium_backdrop import scatter_fan_recolor
+
+            # Cluster-scale red BEFORE the structure overlay so aisles/top-fade dim the red
+            # fans like everyone else. The tile's own single-fan red specks minify away at
+            # bowl range (measured 2026-07-05: quilt 3.2% red -> beauty 0.0%).
+            quilt = scatter_fan_recolor(quilt, frac=crowd_red, seed=crowd_seed)
         if crowd_structure:
             from pitch3d.adapters.render.stadium_backdrop import apply_stand_structure
 
@@ -662,13 +682,14 @@ def _export_stadium(
     print(
         f"stadium: {sv.shape[0]} verts {sf.shape[0]} tris; covered "
         f"{int(scov.sum())}/{scov.size} ({scov.mean() * 100:.0f}%); "
-        f"{crowd_mode} {tex.shape[1]}x{tex.shape[0]} (ext {tile_ext}) -> stadium.npz"
+        f"{crowd_mode} {tex.shape[1]}x{tex.shape[0]} (ext {tile_ext}, "
+        f"red {crowd_red:.2f}) -> stadium.npz"
     )
 
 
 def _export_boards(
     scene, out_dir: str, entries: dict[str, list[str]], *, height: float, offset: float,
-    source_video: str = "", source_ok: bool = False,
+    source_video: str = "", source_ok: bool = False, fascia_windows: int = 1,
 ) -> None:
     # Broadcast perimeter furniture (v2 lever, 2026-07-03): grass → white LED boards → dark
     # walkway → crowd is the night-broadcast silhouette the finisher knows; without it the
@@ -702,6 +723,7 @@ def _export_boards(
                 scene.camera, band, source_video,
                 frame_override=int(frame_env) if frame_env else None,
                 gap_rel=gap / height,
+                fascia_windows=fascia_windows,
             )
             emission = strip_emission(strip)
             # Fascia: median -> the walkway-validated emitted level (0.40 survives the night
@@ -736,7 +758,8 @@ def _export_boards(
             )
             keys += ["emission", "fascia_emission", "fascia_rows", "tile", "tile_ext", "uv"]
             note = (f"measured LED strip {strip.shape[1]}x{strip.shape[0]} x{repeat:.0f} around "
-                    f"+ fascia {fascia.shape[1]}x{fascia.shape[0]} (clip frame {pick}, "
+                    f"+ fascia {fascia.shape[1]}x{fascia.shape[0]} ({fascia_windows} windows, "
+                    f"clip frame {pick}, "
                     f"emission x{emission:.2f} / fascia x{fascia_emission:.2f})")
         except ValueError as exc:
             note = f"flat prior (strip failed: {exc})"
@@ -800,10 +823,12 @@ def main(argv: list[str] | None = None) -> int:
         crowd_structure=bool(args.crowd_structure),
         crowd_fan_scale=args.crowd_fan_scale,
         crowd_contrast=args.crowd_contrast,
+        crowd_red=args.crowd_red,
     )
     _export_boards(
         scene, args.out, entries, height=args.board_height, offset=args.board_offset,
         source_video=args.source_video, source_ok=source_ok,
+        fascia_windows=args.fascia_windows,
     )
     _export_lighting(scene, args.out, args.source_video, source_ok, entries)
 

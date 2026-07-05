@@ -242,6 +242,7 @@ def extract_board_strip(
     strip_height: int = 48,
     frame_override: int | None = None,
     gap_rel: float = 4.6,
+    fascia_windows: int = 1,
 ) -> tuple[np.ndarray, np.ndarray, int]:
     """Cut the LED ad-board run from the clip to wrap around the ring: ``(strip_height, W, 3)``.
 
@@ -362,6 +363,16 @@ def extract_board_strip(
     if not strips:
         raise ValueError("LED band fit failed on every candidate frame")
     j = dominant_strip_index(strips)
+    if fascia_windows > 1:
+        # LED half: the dominant ad tiled as-is (sponsor content repeating along the perimeter
+        # IS the real look). Fascia half: a quilt over every candidate window — the panel row
+        # must NOT repeat in lockstep (see assemble_fascia_quilt). Same width so the vertical
+        # atlas keeps one shared u.
+        strip = np.tile(strips[j], (1, fascia_windows, 1))
+        fascia = assemble_fascia_quilt(fascias, fascia_windows)
+        if fascia.shape[1] != strip.shape[1]:  # pool min-width guard trimmed a px or two
+            strip = strip[:, : fascia.shape[1]]
+        return strip, fascia, kept[j]
     return strips[j], fascias[j], kept[j]
 
 
@@ -464,6 +475,106 @@ def _cut_run_strip(
     fmap_x = np.broadcast_to(np.arange(width, dtype=np.float32)[None, :], fmap_y.shape).copy()
     fascia = cv2.remap(rect, fmap_x, fmap_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
     return strip.astype(np.float32), fascia.astype(np.float32)
+
+
+def assemble_fascia_quilt(
+    fascias: Sequence[np.ndarray], n_windows: int, *, seed: int = 0
+) -> np.ndarray:
+    """Widen the fascia band from ONE measured window to ``n_windows`` varied ones.
+
+    The walkway/fascia window repeats ``perim / (aspect · height)`` ≈ 19 times around the ring —
+    with a single measured window the gold FIFA/GUADALAJARA panel row reads as a ×19 periodic
+    pattern (t18 residual). The broadcast camera PANS across the far straight, so the up-to-9
+    candidate frames the strip cut already collects each rectify a *different* (overlapping)
+    stretch of the same physical band (measured 2026-07-05: content slides ±70 px @512 across
+    candidates, aligned luma diff up to 0.16). This stitches a canvas ``n_windows`` windows wide
+    from full-height crops of those candidates — Hann-feathered along x only (the band is
+    vertically structured: crowd → panel row → hedge → walkway; vertical offsets would scramble
+    the layers), never flipped (panel text), wrapping in x so the ring seam blends like any
+    interior seam. Every pixel stays measured; only the horizontal arrangement is synthetic.
+
+    With a single candidate (pinned ``frame_override``) it degrades to phase-jittered crops of
+    that window — periodicity breaks even then. Deterministic per ``seed``. Returns float32
+    ``(rows, n_windows · width, 3)``.
+    """
+    pool = [np.asarray(f, dtype=np.float32) for f in fascias]
+    rows = min(f.shape[0] for f in pool)
+    w = min(f.shape[1] for f in pool)
+    pool = [f[:rows, :w] for f in pool]
+    if n_windows <= 1 and len(pool) >= 1:
+        return pool[0]
+    rng = np.random.default_rng(seed)
+    out_w = n_windows * w
+    pw = max(16, w // 3)
+    win = (np.hanning(pw).astype(np.float32) + 1e-4)[None, :]
+    acc = np.zeros((rows, out_w, 3), dtype=np.float32)
+    wsum = np.zeros((rows, out_w), dtype=np.float32)
+    step = max(1, pw - pw // 3)
+    for x in range(0, out_w, step):
+        src = pool[int(rng.integers(0, len(pool)))]
+        x0 = int(rng.integers(0, w - pw + 1))
+        patch = src[:, x0 : x0 + pw]
+        cols = (x + np.arange(pw)) % out_w
+        acc[:, cols] += patch * win[..., None]
+        wsum[:, cols] += win[0]
+    return (acc / np.maximum(wsum, 1e-8)[..., None]).astype(np.float32)
+
+
+def scatter_fan_recolor(
+    quilt: np.ndarray,
+    *,
+    frac: float = 0.04,
+    rgb: tuple[float, float, float] = (0.45, 0.10, 0.10),
+    seed: int = 0,
+    diam_range: tuple[int, int] = (12, 56),
+) -> np.ndarray:
+    """Recolour scattered fan-sized spots of the crowd quilt to the clip's minority shirt colour.
+
+    Measured on the night clip (2026-07-05): the stands are 4.0% *scattered dark red* fans
+    (H≈16°, S .46, V .21; blobs median 6 px, p90 68 px at 1080p in a ~205 px stand band). The
+    measured crowd tile already carries 3.2% red, but the rendered stands show 0.0%: the specks
+    are single-fan sized, and texture minification (bowl at long range) averages them into the
+    amber surround before the tint multiply is even a factor. Wan then paints red back only
+    where prompted (~1%, t18). So the red must enter the quilt at *cluster* scale — spot
+    diameters here map to the clip's blob-cluster range scaled to the quilt's taller rake — and
+    saturated (default ``rgb`` sims to rendered S≈.89 through the stands tint, surviving the
+    downscale average).
+
+    Spots keep the quilt's own luma texture (per-pixel V is preserved; only chroma is replaced)
+    and get a feathered edge, so they read as fans in red shirts under the same light, not
+    painted dots. ``frac`` is the target fraction of quilt area (0 disables). Deterministic per
+    ``seed``. Returns float32, same shape.
+    """
+    q = np.asarray(quilt, dtype=np.float32).copy()
+    if frac <= 0.0:
+        return q
+    h, w = q.shape[:2]
+    rng = np.random.default_rng(seed)
+    target = np.asarray(rgb, dtype=np.float32)
+    t_luma = float(target.mean())
+    yy, xx = np.mgrid[0 : diam_range[1], 0 : diam_range[1]].astype(np.float32)
+    area_done, area_goal = 0.0, frac * h * w
+    while area_done < area_goal:
+        d = int(rng.integers(diam_range[0], diam_range[1] + 1))
+        r = d / 2.0
+        cy = int(rng.integers(0, h))
+        cx = int(rng.integers(0, w))
+        # feathered disc alpha, clipped at the quilt edges (x wraps around the bowl)
+        dist = np.hypot(yy[:d, :d] - r + 0.5, xx[:d, :d] - r + 0.5)
+        alpha = np.clip((r - dist) / max(1.0, 0.25 * r), 0.0, 1.0)
+        raw_rows = cy - d // 2 + np.arange(d)
+        keep = (raw_rows >= 0) & (raw_rows < h)  # crop at rake edges; x wraps, y must not
+        rows = raw_rows[keep]
+        alpha = alpha[keep]
+        cols = (cx - d // 2 + np.arange(d)) % w
+        region = q[np.ix_(rows, cols)]
+        luma = region.mean(axis=2, keepdims=True)
+        red = target[None, None, :] * (luma / max(t_luma, 1e-6))
+        a = alpha[..., None]
+        q[np.ix_(rows, cols)] = region * (1.0 - a) + np.clip(red, 0.0, 1.0) * a
+        area_done += max(1.0, float((alpha > 0.5).sum()))  # max: a fully-feathered tiny
+        # spot still counts, else frac->0 with a degenerate diam_range would never converge
+    return np.clip(q, 0.0, 1.0)
 
 
 def apply_stand_structure(
