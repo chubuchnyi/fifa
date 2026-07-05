@@ -99,10 +99,12 @@
   gate) lands board whites on the clip's glow (Vmed .93-.95 vs clip .93-.96) — letters
   darker-crisper, $0 local iteration. PANEL TONE evening (§6): stage-12 V-only pin
   (`--val-only`) cools the hot panel band to the clip's level (Vmed .27 vs .30) — second
-  $0 lever. NEW BEST FINALS
-  `out/kitzones_pod/sideline_t17_pinned6_paneltone.mp4` (t10 recipe + boards + fascia +
-  panels + board glow + panel tone) + `goal3_pinned4_xflat.mp4` (goal stands
-  pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t17.png` + `goal_vs_clip_t10.png`.
+  $0 lever. CROWD COMPOSITION late evening (§6): measured yellow/red fan fractions stated
+  in the v2v prompt — yellow half-way to the clip (.39 vs .51 left sector), left>right
+  gradient appears; stages 11-12 verified in-batch. NEW BEST FINALS
+  `out/kitzones_pod/sideline_t18_pinned6_crowdmix.mp4` (t10 recipe + boards + fascia +
+  panels + board glow + panel tone + crowd mix) + `goal3_pinned4_xflat.mp4` (goal stands
+  pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t18.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -324,6 +326,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (late evening)** — **CROWD COMPOSITION IN THE PROMPT (`b9808f8`) + stages
+  11-12 verified in-batch; new best sideline final (t18, TAIL_ONLY ~$0.25).** Measured the
+  clip's stands composition per x-sector (V>.15-lit, S>.35): 33-51% yellow-shirted pixels
+  (more on the LEFT) + 3-5% scattered red; ours rendered 25-33% yellow / 1% red with the
+  "amber and brown" wording — the twice-measured rule applied to the crowd's COMPOSITION,
+  not just its tone. Prompt now states "most in muted dark yellow and amber shirts, some in
+  brown, a few scattered fans in dark red" (intensity words stay muted/dark — the documented
+  S-blowout trap; stands pin re-anchors global tone after). t18 TAIL_ONLY A/B vs t17 (same
+  control frames): yellow .39/.28/.31/.33 (f28, left→right) vs t17 .33/.24/.27/.28 vs clip
+  .51/.37/.39/.33 — half the gap closed, the left>right gradient appears; scattered red did
+  NOT land (1% unchanged — Wan ignores few-instance instructions; residual). Stages 11-12
+  ran in-batch with auto-measured targets, numbers match the local t16/t17 prototypes
+  (boards V ×1.48, panels V ×0.64 val-only): the $0-local-then-wire pattern holds. Stands
+  re-pinned to the same H 40.9 / V .16; grass/boards/kits unchanged (hue pins -38.1/+14.1
+  normal). Eye: the mosaic pops yellow-on-dark like the clip instead of uniform amber. NEW
+  BEST sideline FINAL: `out/kitzones_pod/sideline_t18_pinned6_crowdmix.mp4` (pod volume
+  `v2v/sideline_t18_pinned6_crowdmix.mp4`); sheet `final_vs_clip_t18.png`.
 
 - **2026-07-05 (evening)** — **PANEL ROW TONE: V-only pin (stage 12, `grass_pin.py
   --val-only`); new best sideline final (t17) — second $0 lever in a row.** The t15/t16
