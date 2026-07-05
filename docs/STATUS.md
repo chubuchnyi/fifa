@@ -74,16 +74,19 @@
   69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
   promoted «muted green». STANDS TONE pinned same night (§6): pin generalized to region tone
   pin (`--roi`/`--pin-val`, stage 10) — clip crowd is darker+yellower (V×0.70 the main knob);
-  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×2):
+  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×3):
   stages 9-10 validated E2E on CLEAN DEFAULTS (tail8 — auto-targets from `ref_night.png` match
   hand-measured clip tones, ref-orientation caveat closed); WALKWAY BAND fixed at source (the
   final's dead-black stripe was our own `gap_color` 0.02 crushed by the tail; dark-grey 0.10
-  default + `PITCH3D_WALKWAY_RGB` override → t9 final band V .16-.23 ≈ clip .16-.22); pod
-  infra hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
-  `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs). NEW BEST
-  FINALS `out/kitzones_pod/sideline_t9_pinned4.mp4` + `goal3_pinned3.mp4` (walkway fix on
-  BOTH views); fresh sheets `out/kitzones_pod/final_vs_clip_t9.png` +
-  `goal_vs_clip_t9night.png`.
+  default + `PITCH3D_WALKWAY_RGB` override → t9 final band V .16-.23 ≈ clip .16-.22); CROWD
+  BIMODALITY closed (quilt `contrast` knob — the Hann blend ate the bright-fan tail —
+  `PITCH3D_CROWD_CONTRAST=1.35`, plus stands-pin override `STANDS_TARGET_VAL=0.31` for this
+  clip's center-bright stands: final fan band p90 .51 / tail .159 vs clip .50-.52 /
+  .165-.171); pod infra hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang
+  on sm_120; `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
+  NEW BEST FINALS `out/kitzones_pod/sideline_t10_pinned4_tv031.mp4` (crowd-contrast +
+  stands-V override) + `goal3_pinned3.mp4`; fresh sheets
+  `out/kitzones_pod/final_vs_clip_t10.png` + `goal_vs_clip_t9night.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -305,6 +308,35 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **CROWD BIMODALITY closed (both halves measured): quilt
+  `contrast` knob restores the bright-fan tail the Hann blend eats, and the stands-pin V
+  target moves .23→.31 for this clip — the final's fan band lands the clip's p90/tail
+  exactly.** Half A (texture, at source): `assemble_crowd_quilt`'s overlap-averaging eats
+  ~25% of the tile's bright-fan tail (tile frac(V>med+.2) .117 → quilt .089 → beauty .105)
+  — the very bimodality the STANDS TONE entry called a crowd-texture lever; and because
+  stages 9-10 are MEDIAN pins, level changes cancel end-to-end, so the fix must change
+  distribution SHAPE: new `contrast` kwarg scales luma about the quilt median (1.0 = strict
+  no-op, chroma direction kept; unit test pins spread↑ / median-stable / channel-order-kept).
+  Wired as `--crowd-contrast` / `PITCH3D_CROWD_CONTRAST` (default 1.0, auto+manual rule).
+  E2E t10 at 1.35: beauty tail frac .105→.135, final relative tail .108-.119 = clip family,
+  eye A/B (`/tmp/stands_ab_t10v.png`) visibly speckled-bimodal vs t9's mud. Half B (level,
+  at the pin): stage-10's auto V target gate-measures the ref's WIDE stands ROI (x .05-.95)
+  → .23, but the clip's CENTER stands (x .35-.65 — floodlit, where the eye judges) sit at
+  filtered V .30-.32; NOT a code bug (`measure_image` gates symmetrically) — the clip's
+  stands are center-bright while our quilt is spatially uniform, so the wide-to-wide pin
+  underlights the judged band ×0.74. tv-sweep on t10's pinned3 (f28 fan band,
+  filt-med/p90/frac(V>.45)): auto .23 → .20/.38/.039; .28 → .25/.46/.114; **.31 →
+  .28/.51/.159**; .34 → .30/.56/.199; clip f30/f150 = .31-.32/.50-.52/.165-.171 (f250 =
+  framing-shift outlier, excluded). Winner **tv=.31** on the bimodality signature AND eye
+  (tv.34 reads uniformly lifted, `/tmp/stands_tv_ab.png`); elegant confirmation: at .31 the
+  pin reports V ×1.00 — the winning treatment is H+8.4 S×1.43 with V untouched, i.e. the
+  auto pin's V-darkening WAS the residual. Auto target stays the batch default; this clip's
+  override documented: `STANDS_TARGET_HUE=40.9 STANDS_TARGET_SAT=0.55 STANDS_TARGET_VAL=0.31`.
+  Next stands lever (if revisited): measured horizontal gain profile on the quilt (clip is
+  floodlight-center-bright, ours flat). NEW BEST sideline FINAL:
+  `out/kitzones_pod/sideline_t10_pinned4_tv031.mp4`; sheet
+  `out/kitzones_pod/final_vs_clip_t10.png`.
 
 - **2026-07-05 (night run)** — **WALKWAY BAND root-caused (the "black stripe" under the
   crowd): our own `gap_color` 0.02 renders V .39 and the generative tail crushes it to a dead
