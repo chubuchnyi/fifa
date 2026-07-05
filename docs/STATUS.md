@@ -67,11 +67,13 @@
   "no sideline ball" were thumbnail-scale eye errors — zoom before verdicts). Goal-cam-only
   residual: green half-erased player ghosts near fast clusters. SHIRT NUMBERS (§6): unreadable
   in this window (digits ≈ 7 px at raw 1080p) → all None honestly; `jersey_numbers.py`
-  makes per-recon assignment repeatable when a legible window exists. GRASS TONE vs clip in
-  progress (§6): root cause = DEFAULT_PROMPT's own «muted yellow-green night grass» (Wan
-  amplifies stated colours; clip measures plain green H 78.8 S .67 vs tail3 H ~68 S ~.88);
-  tail6 (drop «yellow-») closed ~1/3 of the hue gap (H 70-73, S unchanged); tail7 («dull
-  green», saturation knob) in flight. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
+  makes per-recon assignment repeatable when a legible window exists. GRASS TONE CLOSED (§6):
+  wording knob measured to its limit (hue ±4° of the stated colour's prior, S floors ~0.85 vs
+  clip .67; «dull green» reads olive) → deterministic `grass_pin.py` = batch stage 9 (grass
+  band H-delta + S-scale, auto-target from `ref_night.png`, team masks excluded; sideline
+  69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
+  promoted «muted green». NEW BEST FINALS `out/kitzones_pod/sideline_tail7_pinned3.mp4` +
+  `goal_pinned3.mp4`. Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
   repaints it. GRASS TONE landed same day (§6): albedos in `scene_builders.py` + prompt;
@@ -292,6 +294,24 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-05 (night run)** — **GRASS TONE CLOSED: deterministic grass pin (batch stage 9)
+  lands the clip's exact tone on BOTH cameras; prompt knob measured to its limit and promoted
+  one word.** tail7 («muted dull green») LOSES: S unchanged (.85-.88) and hue back to olive
+  H 68.9 — intensity words carry their own hue prior («dull green» ≈ olive). Three wording
+  A/Bs total ⇒ reusable limit: hue lands ±4° of the stated colour's prior, S floors at ~0.85
+  (clip .67) — wording gets CLOSE, it cannot land exact tone. NEW `scripts/grass_pin.py`
+  (stage 9 in `pod_finish_batch.sh`, `GRASS_PIN=0` skips, `GRASS_TARGET_HUE/SAT` manual
+  overrides): ONE global hue delta + ONE global sat scale over the grass band (55-140°,
+  s≥.25, v≥.10), targets auto-measured from the clip-derived `ref_night.png` (measured 79.1/
+  .67 ≡ clip 78.8/.67), team masks EXCLUDED (pin-A yellow sits at H≈70 INSIDE the band —
+  maskless smoke visibly dragged shirts to chartreuse). Validated: sideline grass 69.2→79.1,
+  S .88→.67 while team-A shirt hue moved only 60.5→61.9 (dilated-edge residual); goal cam
+  (worse: H 63.5 S .94) → same 79.1/.67. Eye A/B: pinned grass reads as the clip's deeper
+  night green, lime cast gone. DEFAULT_PROMPT promoted: «muted yellow-green» → «muted green»
+  (best pre-pin wording = smallest pin delta). NEW BEST FINALS:
+  `out/kitzones_pod/sideline_tail7_pinned3.mp4`, `goal_pinned3.mp4`;
+  sheets `/tmp/grasspin_final_abc.png`.
 
 - **2026-07-05 (night run)** — **TAIL #6: grass tone — the prompt itself violated the
   twice-measured rule; dropping «yellow-» closes ~1/3 of the hue gap, saturation untouched;

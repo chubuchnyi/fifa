@@ -28,9 +28,14 @@ import sys
 # out the full kit (shirts+shorts+socks per team) restored every shirt (batch #2 A/B). State
 # the measured look of EVERY large surface AT its measured intensity, push failure colours
 # into the negative.
+# LIMIT of the wording knob (measured 2026-07-05, three grass A/Bs vs clip H 78.8 S .67):
+# hue lands within ~+-4deg of wherever the stated colour's prior sits ("yellow-green" -> 68,
+# "green" -> 72, "dull green" -> olive 69 — intensity words carry their own hue prior) and
+# saturation never drops below ~0.85 no matter the wording. Wording gets the tone CLOSE;
+# exact tone is the deterministic grass pin's job (scripts/grass_pin.py, batch stage 9).
 DEFAULT_PROMPT = (
     "Professional television broadcast of a floodlit night football match. "
-    "Dark stadium bowl at night, bright white floodlights, muted yellow-green "
+    "Dark stadium bowl at night, bright white floodlights, muted green "
     "night grass with faint mowing stripes, one team in yellow short-sleeved "
     "shirts with bright white shorts and deep red socks, the other team in an all "
     "sky-blue kit with sky-blue shirts, sky-blue shorts and sky-blue socks, "
