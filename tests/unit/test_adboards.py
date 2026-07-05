@@ -81,6 +81,22 @@ def test_loop_uvs_mirror_ring_face_order():
     assert np.all(uv[6 * n :] == 0.5)
 
 
+def test_loop_uvs_atlas_bands_share_u_and_split_v():
+    # Vertical atlas mode (2026-07-05): the walkway band wears the measured fascia window, so
+    # its loops must walk the SAME u as the boards (columns align — both strips come from one
+    # rectified cut) while v splits the atlas: boards the LED half, walkway the fascia half.
+    n = 16
+    uv = adboard_loop_uvs(
+        n, repeat_around=float(n), board_v=(0.01, 0.4), walkway_v=(0.4, 0.99)
+    )
+    board, walkway = uv[: 6 * n], uv[6 * n :]
+    assert np.allclose(walkway[:, 0], board[:, 0])
+    assert np.allclose(np.unique(board[:, 1]), [0.01, 0.4])
+    assert np.allclose(np.unique(walkway[:, 1]), [0.4, 0.99])
+    # v0 rows (band bottom) sit at the seam for the walkway: boards top == walkway bottom.
+    assert np.all((walkway[:, 1] < 0.5) == (board[:, 1] < 0.1))
+
+
 def test_robust_quadfit_rejects_goalpost_outliers():
     t = np.linspace(0.0, 1.0, 400).astype(np.float32)
     y = 40.0 + 30.0 * t - 18.0 * t**2

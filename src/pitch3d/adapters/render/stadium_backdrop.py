@@ -236,7 +236,8 @@ def extract_board_strip(
     *,
     strip_height: int = 48,
     frame_override: int | None = None,
-) -> tuple[np.ndarray, int]:
+    gap_rel: float = 2.2,
+) -> tuple[np.ndarray, np.ndarray, int]:
     """Cut the LED ad-board run from the clip to wrap around the ring: ``(strip_height, W, 3)``.
 
     The geometric ring renders as a flat white band, but the clip's boards are LED panels with
@@ -270,10 +271,17 @@ def extract_board_strip(
       are cut and the one whose panel level (median V) sits at the candidates' median wins — the
       dominant ad. ``frame_override`` (env ``PITCH3D_BOARD_FRAME`` at the exporter) pins an
       exact clip frame instead.
+    - **The fascia band above rides the same cut.** The clip reads boards → dark walkway/fascia
+      sandwich (FIFA/GUADALAJARA panels) → crowd, and the ring's walkway band was a flat grey
+      (measured 2026-07-05: our crowd mosaic ran almost straight into the boards). The window
+      the walkway band physically occupies — ``gap_rel`` board heights starting half a band
+      above the fitted LED centre — is cut from the same rectified run, whatever the clip has
+      there, and returned as a second strip for the walkway band to wear.
 
     ``board_verts`` is the ring's board band as built by ``adboard_ring_geometry`` (bottom/top
-    interleaved per loop point). Returns ``(strip, frame_index)``: image-style rows (row 0 =
-    board top) RGB ``[0, 1]`` plus the clip frame the cut came from.
+    interleaved per loop point); ``gap_rel`` is the walkway band height in board heights
+    (``gap / height`` of the ring). Returns ``(strip, fascia, frame_index)``: image-style rows
+    (row 0 = strip top) RGB ``[0, 1]`` plus the clip frame the cuts came from.
     """
     pairs = np.asarray(board_verts, dtype=float).reshape(-1, 2, 3)  # (n, [bottom, top], 3)
     k = camera.intrinsics
@@ -330,6 +338,7 @@ def extract_board_strip(
     reflect = float(-rot0[1, 2]) < 0.0  # rolled camera: reflect coords, don't rotate the image
 
     strips: list[np.ndarray] = []
+    fascias: list[np.ndarray] = []
     kept: list[int] = []
     by_idx = {c[1]: c for c in picks}
     for idx, bgr in iter_clip_frames(video_uri, sorted(by_idx)):
@@ -338,7 +347,9 @@ def extract_board_strip(
             uv_b = np.float32([w - 1, h - 1]) - uv_b
             uv_t = np.float32([w - 1, h - 1]) - uv_t
         try:
-            strips.append(_cut_run_strip(bgr, uv_b, uv_t, w, h, strip_height))
+            strip, fascia = _cut_run_strip(bgr, uv_b, uv_t, w, h, strip_height, gap_rel)
+            strips.append(strip)
+            fascias.append(fascia)
             kept.append(int(idx))
         except ValueError:
             if len(by_idx) == 1:  # a pinned frame must cut or fail loudly
@@ -346,13 +357,15 @@ def extract_board_strip(
     if not strips:
         raise ValueError("LED band fit failed on every candidate frame")
     j = dominant_strip_index(strips)
-    return strips[j], kept[j]
+    return strips[j], fascias[j], kept[j]
 
 
 def _cut_run_strip(
-    bgr: np.ndarray, uv_b: np.ndarray, uv_t: np.ndarray, w: int, h: int, strip_height: int
-) -> np.ndarray:
-    """One frame's cut: rectify the run, anchor to the grass boundary, sample the LED band."""
+    bgr: np.ndarray, uv_b: np.ndarray, uv_t: np.ndarray, w: int, h: int, strip_height: int,
+    gap_rel: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """One frame's cut: rectify the run, anchor to the grass boundary, sample the LED band
+    plus the walkway/fascia window sitting ``gap_rel`` board heights above it."""
     import cv2
 
     dh, dw = bgr.shape[:2]
@@ -435,7 +448,15 @@ def _cut_run_strip(
     smap_y = (r_fit - 0.5 * h_band)[None, :] + (tt * h_band)[:, None]
     smap_x = np.broadcast_to(np.arange(width, dtype=np.float32)[None, :], smap_y.shape).copy()
     strip = cv2.remap(rect, smap_x, smap_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-    return strip.astype(np.float32)
+
+    # The walkway band's own window: gap_rel board heights ending at the board top edge. Same
+    # px-per-metre as the fitted band, so the cut lands exactly where the ring geometry renders.
+    fh = max(8, int(round(strip_height * gap_rel)))
+    ft = (np.arange(fh, dtype=np.float32) + 0.5) / fh
+    fmap_y = (r_fit - (0.5 + gap_rel) * h_band)[None, :] + (ft * (gap_rel * h_band))[:, None]
+    fmap_x = np.broadcast_to(np.arange(width, dtype=np.float32)[None, :], fmap_y.shape).copy()
+    fascia = cv2.remap(rect, fmap_x, fmap_y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return strip.astype(np.float32), fascia.astype(np.float32)
 
 
 def apply_stand_structure(

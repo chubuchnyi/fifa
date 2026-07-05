@@ -681,8 +681,9 @@ def _export_boards(
         return
     walkway = _env_rgb("PITCH3D_WALKWAY_RGB")  # manual override of the dark-grey default
     ring_kwargs = {} if walkway is None else {"gap_color": tuple(float(c) for c in walkway)}
+    gap = 2.2  # walkway band height (m); mirrors the adboard_ring_geometry default
     bv, bf, bc = adboard_ring_geometry(
-        scene.field.dimensions, offset=offset, height=height, **ring_kwargs
+        scene.field.dimensions, offset=offset, height=height, gap=gap, **ring_kwargs
     )
     payload: dict[str, Any] = {
         "verts": bv.astype(np.float32),
@@ -697,29 +698,44 @@ def _export_boards(
         band = bv[: bv.shape[0] // 2]  # board band verts; walkway band follows
         frame_env = os.environ.get("PITCH3D_BOARD_FRAME", "")
         try:
-            strip, pick = extract_board_strip(
+            strip, fascia, pick = extract_board_strip(
                 scene.camera, band, source_video,
                 frame_override=int(frame_env) if frame_env else None,
+                gap_rel=gap / height,
             )
             emission = strip_emission(strip)
-            # The walkway band shares the boards material (same tile x strength); its grey was
-            # tuned under the old fixed x4, so hold its emitted level constant — else the
-            # calibrated strength crushes it back to the dead-black stripe (regression t11).
-            payload["colors"][bc.shape[0] // 2 :] *= np.float32(4.0 / emission)
+            fascia_emission = strip_emission(fascia)
+            # Vertical atlas: the walkway band wears the measured fascia window instead of the
+            # flat grey (2026-07-05: the clip's dark fascia/walkway sandwich with FIFA panels
+            # sits right above the boards — grey read as a dead stripe). Fascia rows on top,
+            # LED strip below; the seam blends physically adjacent content. Both bands' tints
+            # go white — the atlas owns the colour; per-band emission splits at render time
+            # (npz fascia_emission vs the material strength) since one material has one
+            # strength. Half-texel v-insets keep REPEAT from wrapping grass into fascia top.
+            tile = np.vstack([fascia, strip]).astype(np.float32)
+            th = tile.shape[0]
+            v_seam = strip.shape[0] / th
+            payload["colors"][bc.shape[0] // 2 :] = 1.0
             bottoms = band.reshape(-1, 2, 3)[:, 0, :]
             hops = np.diff(np.vstack([bottoms, bottoms[:1]]), axis=0)
             perim = float(np.linalg.norm(hops, axis=1).sum())
             aspect = strip.shape[1] / strip.shape[0]
             repeat = max(1.0, round(perim / (aspect * height)))
             payload.update(
-                tile=strip.astype(np.float32),
-                uv=adboard_loop_uvs(bottoms.shape[0], repeat_around=repeat).astype(np.float32),
+                tile=tile,
+                uv=adboard_loop_uvs(
+                    bottoms.shape[0], repeat_around=repeat,
+                    board_v=(0.5 / th, v_seam), walkway_v=(v_seam, 1.0 - 0.5 / th),
+                ).astype(np.float32),
                 tile_ext="REPEAT",
                 emission=np.float32(emission),
+                fascia_rows=np.int32(fascia.shape[0]),
+                fascia_emission=np.float32(fascia_emission),
             )
-            keys += ["emission", "tile", "tile_ext", "uv"]
+            keys += ["emission", "fascia_emission", "fascia_rows", "tile", "tile_ext", "uv"]
             note = (f"measured LED strip {strip.shape[1]}x{strip.shape[0]} x{repeat:.0f} around "
-                    f"(clip frame {pick}, emission x{emission:.2f})")
+                    f"+ fascia {fascia.shape[1]}x{fascia.shape[0]} (clip frame {pick}, "
+                    f"emission x{emission:.2f} / fascia x{fascia_emission:.2f})")
         except ValueError as exc:
             note = f"flat prior (strip failed: {exc})"
     np.savez(os.path.join(out_dir, "boards.npz"), **payload)

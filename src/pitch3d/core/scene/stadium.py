@@ -221,7 +221,13 @@ def bowl_tile_loop_uvs(
     return np.stack([u, v], axis=-1).reshape(-1, 2).astype(np.float32)
 
 
-def adboard_loop_uvs(n_around: int, *, repeat_around: float) -> np.ndarray:
+def adboard_loop_uvs(
+    n_around: int,
+    *,
+    repeat_around: float,
+    board_v: tuple[float, float] = (0.0, 1.0),
+    walkway_v: tuple[float, float] | None = None,
+) -> np.ndarray:
     """Per-loop UVs wrapping a measured LED strip around the ad-board ring: ``(12·n, 2)`` float.
 
     Row order mirrors :func:`adboard_ring_geometry` exactly (board-band faces then walkway faces,
@@ -229,20 +235,27 @@ def adboard_loop_uvs(n_around: int, *, repeat_around: float) -> np.ndarray:
     ``u`` walks the loop in ``[repeat_around, 0]`` — *against* ring vertex order, because the ring
     runs toward −x along the far touchline while a strip cut left→right from the upright clip view
     runs toward +x there (measured 2026-07-04: forward u rendered every board mirror-image). One
-    global reversal orients text for any camera inside the ring; ``v`` spans the board height 0→1.
+    global reversal orients text for any camera inside the ring; ``v`` spans ``board_v`` bottom→top
+    (the full texture by default, or the LED half of a vertical atlas).
     The wrap segment keeps ``u`` monotonic by running down to 0 instead of folding back to a full
     turn — REPEAT extension samples it like any interior segment.
-    Walkway faces get a constant mid-texture UV: their near-black vertex tint owns the colour, the
-    sampled texel just cancels out of the product.
+    Walkway faces get a constant mid-texture UV by default (their near-black vertex tint owns the
+    colour, the sampled texel cancels out of the product); with ``walkway_v`` they walk the same
+    ``u`` and span that v range instead — the fascia half of the atlas (measured 2026-07-05: the
+    clip's dark fascia/walkway sandwich sits right above the boards, not a flat grey).
     """
     us = (n_around - np.arange(n_around + 1, dtype=np.float32)) / n_around * repeat_around
-    quads = []
-    for i in range(n_around):
-        ui, uj = us[i], us[i + 1]
-        # tri [a, c, b] = (bottom-i, top-j, bottom-j); tri [a, d, c] = (bottom-i, top-i, top-j)
-        quads.append([(ui, 0.0), (uj, 1.0), (uj, 0.0), (ui, 0.0), (ui, 1.0), (uj, 1.0)])
-    board = np.asarray(quads, dtype=np.float32).reshape(-1, 2)
-    walkway = np.full_like(board, 0.5)
+
+    def band_uvs(v0: float, v1: float) -> np.ndarray:
+        quads = []
+        for i in range(n_around):
+            ui, uj = us[i], us[i + 1]
+            # tri [a, c, b] = (bottom-i, top-j, bottom-j); tri [a, d, c] = (bottom-i, top-i, top-j)
+            quads.append([(ui, v0), (uj, v1), (uj, v0), (ui, v0), (ui, v1), (uj, v1)])
+        return np.asarray(quads, dtype=np.float32).reshape(-1, 2)
+
+    board = band_uvs(*board_v)
+    walkway = band_uvs(*walkway_v) if walkway_v is not None else np.full_like(board, 0.5)
     return np.concatenate([board, walkway], axis=0)
 
 

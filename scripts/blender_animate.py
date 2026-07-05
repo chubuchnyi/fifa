@@ -417,22 +417,33 @@ if os.path.exists(stadium_path) and not TEAM_MASK:  # emissive crowd would pollu
         emission_strength=float(os.environ.get("PITCH3D_CROWD_EMISSION", "3.6")) * _tgain,
     )
 
-# LED ad-board ring + dark walkway band (anim_export's boards.npz, 2026-07-03): emission-driven.
+# LED ad-board ring + walkway band (anim_export's boards.npz, 2026-07-03): emission-driven.
 # When the exporter measured a sponsor strip from the clip (uv/tile keys, 2026-07-04) the ring
 # wraps it — real "BANK OF AMERICA" rhythm at the grass boundary; else flat vertex colour.
 # Strength: exporter-calibrated per strip (npz "emission", 2026-07-05 — a fixed x4 clipped BOTH
 # text and panels to white, erasing the ad's own polarity); PITCH3D_BOARD_EMISSION overrides.
+# The tile may be a vertical atlas (npz "fascia_rows", 2026-07-05): top rows are the measured
+# walkway/fascia window worn by the walkway band. One material = one strength, so the fascia's
+# own calibration (npz "fascia_emission"; PITCH3D_FASCIA_EMISSION overrides) is folded into the
+# float tile pixels relative to the LED strength.
 boards_path = os.path.join(IN, "boards.npz")
 if os.path.exists(boards_path) and not TEAM_MASK:
     bdz = np.load(boards_path)
     _bem = os.environ.get("PITCH3D_BOARD_EMISSION", "")
+    _bstr = (float(_bem) if _bem
+             else (float(bdz["emission"]) if "emission" in bdz.files else 4.0))
+    _btile = bdz["tile"].astype(np.float32) if "tile" in bdz.files else None
+    if _btile is not None and "fascia_rows" in bdz.files:
+        _fem = os.environ.get("PITCH3D_FASCIA_EMISSION", "")
+        _f = (float(_fem) if _fem
+              else (float(bdz["fascia_emission"]) if "fascia_emission" in bdz.files else _bstr))
+        _btile[: int(bdz["fascia_rows"])] *= np.float32(_f / _bstr)
     _add_stadium_mesh(
         "adboards", bdz["verts"], bdz["faces"], bdz["colors"],
         uv=bdz["uv"] if "uv" in bdz.files else None,
-        tile=bdz["tile"] if "tile" in bdz.files else None,
+        tile=_btile,
         tile_ext=str(bdz["tile_ext"]) if "tile_ext" in bdz.files else "REPEAT",
-        emission_strength=float(_bem) if _bem
-        else (float(bdz["emission"]) if "emission" in bdz.files else 4.0),
+        emission_strength=_bstr,
         normalize=False,
     )
 
