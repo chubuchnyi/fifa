@@ -116,11 +116,13 @@
   stage-12.5 `stands_soften_pin.py` (g9 blur-blend keep .25 + S quantile map to the raw
   clip's band, static LUT, before the red pin so specks stay crisp): lc .0144≈clip .0134,
   S med/p90/frac>.5 all land, red pin then hits .036 exactly pre-encode.
+  Pod E2E same session: stages 9→13 replayed on the t19b intermediates WITH masks
+  (~$0.10, pod DOWN) — soften/red stats identical to the local prototype.
   NEW BEST FINALS
-  `/tmp/t20_gsr.mp4` → reproduce in-batch as `sideline_*_pinned7.mp4` (stages 9+12.5+13
-  rerun on pod pending) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets
-  `/tmp/t21_full_triple.png` (old/new/clip), `/tmp/t21_stands_triple.png`,
-  `/tmp/t21_grass_triple.png`.
+  `out/kitzones_pod/sideline_t20_pinned7.mp4` (pod volume `v2v/sideline_t20_pinned7.mp4`;
+  grass H 84.7 S .722 V .502 vs clip 81.9/.663/.549, stands lc .0141≈clip .0134) +
+  `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets `/tmp/t20_final_ab.png`,
+  `/tmp/t21_{full,stands,grass}_triple.png` (old/new/clip).
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -378,7 +380,15 @@ fabricate or silently hide.
   cheap path: `TAIL_ONLY=1` or manual pin rerun on the volume's pinned2). RESIDUALS (eye,
   parked): boards letter fragments/repetition («BAN!» ×5 — v2v letter crispness, both levers
   lost before), stiff plasticky players (parked), stands S med post-encode .52 vs clip .45
-  (double-encode chroma smear; shape landed pre-encode). Commit `<t20>`.
+  (double-encode chroma smear; shape landed pre-encode). POD E2E same session: stages 9→13
+  replayed on the t19b intermediates WITH team masks (local prototype was maskless) via a
+  one-off ssh chain (~4 min, ~$0.10, pod DOWN after): soften landed identically (lc .0154,
+  S med .459, frac>.5 .434), red pin .036 exact; grass with masks lands H 84.7 S .722 V .502
+  (vs clip 81.9/.663/.549 — masked gate shifts the measured "before", residual S +.06/V −.05,
+  candidate micro-polish: measure stage-9 targets through the mask gate). NEW BEST FINAL
+  `out/kitzones_pod/sideline_t20_pinned7.mp4` (volume `v2v/sideline_t20_pinned7.mp4`); A/B
+  `/tmp/t20_final_ab.png` — acid-olive gone, crowd reads as soft mass at clip texture scale.
+  Commits `d70d9e1` (lever) + `<t20-close>`.
   two rounds + a screen-space pin; new best sideline final.** Lever A (the ×19 fascia window
   repetition, t18 residual): the aggregated camera is CONSTANT, so the broadcast pan slides
   clip content UNDER the fixed rectified window — the strip cut's up-to-9 candidate frames
