@@ -45,9 +45,10 @@ def test_ring_bands_split_at_board_height():
     board_z, gap_z = verts[:half, 2], verts[half:, 2]
     assert set(np.round(board_z, 6)) == {0.0, h}
     assert set(np.round(gap_z, 6)) == {h, h + gap}
-    # Board band is the bright one, walkway band the dark one.
+    # Board band is the bright one, walkway band the dark one (dark-GREY, not near-black:
+    # 0.02 albedo crushed to a dead V 0.00 stripe through the generative tail, 2026-07-05).
     assert colors[:half].min() > 0.9
-    assert colors[half:].max() < 0.1
+    assert colors[half:].max() < 0.2
 
 
 def test_ring_sits_outside_the_pitch():

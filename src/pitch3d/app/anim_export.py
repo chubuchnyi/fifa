@@ -672,7 +672,11 @@ def _export_boards(
     if height <= 0.0:
         print("boards: --board-height 0, skipping boards.npz")
         return
-    bv, bf, bc = adboard_ring_geometry(scene.field.dimensions, offset=offset, height=height)
+    walkway = _env_rgb("PITCH3D_WALKWAY_RGB")  # manual override of the dark-grey default
+    ring_kwargs = {} if walkway is None else {"gap_color": tuple(float(c) for c in walkway)}
+    bv, bf, bc = adboard_ring_geometry(
+        scene.field.dimensions, offset=offset, height=height, **ring_kwargs
+    )
     payload: dict[str, Any] = {
         "verts": bv.astype(np.float32),
         "faces": bf.astype(np.int32),

@@ -298,6 +298,35 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-05 (night run)** — **WALKWAY BAND root-caused (the "black stripe" under the
+  crowd): our own `gap_color` 0.02 renders V .39 and the generative tail crushes it to a dead
+  V 0.00; fix = dark-GREY walkway (0.10/0.10/0.115) + `PITCH3D_WALKWAY_RGB` override.** The
+  boards-row investigation ended in an eye-scale lesson worth keeping: row V-profiles first
+  suggested "boards washed out", then "black apron gap between boards and pitch" — a zoom
+  showed the truth: image order is crowd → DARK WALKWAY BAND → bright LED boards ("BANK OF
+  AMERICA" legible) → grass; the V-1.00 rows I'd read as "touchline" were the boards. The dark
+  stripe is our own adboard-ring walkway band (H 247 S .20 V .39 in beauty — the near-black
+  0.02/0.02/0.03 vertex colour under emission 4.0), and the clip HAS the same band (crowd .27
+  → walkway .16-.22 → bright boards/apron .41-.57): geometry right, only our level dies in
+  the tail (grade3 halves .39, Wan sees a smooth near-black stripe and paints 0.00; clip's is
+  .16-.22 WITH texture). Fix at source (stadium.py default + env override in
+  `_export_boards`, auto+manual rule); target: beauty walkway ~.55-.6 → post-tail ~.15-.2 ≈
+  clip, walkway/crowd ratio .67 matches the clip's. Test threshold updated (walkway dark-grey
+  < 0.2, not < 0.1). E2E rerun (REUSE_SCENE=1 — export re-runs, recon skipped) is the next
+  pod step; verdict lands in this log.
+
+- **2026-07-05 (night run)** — **BATCH STAGES 9-10 VALIDATED E2E ON CLEAN DEFAULTS (tail8):
+  one command, zero env overrides → grass + stands pins auto-target correctly from
+  `ref_night.png`; ref-orientation caveat CLOSED; new best sideline FINAL.** Full
+  `pod_finish_batch.sh` defaults run (TAIL_ONLY=1 over the tail7 control): BATCH_FINISH_OK;
+  stage 9 auto-measured grass target H 78.9 S .68 and stage 10 stands target H 40.9 S .55
+  V .23 from the committed ref — i.e. the ref IS upright and both auto-targets match the
+  hand-measured clip values (grass 78.8/.67, stands 42.2/.56/.23), closing the stage-10
+  orientation caveat from the STANDS TONE entry. FINAL measured: grass H 81.6 S .70 V .49,
+  stands H 43.6 S .59 V .21 vs clip 42.2/.56/.23 — both in the clip family. NEW BEST:
+  `out/kitzones_pod/sideline_tail8_pinned4.mp4` (replaces tail7_pinned4 as the sideline
+  deliverable finish).
+
 - **2026-07-05 (night run)** — **STANDS TONE: pin generalized to a region tone pin (stage 10)
   — clip's darker+yellower crowd tone landed locally, free.** Fresh eye pass over the new
   finals flagged the stands as the biggest visible gap (clip = dark crowd with bright

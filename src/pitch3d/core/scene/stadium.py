@@ -141,7 +141,7 @@ def adboard_ring_geometry(
     n_around: int = 240,
     corner_radius: float = 14.0,
     board_color: tuple[float, float, float] = (1.0, 1.0, 1.0),
-    gap_color: tuple[float, float, float] = (0.02, 0.02, 0.03),
+    gap_color: tuple[float, float, float] = (0.10, 0.10, 0.115),
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The broadcast pitch-perimeter furniture: LED ad-board ring + dark walkway band behind it.
 
@@ -149,9 +149,12 @@ def adboard_ring_geometry(
     render, while a real night broadcast reads grass → bright white LED boards → dark walkway →
     crowd. Two vertical quad strips on a rounded-rectangle loop ``offset`` metres outside the
     lines: boards ``z ∈ [0, height]`` in ``board_color``, the walkway band
-    ``z ∈ [height, height+gap]`` in ``gap_color``. Vertices are NOT shared across the two strips
-    so per-vertex colours stay crisp at the boundary. Faces wind to face the pitch, matching
-    :func:`stadium_bowl_geometry`. Returns ``(verts (M, 3), faces (F, 3), colors (M, 3))``.
+    ``z ∈ [height, height+gap]`` in ``gap_color``. ``gap_color`` is dark-grey, not near-black
+    (0.02 rendered V .39 and the generative tail crushed that to a dead V 0.00 stripe; the clip's
+    walkway is V .16-.22 with visible texture — measured 2026-07-05). Vertices are NOT shared
+    across the two strips so per-vertex colours stay crisp at the boundary. Faces wind to face
+    the pitch, matching :func:`stadium_bowl_geometry`. Returns
+    ``(verts (M, 3), faces (F, 3), colors (M, 3))``.
     """
     dims = dimensions or FieldDimensions()
     hx = dims.length / 2.0 + offset
