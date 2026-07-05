@@ -692,11 +692,16 @@ def _export_boards(
     keys = ["colors", "faces", "verts"]
     note = "flat prior"
     if source_ok:
-        from pitch3d.adapters.render.stadium_backdrop import extract_board_strip
+        from pitch3d.adapters.render.stadium_backdrop import extract_board_strip, strip_emission
 
         band = bv[: bv.shape[0] // 2]  # board band verts; walkway band follows
+        frame_env = os.environ.get("PITCH3D_BOARD_FRAME", "")
         try:
-            strip = extract_board_strip(scene.camera, band, source_video)
+            strip, pick = extract_board_strip(
+                scene.camera, band, source_video,
+                frame_override=int(frame_env) if frame_env else None,
+            )
+            emission = strip_emission(strip)
             bottoms = band.reshape(-1, 2, 3)[:, 0, :]
             hops = np.diff(np.vstack([bottoms, bottoms[:1]]), axis=0)
             perim = float(np.linalg.norm(hops, axis=1).sum())
@@ -706,9 +711,11 @@ def _export_boards(
                 tile=strip.astype(np.float32),
                 uv=adboard_loop_uvs(bottoms.shape[0], repeat_around=repeat).astype(np.float32),
                 tile_ext="REPEAT",
+                emission=np.float32(emission),
             )
-            keys += ["tile", "tile_ext", "uv"]
-            note = f"measured LED strip {strip.shape[1]}x{strip.shape[0]} x{repeat:.0f} around"
+            keys += ["emission", "tile", "tile_ext", "uv"]
+            note = (f"measured LED strip {strip.shape[1]}x{strip.shape[0]} x{repeat:.0f} around "
+                    f"(clip frame {pick}, emission x{emission:.2f})")
         except ValueError as exc:
             note = f"flat prior (strip failed: {exc})"
     np.savez(os.path.join(out_dir, "boards.npz"), **payload)

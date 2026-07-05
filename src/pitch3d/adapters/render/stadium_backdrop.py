@@ -12,6 +12,8 @@ never saw (its own near stand, end gaps) come back ``covered=False`` for
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 
 from ...core.scene.camera import CameraTrack
@@ -199,18 +201,48 @@ def _robust_quadfit(
     return coef, keep
 
 
+def strip_emission(
+    strip: np.ndarray, *, target: float = 1.05, lo: float = 1.0, hi: float = 4.0
+) -> float:
+    """Emission strength that saturates the strip's own bright content and nothing else.
+
+    A fixed strength inverts dark ads: x4 pushed 0.3 panels to 1.2 — clipped to PNG white right
+    alongside the glowing text, so the whole band rendered as one featureless bright stripe
+    (measured 2026-07-05). Scale so the strip's p90 V lands just past white; everything darker
+    keeps its measured level. ``PITCH3D_BOARD_EMISSION`` stays the manual override.
+    """
+    v = float(np.percentile(np.asarray(strip, dtype=np.float32).max(axis=2), 90.0))
+    return float(np.clip(target / max(v, 1e-6), lo, hi))
+
+
+def dominant_strip_index(strips: Sequence[np.ndarray]) -> int:
+    """Index of the strip showing the window's *dominant* ad appearance.
+
+    LED boards rotate sponsor panels within the render window (this clip: dark FIFA panels most
+    of the time, a white BANK OF AMERICA moment); appearances separate cleanly by panel level
+    (median V — text is a minority of pixels), so pick the strip whose level sits closest to the
+    median level across candidates.
+    """
+    levels = np.array(
+        [float(np.median(np.asarray(s, dtype=np.float32).max(axis=2))) for s in strips]
+    )
+    return int(np.argmin(np.abs(levels - np.median(levels))))
+
+
 def extract_board_strip(
     camera: CameraTrack,
     board_verts: np.ndarray,
     video_uri: str,
     *,
     strip_height: int = 48,
-) -> np.ndarray:
+    frame_override: int | None = None,
+) -> tuple[np.ndarray, int]:
     """Cut the LED ad-board run from the clip to wrap around the ring: ``(strip_height, W, 3)``.
 
     The geometric ring renders as a flat white band, but the clip's boards are LED panels with
     sponsor text ("BANK OF AMERICA") — that rhythm is the realism tell at the grass boundary.
-    Three measurements (2026-07-04, night clip) shape the recipe:
+    Three measurements (2026-07-04, night clip) plus the ad-rotation fix (2026-07-05) shape the
+    recipe:
 
     - **Raw-frame sampling.** The solved camera projects onto the 180°-rolled frame; cropping the
       rotated image (the crowd-tile trick) would bake the text in upside-down. Projected coords
@@ -232,12 +264,17 @@ def extract_board_strip(
       then take the row maximising the box-filtered LED signature — val·(1−sat) — in the thin
       zone just above it. MAD-rejected quadratic fits ride over goalposts and players crossing
       the boards; the band height is the median contiguous high-score run at the fitted centre.
+    - **The frame is chosen by TIME, not span.** LED ads rotate within the render window (this
+      clip: dark FIFA panels most of it, one white BANK OF AMERICA stretch); the widest-span
+      frame is time-blind and cut the minority white ad. Up to 9 evenly-spaced candidate frames
+      are cut and the one whose panel level (median V) sits at the candidates' median wins — the
+      dominant ad. ``frame_override`` (env ``PITCH3D_BOARD_FRAME`` at the exporter) pins an
+      exact clip frame instead.
 
     ``board_verts`` is the ring's board band as built by ``adboard_ring_geometry`` (bottom/top
-    interleaved per loop point). Returns image-style rows (row 0 = board top) RGB ``[0, 1]``.
+    interleaved per loop point). Returns ``(strip, frame_index)``: image-style rows (row 0 =
+    board top) RGB ``[0, 1]`` plus the clip frame the cut came from.
     """
-    import cv2
-
     pairs = np.asarray(board_verts, dtype=float).reshape(-1, 2, 3)  # (n, [bottom, top], 3)
     k = camera.intrinsics
     w, h = int(k.width), int(k.height)
@@ -252,12 +289,13 @@ def extract_board_strip(
         np.abs(bx + hx) < 1e-3,
     ]
 
-    best = None  # ((depth bin, span px), frame, uv bottom, uv top)
+    best = None  # ((depth bin, span px), side index)
+    cand: list[list[tuple[float, int, np.ndarray, np.ndarray]]] = [[] for _ in sides]
     for idx in frames:
         uv_all_b, d_b, vis_b = project_world_points_with_depth(camera, int(idx), pairs[:, 0])
         uv_all_t, _d_t, vis_t = project_world_points_with_depth(camera, int(idx), pairs[:, 1])
         ok = vis_b & vis_t
-        for side in sides:
+        for si, side in enumerate(sides):
             m = ok & side
             if int(m.sum()) < 8:
                 continue
@@ -267,22 +305,56 @@ def extract_board_strip(
             # Depth quantised to 5 m bins: the far straight beats the near one outright, while
             # frames of the SAME straight compete on visible span.
             key = (round(float(d_b[m].mean()) / 5.0), span)
+            cand[si].append((span, int(idx), uv_all_b[m], uv_all_t[m]))
             if best is None or key > best[0]:
-                best = (key, int(idx), uv_all_b[m], uv_all_t[m])
+                best = (key, si)
     if best is None:
         raise ValueError("no ad-board straight is visible in any frame; cannot cut a strip")
-    _key, best_idx, uv_b, uv_t = best
+    cands = sorted(cand[best[1]], key=lambda c: c[1])
+    best_span = max(c[0] for c in cands)
+    cands = [c for c in cands if c[0] >= 0.6 * best_span]
+
+    if frame_override is not None:
+        picks = [c for c in cands if c[1] == int(frame_override)]
+        if not picks:
+            have = [c[1] for c in cands]
+            raise ValueError(
+                f"frame_override={frame_override} does not see the chosen run wide enough; "
+                f"usable frames: {have[0]}..{have[-1]} ({len(have)} candidates)"
+            )
+    else:
+        step = max(1, len(cands) // 9)
+        picks = cands[::step][:9]
 
     rot0, _ = camera_pose(camera, int(frames[0]))
-    if float(-rot0[1, 2]) < 0.0:  # rolled camera: reflect coords instead of rotating the image
-        uv_b = np.float32([w - 1, h - 1]) - uv_b
-        uv_t = np.float32([w - 1, h - 1]) - uv_t
+    reflect = float(-rot0[1, 2]) < 0.0  # rolled camera: reflect coords, don't rotate the image
 
-    bgr = None
-    for _idx, frame_bgr in iter_clip_frames(video_uri, [best_idx]):
-        bgr = frame_bgr
-    if bgr is None:
-        raise ValueError(f"could not decode frame {best_idx} from {video_uri}")
+    strips: list[np.ndarray] = []
+    kept: list[int] = []
+    by_idx = {c[1]: c for c in picks}
+    for idx, bgr in iter_clip_frames(video_uri, sorted(by_idx)):
+        _span, _i, uv_b, uv_t = by_idx[int(idx)]
+        if reflect:
+            uv_b = np.float32([w - 1, h - 1]) - uv_b
+            uv_t = np.float32([w - 1, h - 1]) - uv_t
+        try:
+            strips.append(_cut_run_strip(bgr, uv_b, uv_t, w, h, strip_height))
+            kept.append(int(idx))
+        except ValueError:
+            if len(by_idx) == 1:  # a pinned frame must cut or fail loudly
+                raise
+    if not strips:
+        raise ValueError("LED band fit failed on every candidate frame")
+    j = dominant_strip_index(strips)
+    return strips[j], kept[j]
+
+
+def _cut_run_strip(
+    bgr: np.ndarray, uv_b: np.ndarray, uv_t: np.ndarray, w: int, h: int, strip_height: int
+) -> np.ndarray:
+    """One frame's cut: rectify the run, anchor to the grass boundary, sample the LED band."""
+    import cv2
+
     dh, dw = bgr.shape[:2]
     scale = np.float32([dw / w, dh / h])  # cut at native decode resolution, not intrinsics grid
     uv_b = uv_b.astype(np.float32) * scale
