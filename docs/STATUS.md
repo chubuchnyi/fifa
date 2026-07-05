@@ -88,8 +88,8 @@
   hardened for Blackwell (Blender 4.5.11 default — 4.2 kernels hang on sm_120;
   `PITCH3D_GPU_BACKEND` override; page-cache prewarm for network-volume venvs).
   NEW BEST FINALS `out/kitzones_pod/sideline_t10_pinned5_xflat.mp4` (crowd-contrast +
-  stands-V override + xflat) + `goal3_pinned3.mp4`; fresh sheets
-  `out/kitzones_pod/final_vs_clip_t10.png` + `goal_vs_clip_t9night.png`.
+  stands-V override + xflat) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened too);
+  fresh sheets `out/kitzones_pod/final_vs_clip_t10.png` + `goal_vs_clip_t10.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -337,6 +337,15 @@ fabricate or silently hide.
   framing-dependent target — flat chosen. NEW BEST sideline FINAL:
   `out/kitzones_pod/sideline_t10_pinned5_xflat.mp4` (reproducible via the committed script:
   tv031 input + `--flatten-val-x 16`); sheet `final_vs_clip_t10.png` rebuilt.
+  **PROPAGATED to the goal view (same night):** goal3's stands band (y .00-.07) had NO stands
+  pin at all — washed-white H 24 S .28 V .42-.47 with a 2.2× center-hot swing. Full pin+xflat
+  run locally on the blessed `goal3_pinned3` (`--roi 0.0 0.07 0.0 1.0 --flatten-val-x 16`,
+  same 40.9/.55/.31 targets): band lands V .31-.32 FLAT (f0/f28/f55), zoom eye = the clip's
+  golden-dark fan family (was pale speckle), walkway/boards/pitch untouched, no feather seam,
+  right-corner stands consistent. Population note (twice-measured): post-pin re-gated medians
+  read H 30 S .41 — S×1.98 pulled previously-washed pixels INTO the gate (same mechanism as
+  the tv-sweep's band-filter population effect); the eye verdict + V dead-on carry it. NEW
+  BEST goal FINAL: `out/kitzones_pod/goal3_pinned4_xflat.mp4`; sheet `goal_vs_clip_t10.png`.
 
 - **2026-07-05 (night run)** — **CROWD BIMODALITY closed (both halves measured): quilt
   `contrast` knob restores the bright-fan tail the Hann blend eats, and the stands-pin V
