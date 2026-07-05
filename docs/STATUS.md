@@ -108,11 +108,19 @@
   dark-red fans land via NEW stage-13 screen-space `stands_red_pin.py` (texture-space red
   measured dead TWICE — render minify+denoise → beauty 0.001, Wan re-adds ~0.8% only; pin
   auto-targets `STANDS_RED_TARGET=0.036`, landed 0.030, `luma_cap` keeps specks dark-red).
+  GRASS TONE + CROWD TEXTURE t20 (§6): the finals' two biggest measured gaps closed at $0 —
+  grass was dark acid-olive (V .43 vs clip .55: stage 9 never pinned V, and `ref_night`'s S
+  .75 ≈ Wan-inflated vs raw clip .655 → explicit `GRASS_TARGET_HUE=81.9 SAT=0.655 VAL=0.545`,
+  stage 9 gains `--pin-val` when VAL set); stands read as saturated lego-confetti (luma
+  local-contrast 2.4× clip, frac S>.5 .71 vs .43 — tone pins land medians, not SHAPE) → NEW
+  stage-12.5 `stands_soften_pin.py` (g9 blur-blend keep .25 + S quantile map to the raw
+  clip's band, static LUT, before the red pin so specks stay crisp): lc .0144≈clip .0134,
+  S med/p90/frac>.5 all land, red pin then hits .036 exactly pre-encode.
   NEW BEST FINALS
-  `out/kitzones_pod/sideline_t19b_pinned7.mp4` (t18 + fascia quilt + red pin; pod volume
-  `v2v/sideline_t19b_pinned6.mp4`, pinned7 in-batch next run) + `goal3_pinned4_xflat.mp4`
-  (goal stands pinned+flattened); sheets `out/kitzones_pod/final_vs_clip_t18.png` +
-  `goal_vs_clip_t10.png`.
+  `/tmp/t20_gsr.mp4` → reproduce in-batch as `sideline_*_pinned7.mp4` (stages 9+12.5+13
+  rerun on pod pending) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets
+  `/tmp/t21_full_triple.png` (old/new/clip), `/tmp/t21_stands_triple.png`,
+  `/tmp/t21_grass_triple.png`.
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -335,7 +343,42 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
-- **2026-07-05 (night)** — **STANDS LEVERS t19: multi-window fascia quilt + scattered red —
+- **2026-07-05 (late night)** — **GRASS TONE + CROWD TEXTURE t20: the two biggest measured
+  gaps in the final closed at $0, screen-space.** Zone-by-zone A/B eye pass on
+  `sideline_t19b_pinned7.mp4` vs clip f28 (full frame + 4 zooms) surfaced two dominant gaps,
+  both then confirmed by numbers (twice-measured rule — the eye impression "grass too
+  bright" was actually WRONG: measurement showed the opposite failure).
+  **(a) Grass = dark acid-olive.** Band medians ours H 79.1 S .753 V .431 vs clip (pin's own
+  gate, stable across 4 frames) H 81.9 S .655 V .545: stage 9 pins H+S only — V was NEVER
+  pinned — and its auto-target `ref_night.png` carries S≈.75 (Wan-inflated) vs the raw
+  clip's .655, so the pin faithfully reproduced the reference's own excess. Fix: stage 9 now
+  adds `--pin-val` when `GRASS_TARGET_VAL` is set; winning recipe passes explicit raw-clip
+  targets `GRASS_TARGET_HUE=81.9 GRASS_TARGET_SAT=0.655 GRASS_TARGET_VAL=0.545` (auto path
+  unchanged — auto default + manual override). Landed: V .43→.52-.56 (clip .549), S
+  .75→.68-.71, H 79→83.
+  **(b) Stands = saturated lego-confetti.** Ours luma local-contrast (|x−box5| med) .0316 vs
+  clip .0134 (2.4×), chroma grain 2.6×, frac(S>.5) .71 vs .43 — the tone pins (10/12) land
+  MEDIANS but not distribution shape, and nothing touches micro-contrast (real crowd at bowl
+  distance = optics+sensor blur; ours = crisp quilt blocks re-sharpened by v2v+SeedVR2). A
+  saturation KNEE can't fit the clip (matching frac>.5 undershoots p90 — the clip has its
+  own saturated tail); a quantile map lands the whole distribution. NEW
+  `scripts/stands_soften_pin.py` = stage 12.5 (`STANDS_SOFTEN=0` skips; `SOFTEN_KSIZE/KEEP/
+  ROI/REF`): g9 blur-blend keep=.25 (tuned: 5px kernel floors at lc .019 — confetti blocks
+  are larger; g9 k=.25 → lc .0127) + static S-LUT (mid frame × raw clip frame, quantile
+  map), vertical feather, BEFORE the red pin so specks stay crisp. Landed (f28): lc .0144 vs
+  clip .0134, S med .451/.447, p90 .725/.729, frac>.5 .427/.427 exact; red pin on the
+  softened band then hits .036 = target exactly pre-encode (encode eats ~15% → .030, known).
+  Cross-frame stable (lc .012-.014, red .028-.030). Eye (triple sheets old/new/clip
+  `/tmp/t21_{full,stands,grass}_triple.png`): grass off acid-olive onto the clip's night
+  green; stands confetti → soft crowd mass at clip texture scale. Unit tests
+  `tests/unit/test_stands_soften_pin.py` (4: contrast drop + keep=1 identity, LUT lands ref
+  distribution, V-channel preserved, determinism); full suite green. Local chain validated
+  on t19b intermediates (pinned6 → grass re-pin → soften → red pin); batch wiring bash-n'd —
+  in-batch reproduction rides the next pod run (stages 9+12.5+13 on the t19b tail is the
+  cheap path: `TAIL_ONLY=1` or manual pin rerun on the volume's pinned2). RESIDUALS (eye,
+  parked): boards letter fragments/repetition («BAN!» ×5 — v2v letter crispness, both levers
+  lost before), stiff plasticky players (parked), stands S med post-encode .52 vs clip .45
+  (double-encode chroma smear; shape landed pre-encode). Commit `<t20>`.
   two rounds + a screen-space pin; new best sideline final.** Lever A (the ×19 fascia window
   repetition, t18 residual): the aggregated camera is CONSTANT, so the broadcast pan slides
   clip content UNDER the fixed rectified window — the strip cut's up-to-9 candidate frames

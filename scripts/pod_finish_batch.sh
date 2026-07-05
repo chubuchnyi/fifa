@@ -26,9 +26,13 @@
 #      hot (t16 Vmed .42 vs clip .27-.31) — V-ONLY pin (--val-only: the zone mixes gold
 #      panels + green hedge + crowd bottom, matching its MEDIAN hue would repaint the
 #      minority materials) — PANELS_PIN=0 skips; PANELS_ROI tuned for the SIDELINE framing
+#  12.5) stands grain-soften pin: crowd-band texture stats -> the clip's (lc 2.4x, saturated
+#      confetti frac S>.5 .71 vs .43 — t20); blur-blend + S quantile map vs the raw clip —
+#      STANDS_SOFTEN=0 skips; SOFTEN_KSIZE/KEEP/ROI/REF override
 #  13) stands red-scatter pin: scattered dark-red fans at SCREEN scale (quilt-space red dies
 #      in the render, Wan re-adds only ~0.8% vs clip 3.6% — t19 measured twice) —
-#      STANDS_RED=0 skips; STANDS_RED_ROI matches the stands pin's SIDELINE framing
+#      STANDS_RED=0 skips; STANDS_RED_ROI matches the stands pin's SIDELINE framing; runs
+#      AFTER the soften (specks stay crisp)
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -150,6 +154,11 @@ if [ "${GRASS_PIN:-1}" = "1" ]; then
   else
     GPIN+=(--target-from-image "${GRASS_REF:-out/v2v/ref_night.png}")
   fi
+  # t20: ref_night's grass S runs ~0.75 vs the raw clip's 0.655 and V was never pinned
+  # (final read dark acid-olive, V .43 vs clip .55) — explicit VAL turns on --pin-val
+  if [ -n "${GRASS_TARGET_VAL:-}" ]; then
+    GPIN+=(--target-val "$GRASS_TARGET_VAL" --pin-val)
+  fi
   "$PY" scripts/grass_pin.py "${GPIN[@]}"
   FINAL="$GFINAL"
 fi
@@ -203,6 +212,20 @@ if [ "${PANELS_PIN:-1}" = "1" ]; then
   fi
   "$PY" scripts/grass_pin.py "${PPIN[@]}"
   FINAL="$PFINAL"
+fi
+
+# 12.5) stands grain-soften pin: land the crowd band's TEXTURE stats on the clip's — luma
+#     local-contrast 2.4x the clip + saturated confetti (frac S>.5 .71 vs .43, t20 measured);
+#     blur-blend + S quantile map to the raw clip's band. Before the red pin so the re-seeded
+#     specks stay crisp. STANDS_SOFTEN=0 skips.
+if [ "${STANDS_SOFTEN:-1}" = "1" ]; then
+  SOFINAL="${V2V720%.mp4}_pinned6b.mp4"
+  SOPIN=(--video "$FINAL" --out "$SOFINAL"
+         --roi ${SOFTEN_ROI:-0.08 0.32 0.0 1.0}
+         --ref-video "${SOFTEN_REF:-${PITCH3D_CLIP:-/workspace/Colombia-1-0-Congo-DR1080p.mp4}}"
+         --ksize "${SOFTEN_KSIZE:-9}" --keep "${SOFTEN_KEEP:-0.25}")
+  "$PY" scripts/stands_soften_pin.py "${SOPIN[@]}"
+  FINAL="$SOFINAL"
 fi
 
 # 13) stands red-scatter pin: the clip's 3.6% scattered dark-red fans re-enter at SCREEN
