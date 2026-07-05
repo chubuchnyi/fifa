@@ -13,6 +13,8 @@
 #   7) hue-pin team B: undo the v2v/SeedVR2 kit-hue drift — target auto-measured from THIS
 #      run's beauty render (TARGET_HUE env = manual override)
 #   8) hue-pin team A (yellow band 5-80, sat-min 0.35 keeps faces out) — PIN_A=0 skips
+#   9) grass pin: grass-band H+S back to the clip's measured tone (prompt wording can't land
+#      it — three A/Bs 2026-07-05, see grass_pin.py); kit masks excluded — GRASS_PIN=0 skips
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -123,6 +125,19 @@ if [ "${PIN_A:-1}" = "1" ]; then
   "$PY" scripts/hue_pin.py --video "$PINNED" --mask-dir "$MASKS" --out "$FINAL" \
     --channel r --dilate "${DILATE:-15}" --hue-band 5 80 --sat-min 0.35 \
     --target-from-frames "$SRC"
+fi
+
+# 9) grass pin (targets auto-measured from the clip-derived night reference frame)
+if [ "${GRASS_PIN:-1}" = "1" ]; then
+  GFINAL="${V2V720%.mp4}_pinned3.mp4"
+  GPIN=(--video "$FINAL" --mask-dir "$MASKS" --out "$GFINAL" --dilate "${DILATE:-15}")
+  if [ -n "${GRASS_TARGET_HUE:-}" ] && [ -n "${GRASS_TARGET_SAT:-}" ]; then
+    GPIN+=(--target-hue "$GRASS_TARGET_HUE" --target-sat "$GRASS_TARGET_SAT")
+  else
+    GPIN+=(--target-from-image "${GRASS_REF:-out/v2v/ref_night.png}")
+  fi
+  "$PY" scripts/grass_pin.py "${GPIN[@]}"
+  FINAL="$GFINAL"
 fi
 
 echo "BATCH_FINISH_OK"

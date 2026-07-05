@@ -1,0 +1,153 @@
+#!/usr/bin/env python
+"""Pin the grass tone of a finished video back to the clip's measured tone.
+
+Prompt wording cannot land it (measured 2026-07-05, three A/Bs: clip grass H 78.8 S 0.67;
+"muted yellow-green" -> H ~68 S ~.88, dropping "yellow-" -> H ~71.7 (1/3 of the gap, S
+unchanged), "dull green" -> olive H 68.9 — intensity words carry their own hue prior and S
+never left 0.85+). So the correction is deterministic post: ONE global hue delta + ONE global
+saturation scale over the grass band, targets auto-measured from a clip frame (manual
+--target-hue/--target-sat override). Team-mask exclusion is REQUIRED whenever masks exist:
+pin A parks the yellow kit at H≈70, inside the grass band — without the mask gate the grass
+pin would drag the shirts green.
+
+usage (pod, after the kit pins):
+  python scripts/grass_pin.py --video pinned2.mp4 --mask-dir MASKS \
+      --target-from-image out/v2v/ref_night.png --out pinned3.mp4
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+
+import cv2
+import numpy as np
+
+
+def _gate(
+    img_bgr: np.ndarray,
+    kit_mask: np.ndarray | None,
+    hue_band: tuple[float, float],
+    sat_min: float,
+    val_min: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV_FULL).astype(np.float32)
+    hue = hsv[..., 0] * (360.0 / 255.0)
+    sat = hsv[..., 1] / 255.0
+    val = hsv[..., 2] / 255.0
+    lo, hi = hue_band
+    gate = (hue >= lo) & (hue <= hi) & (sat >= sat_min) & (val >= val_min)
+    if kit_mask is not None:
+        gate &= ~kit_mask
+    return hsv, gate
+
+
+def _kit_mask(mask_path: str, shape: tuple[int, int], dilate: int) -> np.ndarray | None:
+    """Any-channel team mask (A=r, B=g, other=b), dilated, at the video's resolution."""
+    m = cv2.imread(mask_path, cv2.IMREAD_COLOR)
+    if m is None:
+        return None
+    if m.shape[:2] != shape:
+        m = cv2.resize(m, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
+    any_kit = (m.max(axis=2) > 127).astype(np.uint8)
+    if dilate > 1:
+        kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate, dilate))
+        any_kit = cv2.dilate(any_kit, kern)
+    return any_kit.astype(bool)
+
+
+def measure_image(path: str, hue_band, sat_min, val_min) -> tuple[float, float]:
+    img = cv2.imread(path, cv2.IMREAD_COLOR)
+    if img is None:
+        raise SystemExit(f"cannot read --target-from-image {path}")
+    hsv, gate = _gate(img, None, hue_band, sat_min, val_min)
+    if gate.sum() < 500:
+        raise SystemExit(f"target-from-image: only {int(gate.sum())} grass pixels in {path}")
+    return (
+        float(np.median(hsv[..., 0][gate]) * (360.0 / 255.0)),
+        float(np.median(hsv[..., 1][gate]) / 255.0),
+    )
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--video", required=True)
+    p.add_argument("--out", required=True)
+    p.add_argument("--mask-dir", help="team-mask frames; omit ONLY for maskless smoke tests")
+    p.add_argument("--target-from-image", help="clip frame to auto-measure the target from")
+    p.add_argument("--target-hue", type=float, help="manual target override, degrees")
+    p.add_argument("--target-sat", type=float, help="manual target override, 0-1")
+    p.add_argument("--hue-band", type=float, nargs=2, default=(55.0, 140.0))
+    p.add_argument("--sat-min", type=float, default=0.25)
+    p.add_argument("--val-min", type=float, default=0.10)
+    p.add_argument("--dilate", type=int, default=15)
+    args = p.parse_args()
+
+    band = tuple(args.hue_band)
+    t_hue, t_sat = args.target_hue, args.target_sat
+    if args.target_from_image and (t_hue is None or t_sat is None):
+        mh, ms = measure_image(args.target_from_image, band, args.sat_min, args.val_min)
+        t_hue = mh if t_hue is None else t_hue
+        t_sat = ms if t_sat is None else t_sat
+        print(f"GRASS_PIN_TARGET H={t_hue:.1f} S={t_sat:.2f} from {args.target_from_image}")
+    if t_hue is None or t_sat is None:
+        raise SystemExit("need --target-from-image or both --target-hue and --target-sat")
+
+    def frames():
+        cap = cv2.VideoCapture(args.video)
+        i = 0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            km = None
+            if args.mask_dir:
+                km = _kit_mask(
+                    os.path.join(args.mask_dir, f"frame_{i:04d}.png"),
+                    frame.shape[:2],
+                    args.dilate,
+                )
+            yield frame, km
+            i += 1
+        cap.release()
+
+    cap = cv2.VideoCapture(args.video)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    cap.release()
+
+    hs, ss = [], []
+    n_frames = 0
+    w = h = 0
+    for frame, km in frames():
+        n_frames += 1
+        h, w = frame.shape[:2]
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min)
+        if gate.any():
+            hs.append(hsv[..., 0][gate] * (360.0 / 255.0))
+            ss.append(hsv[..., 1][gate] / 255.0)
+    if not hs:
+        raise SystemExit("no grass-band pixels in any frame")
+    before_h = float(np.median(np.concatenate(hs)))
+    before_s = float(np.median(np.concatenate(ss)))
+    delta_h = t_hue - before_h
+    scale_s = t_sat / max(before_s, 1e-6)
+
+    writer = cv2.VideoWriter(args.out, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    for frame, km in frames():
+        hsv, gate = _gate(frame, km, band, args.sat_min, args.val_min)
+        hue = hsv[..., 0] * (360.0 / 255.0)
+        hue[gate] = np.mod(hue[gate] + delta_h, 360.0)
+        hsv[..., 0] = hue * (255.0 / 360.0)
+        hsv[..., 1][gate] = np.clip(hsv[..., 1][gate] * scale_s, 0.0, 255.0)
+        writer.write(cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR_FULL))
+    writer.release()
+    print(
+        f"GRASS_PIN_OK frames={n_frames} H {before_h:.1f} -> {t_hue:.1f} (delta {delta_h:+.1f}) "
+        f"S {before_s:.2f} -> {t_sat:.2f} (x{scale_s:.2f}) masks={'yes' if args.mask_dir else 'NO'} "
+        f"-> {args.out}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
