@@ -74,7 +74,7 @@
   69.2→79.1/.88→.67 with shirts intact 60.5→61.9, goal 63.5→79.1/.94→.67); DEFAULT_PROMPT
   promoted «muted green». STANDS TONE pinned same night (§6): pin generalized to region tone
   pin (`--roi`/`--pin-val`, stage 10) — clip crowd is darker+yellower (V×0.70 the main knob);
-  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×3):
+  bright-fans-on-dark bimodality remains a crowd-TEXTURE lever. NIGHT RUN 2026-07-05 (§6 ×2):
   stages 9-10 validated E2E on CLEAN DEFAULTS (tail8 — auto-targets from `ref_night.png` match
   hand-measured clip tones, ref-orientation caveat closed); WALKWAY BAND fixed at source (the
   final's dead-black stripe was our own `gap_color` 0.02 crushed by the tail; dark-grey 0.10
