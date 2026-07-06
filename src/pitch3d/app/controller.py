@@ -36,6 +36,11 @@ from ..core.correction.engine import (
     resolve_subject_motion,
 )
 from ..core.correction.collision import CollisionReport, collision_gate
+from ..core.correction.contact_probe import (
+    ContactProbeReport,
+    FootPositionProvider,
+    contact_probe,
+)
 from ..core.correction.foot_floor import FootFloorReport, foot_floor_gate
 from ..core.correction.foot_plant import FootPlantReport, foot_plant_gate
 from ..core.correction.joint_kinematics import JointKinematicReport, joint_kinematic_gate
@@ -86,6 +91,7 @@ class Application:
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
     _scene_kinematics: dict[str, KinematicReport | None] = field(default_factory=dict, repr=False)
+    _scene_contact: dict[str, ContactProbeReport | None] = field(default_factory=dict, repr=False)
     _snapshots: SnapshotStore = field(default_factory=SnapshotStore, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
 
@@ -133,6 +139,7 @@ class Application:
         auto_tune_sink: Any = None,
         physics_cfg: PhysicsConfig | None = None,
         pelvis_target_provider: Any = None,
+        foot_position_provider: FootPositionProvider | None = None,
     ) -> str:
         """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
 
@@ -202,6 +209,12 @@ class Application:
                 scene, physics_cfg.orientation, fps=clip.fps,
             )
             scene, collision_rep = collision_gate(scene, physics_cfg.collision)
+            # Step 3 probe (measurement only — no correction emitted yet)
+            if physics_cfg.contact_probe.enabled and foot_position_provider is not None:
+                contact_rep = contact_probe(
+                    scene, physics_cfg.contact_probe, foot_position_provider,
+                )
+                self._scene_contact[scene_id] = contact_rep
 
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene

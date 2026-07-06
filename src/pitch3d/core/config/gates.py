@@ -131,6 +131,26 @@ class CollisionConfig:
 
 
 @dataclass(frozen=True)
+class ContactProbeConfig:
+    """Step 3 probe — foot-contact detection + slide measurement.
+
+    A foot is CONTACTED when its Z sits below ``contact_z_threshold_m`` for
+    at least ``min_contact_run_frames`` consecutive frames. Within each
+    contact run we measure the XY displacement of the foot: if it drifted
+    by more than ``slide_threshold_m`` the subject was foot-sliding
+    (unphysical — the classic "glide-walking" complaint).
+
+    This is measurement-only; the correction that zeroes the sliding
+    velocity is the next iteration (WHAM contact head + IK anti-slide).
+    """
+
+    enabled: bool = False
+    contact_z_threshold_m: float = 0.05     # foot Z below floor + this = contact
+    min_contact_run_frames: int = 2         # ignore single-frame touches
+    slide_threshold_m: float = 0.05         # ignore < 5cm slides (jitter)
+
+
+@dataclass(frozen=True)
 class ProbeConfig:
     """Thresholds only ``scripts/motion_stats.py`` (and future probes) consume."""
 

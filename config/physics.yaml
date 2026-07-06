@@ -81,6 +81,12 @@ base:
     max_push_per_frame_m:   0.30     # safety cap on the per-frame net push
     min_correction_m:       1.0e-4   # skip emit below this net positional dev
 
+  contact_probe:            # step 3 — detect + measure foot slide during contact
+    enabled:               false
+    contact_z_threshold_m: 0.05
+    min_contact_run_frames: 2
+    slide_threshold_m:     0.05
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded

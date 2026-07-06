@@ -40,6 +40,13 @@ from .collision import (
     CollisionReport,
     collision_gate,
 )
+from .contact_probe import (
+    ContactProbeReport,
+    ContactRun,
+    FootPositionProvider,
+    SubjectContactReport,
+    contact_probe,
+)
 from .foot_floor import (
     FootFloorReport,
     SubjectFootReport,
@@ -111,6 +118,11 @@ __all__ = [
     "smooth_vector",
     "CollisionReport",
     "collision_gate",
+    "ContactProbeReport",
+    "ContactRun",
+    "FootPositionProvider",
+    "SubjectContactReport",
+    "contact_probe",
     "FootFloorReport",
     "SubjectFootReport",
     "foot_floor_gate",

@@ -32,6 +32,7 @@ from ..correction.kinematics import KinematicConfig
 from .gates import (
     BallConfig,
     CollisionConfig,
+    ContactProbeConfig,
     FootFloorConfig,
     FootPlantConfig,
     IdentityConfig,
@@ -76,6 +77,7 @@ class PhysicsConfig:
     orientation: OrientationConfig
     collision: CollisionConfig
     identity: IdentityConfig
+    contact_probe: ContactProbeConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -204,6 +206,9 @@ def load_physics_config(
     plant = _build_dataclass(FootPlantConfig, base.get("foot_plant", {}), "foot_plant")
     collision = _build_dataclass(CollisionConfig, base.get("collision", {}), "collision")
     identity = _build_dataclass(IdentityConfig, base.get("identity", {}), "identity")
+    contact_probe = _build_dataclass(
+        ContactProbeConfig, base.get("contact_probe", {}), "contact_probe",
+    )
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -216,6 +221,7 @@ def load_physics_config(
         orientation=orient,
         collision=collision,
         identity=identity,
+        contact_probe=contact_probe,
         ball=ball,
         probe=probe,
         profile_name=profile,
