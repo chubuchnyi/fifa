@@ -228,6 +228,23 @@ class UpdateOutcome(str, Enum):
     OPERATOR_LOCKED = "operator_locked"       # source=operator → immutable
 
 
+@dataclass(frozen=True)
+class ProfileUpdateProposal:
+    """A per-subject observation the gate hands off to the profile store.
+
+    A gate emits one proposal per (subject, field) it observed; the store
+    applies each through :func:`update_field` so the seven-layer filter runs
+    at the persistence seam (never in the gate itself).
+    """
+
+    track_id: int
+    domain: str                # "player" | "ball"
+    field_key: str             # e.g. "peak_speed_mps", "peak_accel_mps2"
+    observation: float
+    confidence: float = 1.0
+    default_value: float | None = None   # population prior for the ceiling floor
+
+
 def _accumulate_ci(prev_ci: float | None, prev_value: float, obs: float,
                    n: int, alpha: float) -> float:
     """Update the running 1-σ estimate with the new observation.
@@ -266,7 +283,13 @@ def update_field(
     if confidence < policy.min_confidence:
         return field_, UpdateOutcome.LOW_CONFIDENCE
 
+    # Quarantine only when the running CI is MEANINGFULLY nonzero. With a run of
+    # identical observations ci collapses to 0 and any float round-off (mean drift
+    # of ~2e-15) would otherwise trip the quarantine on every subsequent sample.
+    # Layer 5 exists to catch ID-swap outliers, not numerical noise.
+    QUARANTINE_CI_FLOOR = 1e-6
     if (field_.ci is not None and field_.n > 1
+            and field_.ci > QUARANTINE_CI_FLOOR
             and abs(observation - field_.value)
             > policy.quarantine_ci_mult * field_.ci):
         return field_, UpdateOutcome.QUARANTINED
@@ -300,3 +323,75 @@ def update_field(
 def set_operator_field(field_: ProfileField, value: float) -> ProfileField:
     """Human override: set the value + mark it OPERATOR (immutable from now on)."""
     return replace(field_, value=float(value), source=ProfileSource.OPERATOR)
+
+
+def apply_profile_updates(
+    store,                                    # ProfileStore (protocol imported lazily)
+    priors: PopulationPriors,
+    subject_lookup: dict[int, tuple[str, int, "Position"]],
+    updates,                                  # Iterable[ProfileUpdateProposal]
+) -> dict[str, int]:
+    """Feed each proposal through :func:`update_field`; persist mutated profiles.
+
+    * ``store`` — any :class:`ProfileStore` implementer (local JSON today).
+    * ``priors`` — for population defaults + the shared :class:`AutoTunePolicy`.
+    * ``subject_lookup`` — ``track_id → (team, jersey, position)``. Callers
+      typically compute this from the scene's ``Subject.team_id`` /
+      ``jersey_number``; unknown tracks are skipped.
+    * ``updates`` — the ``report.profile_updates`` produced by the gate.
+
+    Returns per-outcome counts (``applied / quarantined / low_confidence /
+    operator_locked / skipped``) — the audit trail for a run.
+    """
+    counts: dict[str, int] = {
+        "applied": 0, "quarantined": 0, "low_confidence": 0,
+        "operator_locked": 0, "skipped": 0,
+    }
+    cache: dict[tuple[str, int], PlayerProfile] = {}
+    for u in updates:
+        entry = subject_lookup.get(int(u.track_id))
+        if entry is None:
+            counts["skipped"] += 1
+            continue
+        team, jersey, position = entry
+        key = (team, int(jersey))
+        profile = cache.get(key)
+        if profile is None:
+            profile = store.load_player(team, jersey)
+            if profile is None:
+                profile = default_player_profile(team, jersey, position, priors=priors)
+        if u.domain != "player":
+            counts["skipped"] += 1
+            continue
+        target = None
+        section = None
+        if u.field_key in profile.kinematics:
+            target = profile.kinematics[u.field_key]
+            section = "kinematics"
+        elif u.field_key in profile.endurance:
+            target = profile.endurance[u.field_key]
+            section = "endurance"
+        if target is None or section is None:
+            counts["skipped"] += 1
+            continue
+        new_field, outcome = update_field(
+            target, u.observation,
+            confidence=u.confidence,
+            policy=priors.policy,
+            default_value=u.default_value,
+        )
+        counts[outcome.value] += 1
+        if new_field == target:
+            continue
+        new_section = dict(getattr(profile, section))
+        new_section[u.field_key] = new_field
+        profile = replace(
+            profile,
+            kinematics=new_section if section == "kinematics" else profile.kinematics,
+            endurance=new_section if section == "endurance" else profile.endurance,
+            last_updated=_now_iso(),
+        )
+        cache[key] = profile
+    for profile in cache.values():
+        store.save_player(profile)
+    return counts

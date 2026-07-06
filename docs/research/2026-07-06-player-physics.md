@@ -397,13 +397,29 @@ slowly, confidence weighting, atomic write leaves no ``.tmp``, delete
 idempotent, list across teams, path-separator sanitised. Full suite:
 726 passed, 12 skipped, 0 failures.
 
-**T4.b — wire into the M3-9 gate.** NEXT.
-``KinematicConfig`` gets a ``profile_provider: Callable[[subject], PlayerProfile] | None``;
-when present, per-subject limits override the shared ``max_speed`` /
-``max_accel``. The gate emits its usual corrections AND a list of
-``ProfileUpdateProposal``s (one per resolved subject); the profile store's
-consumer applies them through :func:`update_field`, so the seven-filter policy
-runs at the seam.
+**T4.b — wire into the M3-9 gate.** DONE.
+``kinematic_gate(...profile_provider=…)``: when the callable returns a
+``PlayerProfile`` for a subject, its ``peak_speed_mps`` / ``peak_accel_mps2``
+override the shared ``KinematicConfig`` limits for that subject only. The gate
+emits its usual corrections AND a list of ``ProfileUpdateProposal`` on
+``KinematicReport.profile_updates``. Consumer helper
+``apply_profile_updates(store, priors, subject_lookup, updates)`` feeds each
+proposal through :func:`update_field` — so the seven-filter policy runs at the
+persistence seam, never in the gate itself. Observations come from the CLAMPED
+motion (§4.4 layer 1), confidence is min ``subject_frame_conf`` over the
+subject's frames.
+
+Small robustness fix as a side-effect: the quarantine filter now requires
+CI > 1e-6 so a run of identical observations (ci collapses to 0) doesn't
+trip on 2e-15 floating-point drift. Documented and covered.
+
+8 new unit tests (``tests/unit/test_kinematics_profile.py``): backwards
+compat with no provider, per-subject ceiling swap, ``profile_updates``
+emitted from clamped motion, ``apply_profile_updates`` promotes measured
+speed after N samples, operator lock still immune, missing player creates
+default from priors, unknown track/field skipped safely.
+
+Full suite: 734 passed, 12 skipped, 0 failures.
 
 **T4.c — ball profile wiring.** After T4.b, same pattern for the ball
 against ``BallConfig``.

@@ -26,11 +26,13 @@ auto coherence smoothing), so the emitted keyframes capture and supersede that b
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Callable
 
 import numpy as np
 
 from ..scene.layers import Correction, CorrectionMode, CorrectionTarget, TargetKind
-from ..scene.scene import Scene
+from ..scene.player_profile import PlayerProfile, ProfileUpdateProposal
+from ..scene.scene import Scene, Subject
 from .engine import make_keyframes, resolve_subject_motion
 
 #: Shared human-motion ceilings — single source of truth with scripts/motion_stats.py.
@@ -87,6 +89,11 @@ class KinematicReport:
     accel_viol_after: int = 0
     max_dev_m: float = 0.0  # largest positional change the clamp introduced anywhere
     teleports: list[TeleportEvent] = field(default_factory=list)
+    #: Per-subject observations for the auto-tuner (T4). Empty unless a
+    #: ``profile_provider`` was passed. Consumed by :func:`apply_profile_updates`.
+    profile_updates: list[ProfileUpdateProposal] = field(default_factory=list)
+    #: Track ids for which the per-subject ceilings came from a stored profile.
+    subjects_using_profile: list[int] = field(default_factory=list)
 
 
 def _speeds_accels(
@@ -251,8 +258,84 @@ def _count_viols(
     return int(sp_mask.sum()), int(ac_mask.sum())
 
 
+#: Callable that returns the stored profile for a subject, or None if unknown.
+ProfileProvider = Callable[[Subject], PlayerProfile | None]
+
+
+def _subject_cfg(cfg: KinematicConfig, profile: PlayerProfile | None
+                 ) -> tuple[KinematicConfig, bool]:
+    """Return ``(cfg_for_this_subject, used_profile)``.
+
+    When ``profile`` carries a measured/default value for ``peak_speed_mps`` or
+    ``peak_accel_mps2``, replace the shared ``cfg`` value with it. Untouched
+    fields (spike_neighbor_frac, teleport_factor, etc.) stay global. This is
+    the per-subject ceiling from §4.1 without touching downstream code.
+    """
+    if profile is None:
+        return cfg, False
+    used = False
+    new_speed = cfg.max_speed
+    new_accel = cfg.max_accel
+    speed_field = profile.kinematics.get("peak_speed_mps")
+    accel_field = profile.kinematics.get("peak_accel_mps2")
+    if speed_field is not None:
+        new_speed = float(speed_field.value)
+        used = True
+    if accel_field is not None:
+        new_accel = float(accel_field.value)
+        used = True
+    if not used:
+        return cfg, False
+    return replace(cfg, max_speed=new_speed, max_accel=new_accel), True
+
+
+def _emit_profile_updates(
+    track_id: int, resolved_xy: np.ndarray, frames: np.ndarray, fps: float,
+    profile: PlayerProfile | None, min_conf: float,
+) -> list[ProfileUpdateProposal]:
+    """Compute p95 speed/accel on the resolved track and emit auto-tune proposals.
+
+    Follows the §4.4 rules that live INSIDE the gate:
+
+    * layer 1 (resolved-only) — we already pass the CLAMPED xy in.
+    * layer 2 (robust estimator) — p95 over the whole visible window, not max.
+
+    The other five filters run inside ``update_field`` when the store consumes
+    these proposals. If ``profile`` is ``None`` there is no target to write to
+    — return empty.
+    """
+    if profile is None or resolved_xy.shape[0] < 3:
+        return []
+    _, speed, accel = _speeds_accels(frames, resolved_xy, fps)
+    updates: list[ProfileUpdateProposal] = []
+    if speed.size >= 2:
+        obs = float(np.percentile(speed, 95))
+        default_v = None
+        f = profile.kinematics.get("peak_speed_mps")
+        if f is not None:
+            default_v = f.value
+        updates.append(ProfileUpdateProposal(
+            track_id=int(track_id), domain="player",
+            field_key="peak_speed_mps", observation=obs,
+            confidence=float(min_conf), default_value=default_v,
+        ))
+    if accel.size >= 2:
+        obs = float(np.percentile(accel, 95))
+        default_v = None
+        f = profile.kinematics.get("peak_accel_mps2")
+        if f is not None:
+            default_v = f.value
+        updates.append(ProfileUpdateProposal(
+            track_id=int(track_id), domain="player",
+            field_key="peak_accel_mps2", observation=obs,
+            confidence=float(min_conf), default_value=default_v,
+        ))
+    return updates
+
+
 def kinematic_gate(
-    scene: Scene, cfg: KinematicConfig | None = None, *, fps: float
+    scene: Scene, cfg: KinematicConfig | None = None, *, fps: float,
+    profile_provider: ProfileProvider | None = None,
 ) -> tuple[Scene, KinematicReport]:
     """Append per-subject kinematic-clamp corrections to a scene; return NEW scene + report.
 
@@ -263,6 +346,13 @@ def kinematic_gate(
     frame. Resolving later reproduces the gated track exactly and supersedes the earlier
     smoothing on that target. The input scene is never mutated; the ball is out of scope
     (measured clean, and ball physics differ).
+
+    ``profile_provider``: optional per-subject :class:`PlayerProfile` lookup. When
+    present, each subject's ``peak_speed_mps`` / ``peak_accel_mps2`` from the
+    profile override the shared ``cfg`` values (T4.b). The gate also emits
+    :class:`ProfileUpdateProposal`s on ``report.profile_updates`` — the store
+    consumer feeds each through :func:`update_field` so the seven-filter policy
+    runs at the persistence seam (never in the gate).
     """
     cfg = cfg or KinematicConfig()
     report = KinematicReport(n_subjects=len(scene.subjects))
@@ -279,13 +369,32 @@ def kinematic_gate(
             continue
         xy = transl[:, :2]
 
-        sp_b, ac_b = _count_viols(frames, xy, fps, cfg)
+        profile = profile_provider(s) if profile_provider is not None else None
+        subject_cfg, used_profile = _subject_cfg(cfg, profile)
+        if used_profile:
+            report.subjects_using_profile.append(int(s.track_id))
+
+        sp_b, ac_b = _count_viols(frames, xy, fps, subject_cfg)
         report.speed_viol_before += sp_b
         report.accel_viol_before += ac_b
+
+        # confidence for auto-tune: use the min subject_frame_conf over the visible
+        # window (falls back to 1.0 when no confidence map is attached)
+        min_conf = 1.0
+        conf_map = scene.confidence
+        if conf_map is not None and s.track_id in conf_map.subject_frame_conf:
+            cvals = np.asarray(conf_map.subject_frame_conf[s.track_id], dtype=float)
+            if cvals.size:
+                min_conf = float(cvals.min())
+
         if sp_b == 0 and ac_b == 0:
+            # nothing to clamp, but still feed the auto-tuner with the resolved p95
+            report.profile_updates.extend(
+                _emit_profile_updates(s.track_id, xy, frames, fps, profile, min_conf)
+            )
             continue
 
-        new_xy, regions = gate_subject_xy(frames, xy, fps, cfg)
+        new_xy, regions = gate_subject_xy(frames, xy, fps, subject_cfg)
         _, speed, _ = _speeds_accels(frames, xy, fps)
         for k0, k1 in regions:
             report.teleports.append(
@@ -298,13 +407,19 @@ def kinematic_gate(
                 )
             )
         preserved = [k for k0, k1 in regions for k in range(k0, k1 + 1)]
-        sp_a, ac_a = _count_viols(frames, new_xy, fps, cfg, exclude_intervals=preserved)
+        sp_a, ac_a = _count_viols(
+            frames, new_xy, fps, subject_cfg, exclude_intervals=preserved,
+        )
         report.speed_viol_after += sp_a
         report.accel_viol_after += ac_a
 
         dev = float(np.linalg.norm(new_xy - xy, axis=1).max())
         report.max_dev_m = max(report.max_dev_m, dev)
-        if dev < cfg.min_correction_m:
+        # auto-tune fed from the CLAMPED track (§4.4 layer 1)
+        report.profile_updates.extend(
+            _emit_profile_updates(s.track_id, new_xy, frames, fps, profile, min_conf)
+        )
+        if dev < subject_cfg.min_correction_m:
             continue
 
         new_transl = transl.copy()
@@ -317,8 +432,10 @@ def kinematic_gate(
                 key_frames=frames.astype(float),
                 key_values=new_transl,
                 note=(
-                    f"auto kinematic gate (root translation): speed<={cfg.max_speed}m/s, "
-                    f"accel<={cfg.max_accel}m/s² @ {fps:.3g}fps"
+                    f"auto kinematic gate (root translation): "
+                    f"speed<={subject_cfg.max_speed}m/s, "
+                    f"accel<={subject_cfg.max_accel}m/s² @ {fps:.3g}fps"
+                    + (f" [profile #{s.track_id}]" if used_profile else "")
                 ),
             )
         )
