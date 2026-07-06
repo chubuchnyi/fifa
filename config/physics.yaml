@@ -235,6 +235,34 @@ profiles:
       inertia_smooth:
         enabled:            true
 
+  full_realism_collide:
+    description: "full_realism + capsule collision; momentum_smooth cleans up the push spikes."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+      foot_plant:
+        enabled:            true
+      collision:
+        enabled:            true
+        strength:           0.3
+        max_push_per_frame_m: 0.15
+      contact_probe:
+        enabled:            true
+      momentum_smooth:
+        enabled:            true
+        preserve_contact:  false
+        smooth_window:      7
+      pose_motion_sync:
+        enabled:            true
+      facing_align:
+        enabled:            true
+      inertia_smooth:
+        enabled:            true
+
   safe_new_humanize:
     description: "safe_new + humanize_teleports — closes hover/joint/orient AND smooths ID-swap jumps."
     overrides:
