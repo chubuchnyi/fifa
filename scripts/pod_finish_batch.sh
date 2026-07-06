@@ -35,6 +35,10 @@
 #      in the render, Wan re-adds only ~0.8% vs clip 3.6% — t19 measured twice) —
 #      STANDS_RED=0 skips; STANDS_RED_ROI matches the stands pin's SIDELINE framing; runs
 #      AFTER the soften (specks stay crisp)
+#  14) player contact-shadow pin: elliptical dark alpha under each player's foot line,
+#      grass-gated so v2v halos don't stack. Clip's contact-shadow V drop is -.029 vs grass;
+#      ours (t21) reads -.139 in the same zone from v2v halo but with NO shadow SHAPE
+#      (t23 measured 2026-07-06). Partial mitigation — PLAYER_SHADOW=0 skips
 #
 # Finishing is per-camera (v2v eats one frame dir): ANIM_CAMERAS must be ONE camera.
 # Env: OUT=out/anim_finish  ANIM_CAMERAS=sideline  REUSE_SCENE=0  TAIL_ONLY=0  TARGET_HUE=  DILATE=15
@@ -257,6 +261,23 @@ if [ "${STANDS_RED:-1}" = "1" ]; then
   [ -n "${STANDS_RED_FRAC:-}" ] && RPIN+=(--frac "$STANDS_RED_FRAC")
   "$PY" scripts/stands_red_pin.py "${RPIN[@]}"
   FINAL="$RFINAL"
+fi
+
+# 14) player contact-shadow pin: screen-space elliptical dark alpha at each player's
+#     foot line, grass-gated. The clip has tight elliptical shadows under players
+#     (V drop -.029 on grass); v2v produces smeared halos with no distinct shadow SHAPE
+#     (t23 measured 2026-07-06). Partial mitigation — cannot recover v2v-smeared silhouettes,
+#     but adds the missing shadow signal on well-detected players. PLAYER_SHADOW=0 skips.
+if [ "${PLAYER_SHADOW:-1}" = "1" ]; then
+  PSFINAL="${V2V720%.mp4}_pinned8.mp4"
+  PSPIN=(--video "$FINAL" --out "$PSFINAL"
+         --strength "${PLAYER_SHADOW_STRENGTH:-0.25}"
+         --ax-w "${PLAYER_SHADOW_AXW:-0.80}"
+         --ax-h "${PLAYER_SHADOW_AXH:-0.20}"
+         --feather "${PLAYER_SHADOW_FEATHER:-5}"
+         --y-band ${PLAYER_SHADOW_YBAND:-0.40 0.88})
+  "$PY" scripts/player_shadow_pin.py "${PSPIN[@]}"
+  FINAL="$PSFINAL"
 fi
 
 echo "BATCH_FINISH_OK"

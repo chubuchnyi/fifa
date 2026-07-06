@@ -122,13 +122,27 @@
   their slight blue cast reads periwinkle (eye said "blue lines", measurement said "dim
   lines": hue/sat match the clip). NEW stage 9b (`LINES_PIN`, existing `grass_pin.py`
   `--val-only`, desaturated-bright gate in the pitch band) lands V .88 vs clip .90.
+  PLAYER SHADOWS t23 (§6, 2026-07-06 morning): 4-zone measurement isolated the shape —
+  clip has tight elliptical contact shadow (contact V vs grass -.029, below -.022, flanks ≈
+  grass, above ≈ grass); ours reads contact -.263, below -.004, flanks +.04 — the v2v
+  smear halo IS what darkens the "contact" strip but the shape is diffuse-ring not
+  elliptical (`/tmp/t23_shadow/t23_shadow_triple.png`). NEW stage-14 screen-space pin
+  `scripts/player_shadow_pin.py`: shirt-colour boxes (yellow Colombia + azure Congo + white
+  ref/GK) → soft ellipse alpha at foot line, GATED by a grass mask so the darkening only
+  stacks on unshaded grass (not on the v2v halo). Prototype on t21_pinned8: visible
+  ellipse under well-detected players (panels 2/4/6 of the sheet) but heavy-smear zones
+  don't recover a shape — this is HONEST partial mitigation, the root gap is v2v erasing
+  silhouettes. 5/5 unit tests green; wired into `pod_finish_batch.sh` last so batch
+  re-runs pick it up.
   NEW BEST FINALS
   `out/kitzones_pod/sideline_t21_pinned8.mp4` (t20 + line glow; masked in-batch reproduction
   rides the next pod run) + `goal3_pinned4_xflat.mp4` (goal stands pinned+flattened); sheets
-  `/tmp/t20_final_ab.png`, `/tmp/t21_lines_full.png`, `/tmp/t21_{full,stands,grass}_triple.png`.
-  NEXT CANDIDATE (t22, measured+eye): panel-row lime dash periodicity (ours = repeating
-  bright green LED-like segments, clip = calm dark-green panels with gold text); player
-  dark halo smears (v2v class, parked before).
+  `/tmp/t20_final_ab.png`, `/tmp/t21_lines_full.png`, `/tmp/t21_{full,stands,grass}_triple.png`,
+  `/tmp/t23_shadow/t23_shadow_triple.png`.
+  NEXT CANDIDATE (t24, measured+eye): panel-row lime dash periodicity (ours = repeating
+  bright green LED-like segments, clip = calm dark-green panels with gold text) — deferred
+  from t22 before the t23 shadow redirect; and player-silhouette recovery (the root cause
+  the shadow pin can only mitigate).
   Pipeline overview: `docs/pipeline.md`.** Previous lever same day (§6): CROWD TONE — knobs
   `PITCH3D_CROWD_EMISSION/CHROMA/TINT_SAT` = 3.6/0.15/1.35 + warm prompt wording; TWICE-MEASURED
   RULE: state the measured colour of EVERY large surface in the v2v prompt, else Wan's prior
@@ -350,6 +364,38 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-06 (morning)** — **PLAYER SHADOWS t23: measured the shape gap, built the
+  screen-space contact-shadow pin, honestly partial mitigation.** The prior session's
+  eye-note ("no crisp contact shadows in ours — soft dark halos AROUND players") got a
+  4-zone measurement (`/tmp/t23_shadow/shadow_zones.py` — contact / below / flanks / above
+  vs a nearby grass patch): CLIP f28 has classic elliptical contact (contact V vs grass
+  **-.029**, below **-.022**, flanks ≈ 0, above ≈ 0 — tight shadow with a soft below-fade,
+  no side spill); OURS t21_pinned8 f28 reads contact **-.263**, below **-.004**, flanks
+  **+.04** — the v2v smear halo IS what's darkening the "under feet" strip, but as a
+  diffuse ring, not an elliptical shadow, and the below-feet fade is missing. Fix at
+  SCREEN scale, last stage: NEW `scripts/player_shadow_pin.py` = shirt-colour player boxes
+  (yellow Colombia H 25-45 S>100 V>100 + azure Congo H 130-175 S>80 V>60 + white ref/GK
+  S<40 V>180, pitch y-band 0.40-0.88 to skip stands/boards, MORPH_OPEN+CLOSE, blob
+  40<area<4000, 4<ww<60, 8<hh<90) → soft ellipse alpha at foot line (axes .75-.85 × ww,
+  .18-.22 × hh, gaussian feather 5-6 px) → multiplicative darken `pixel *= 1 - strength*
+  alpha*grass_mask`, gated by a grass mask (H 50-110 S>40 V>90, blurred 5 px) so the
+  darkening stacks on unshaded grass rather than on the v2v halo. On the prototype
+  (`/tmp/t23_shadow/pinned9_shadow_v2.mp4`, s=.30 ax_w=.85 ax_h=.22): eyeball A/B triple
+  (`t23_shadow_triple.png`) shows visible elliptical shadow under the well-detected
+  players (panels 2/4/6); heavy v2v-smear zones (panels 3/5) don't recover a shape because
+  the underlying silhouette IS the smear — HONEST partial mitigation, root cause is v2v
+  erasing silhouettes (future lever). Contact delta -.139 → -.192 (measurement is
+  confounded by v2v leakage into the strip; visual shows the added ellipse under grass).
+  Unit tests: `tests/unit/test_player_shadow_pin.py` (5/5) — detect yellow+azure, grass
+  mask covers everything except shirts, paint darkens contact strip AND leaves shirt/far
+  grass untouched, strength=0 is identity, deterministic. Wired as stage 14 in
+  `pod_finish_batch.sh` (after stands red-scatter, PLAYER_SHADOW=1 default, env
+  PLAYER_SHADOW_STRENGTH/AXW/AXH/FEATHER/YBAND). Best final unchanged (still
+  `sideline_t21_pinned8.mp4`); next full pod E2E rides pinned8 after stage 14. Fifth
+  eye/measure inversion (contact reads dark on ours despite "no shadows" eye note — the
+  darkness is the smear, not a shadow). Sheets: `/tmp/t23_shadow/{t23_zoom_f28.png,
+  t23_shadow_triple.png}`. Commit `<t23>`.
 
 - **2026-07-05 (late night 2)** — **LINE GLOW t21: pitch markings brightened to the clip's
   glow — $0, existing machinery, third eye/measure inversion in a row.** t21 zone pass on
