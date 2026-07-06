@@ -33,6 +33,7 @@ from .gates import (
     BallConfig,
     CollisionConfig,
     FootFloorConfig,
+    FootPlantConfig,
     JointKinematicConfig,
     OrientationConfig,
     ProbeConfig,
@@ -69,6 +70,7 @@ class PhysicsConfig:
     kinematic: KinematicConfig
     coherence: CoherenceConfig
     foot_floor: FootFloorConfig
+    foot_plant: FootPlantConfig
     joint: JointKinematicConfig
     orientation: OrientationConfig
     collision: CollisionConfig
@@ -197,6 +199,7 @@ def load_physics_config(
     foot = _build_dataclass(FootFloorConfig, base.get("foot_floor", {}), "foot_floor")
     joint = _build_dataclass(JointKinematicConfig, base.get("joint", {}), "joint")
     orient = _build_dataclass(OrientationConfig, base.get("orientation", {}), "orientation")
+    plant = _build_dataclass(FootPlantConfig, base.get("foot_plant", {}), "foot_plant")
     collision = _build_dataclass(CollisionConfig, base.get("collision", {}), "collision")
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
@@ -205,6 +208,7 @@ def load_physics_config(
         kinematic=kin,
         coherence=coh,
         foot_floor=foot,
+        foot_plant=plant,
         joint=joint,
         orientation=orient,
         collision=collision,

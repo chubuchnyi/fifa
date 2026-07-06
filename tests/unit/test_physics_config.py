@@ -45,6 +45,9 @@ def _minimal(**profiles) -> dict:
                 "extrapolate_velocity_window": 3, "coast_max_speed": 10.5,
             },
             "foot_floor": {"enabled": False, "floor_m": 0.0, "warn_hover_m": 0.30},
+            "foot_plant": {"enabled": False, "mode": "median_lock",
+                           "target_pelvis_m": 0.92, "bias_threshold_m": 0.05,
+                           "min_correction_m": 1e-4},
             "joint":      {"enabled": False, "max_omega_dps": 600.0},
             "orientation": {"enabled": False, "max_turn_rate_dps": 720.0},
             "ball":       {"max_speed": 36.0, "max_accel": 200.0},
@@ -156,8 +159,8 @@ def test_lineage_covers_every_leaf(tmp_path):
     # For every field of every sub-config, lineage has an entry
     for section, dc in (
         ("kinematic", cfg.kinematic), ("coherence", cfg.coherence),
-        ("foot_floor", cfg.foot_floor), ("joint", cfg.joint),
-        ("orientation", cfg.orientation),
+        ("foot_floor", cfg.foot_floor), ("foot_plant", cfg.foot_plant),
+        ("joint", cfg.joint), ("orientation", cfg.orientation),
         ("ball", cfg.ball), ("probe", cfg.probe),
     ):
         for f in dc.__dataclass_fields__:

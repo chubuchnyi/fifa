@@ -45,6 +45,11 @@ from .foot_floor import (
     SubjectFootReport,
     foot_floor_gate,
 )
+from .foot_plant import (
+    FootPlantReport,
+    SubjectPlantReport,
+    foot_plant_gate,
+)
 from .joint_kinematics import (
     JointKinematicReport,
     JointViolation,
@@ -109,6 +114,9 @@ __all__ = [
     "FootFloorReport",
     "SubjectFootReport",
     "foot_floor_gate",
+    "FootPlantReport",
+    "SubjectPlantReport",
+    "foot_plant_gate",
     "JointKinematicReport",
     "JointViolation",
     "joint_kinematic_gate",

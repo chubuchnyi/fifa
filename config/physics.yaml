@@ -56,6 +56,13 @@ base:
     enabled:               false
     max_turn_rate_dps:    720.0      # global_orient rate ceiling
 
+  foot_plant:               # T6.a — recenter root Z so subjects don't hover
+    enabled:               false
+    mode:                  median_lock   # "off" | "median_lock" | "hard_lock"
+    target_pelvis_m:       0.92          # nominal pelvis-above-floor for standing player
+    bias_threshold_m:      0.05          # skip subjects already within this of target
+    min_correction_m:      1.0e-4
+
   collision:                # Tier 3 — capsule soft-repulsion post-process
     enabled:               false
     capsule_radius_m:       0.35     # ~ shoulder half-width for a standing player
@@ -127,6 +134,18 @@ profiles:
       joint:
         enabled:            true
       orientation:
+        enabled:            true
+
+  safe_new_plant:
+    description: "safe_new + T6.a foot_plant (median-lock Z bias fix — 'stop hovering')."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+      foot_plant:
         enabled:            true
 
   safe_new_humanize:

@@ -46,6 +46,27 @@ class BallConfig:
 
 
 @dataclass(frozen=True)
+class FootPlantConfig:
+    """T6.a — foot plant: recenter root Z so subjects don't hover.
+
+    Modes:
+      * ``off`` — measure only, no corrections emitted.
+      * ``median_lock`` — shift each subject's whole Z track by
+        ``target_pelvis_m - median(Z)`` when the offset exceeds
+        ``bias_threshold_m``. Preserves stride/jump variance but kills the
+        systematic bias that makes every player float.
+      * ``hard_lock`` — clamp every frame's Z to ``target_pelvis_m``. Kills
+        legitimate jumps too; use only for debug.
+    """
+
+    enabled: bool = False
+    mode: str = "median_lock"           # "off" | "median_lock" | "hard_lock"
+    target_pelvis_m: float = 0.92       # nominal pelvis-above-floor for a standing player
+    bias_threshold_m: float = 0.05      # skip subjects whose median Z is already within this
+    min_correction_m: float = 1e-4
+
+
+@dataclass(frozen=True)
 class CollisionConfig:
     """Capsule-collision post-process (Tier 3).
 
