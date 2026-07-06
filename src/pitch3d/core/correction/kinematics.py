@@ -40,6 +40,16 @@ HUMAN_MAX_SPEED = 10.5  # m/s — elite sprint ceiling
 HUMAN_MAX_ACCEL = 8.0   # m/s² — elite acceleration ceiling
 
 
+#: Valid values for :attr:`KinematicConfig.teleport_policy`.
+TELEPORT_POLICIES = ("hold", "interpolate")
+
+#: Confidence stamped on frames whose XY was interpolated across a teleport
+#: region — below coherence's ``extrapolated_confidence=0.2`` so the operator
+#: can still tell "reconstructed across an ID swap" apart from "coast-extended
+#: past the tracker" in the attention list (R-6).
+TELEPORT_INTERPOLATED_CONF = 0.15
+
+
 @dataclass(frozen=True)
 class KinematicConfig:
     """Physical limits + gate knobs (fps is passed at call time, like motion_stats)."""
@@ -55,6 +65,21 @@ class KinematicConfig:
     spike_reversal_cos: float = -0.5   # ...and point back (cosine below this)
     max_passes: int = 50           # bounded accel-clamp sweeps per segment
     min_correction_m: float = 1e-6  # skip emitting a correction below this max deviation
+    #: What to do with detected teleport regions (T2.b):
+    #: * ``"hold"`` (default, R-6 strict): preserve the jump verbatim in the emitted
+    #:   correction. The renderer shows a discontinuity at the ID-swap frame.
+    #: * ``"interpolate"``: replace the region with a linear XY path between the
+    #:   two anchor rows (the entry and exit of the region). ``TeleportEvent`` is
+    #:   still recorded so the audit trail is preserved, and interpolated frames
+    #:   are stamped with :data:`TELEPORT_INTERPOLATED_CONF` in the confidence
+    #:   map so the attention list flags them as inferred (never silently trusted).
+    teleport_policy: str = "hold"
+
+    def __post_init__(self) -> None:
+        if self.teleport_policy not in TELEPORT_POLICIES:
+            raise ValueError(
+                f"teleport_policy={self.teleport_policy!r} not in {TELEPORT_POLICIES}"
+            )
 
 
 @dataclass(frozen=True)
@@ -94,6 +119,9 @@ class KinematicReport:
     profile_updates: list[ProfileUpdateProposal] = field(default_factory=list)
     #: Track ids for which the per-subject ceilings came from a stored profile.
     subjects_using_profile: list[int] = field(default_factory=list)
+    #: Total frames whose XY was replaced with a low-confidence interpolant
+    #: across a teleport region (T2.b `teleport_policy="interpolate"`).
+    teleport_interpolated_frames: int = 0
 
 
 def _speeds_accels(
@@ -203,19 +231,25 @@ def _is_jitter_spike(vel: np.ndarray, speed: np.ndarray, k: int, cfg: KinematicC
 
 def gate_subject_xy(
     frames: np.ndarray, xy: np.ndarray, fps: float, cfg: KinematicConfig
-) -> tuple[np.ndarray, list[tuple[int, int]]]:
-    """Clamp one subject's XY track, preserving teleport regions verbatim.
+) -> tuple[np.ndarray, list[tuple[int, int]], list[int]]:
+    """Clamp one subject's XY track. Returns ``(new_xy, regions, interpolated_rows)``.
 
     Consecutive candidate intervals are grouped into ONE region ``(k0, k1)`` (inclusive
-    interval indices): the jump between rows ``k0`` and ``k1+1`` is kept exactly as
-    measured (an instantaneous ID swap when ``k0 == k1``, a slid-off/smeared swap when
-    longer — no feasible path covers its displacement, so clamping would invent motion).
-    The candidate-free stretches between regions are clamped independently.
+    interval indices). Behaviour then depends on ``cfg.teleport_policy``:
+
+    * ``"hold"`` (R-6 default): the jump between rows ``k0`` and ``k1+1`` is kept as
+      measured; ``interpolated_rows`` is empty. Candidate-free stretches are clamped
+      independently between regions.
+    * ``"interpolate"``: the whole track is clamped as a single anchored segment, which
+      linearly interpolates across the region — no invented sprint, just a straight
+      path between the two anchors. ``interpolated_rows`` lists the frame indices
+      whose XY changed from the raw measurement so the caller can stamp them with a
+      low confidence in the attention list.
     """
     xy = np.asarray(xy, dtype=float)
     n = xy.shape[0]
     if n < 3:
-        return xy.copy(), []
+        return xy.copy(), [], []
     dt = np.diff(np.asarray(frames, dtype=float)) / fps
     vel = np.diff(xy, axis=0) / dt[:, None]
     speed = np.linalg.norm(vel, axis=1)
@@ -232,11 +266,28 @@ def gate_subject_xy(
             regions.append((k, k))
 
     out = xy.copy()
-    cuts = [0, *(i for k0, k1 in regions for i in (k0 + 1, k1 + 1)), n]
-    for b, e in zip(cuts[::2], cuts[1::2], strict=True):  # candidate-free [b, e) stretches
-        if e - b >= 3:
-            out[b:e] = clamp_track_xy(frames[b:e], xy[b:e], fps, cfg)
-    return out, regions
+    interpolated_rows: list[int] = []
+
+    if cfg.teleport_policy == "interpolate" and regions:
+        # Clamp the whole track as one anchored segment. The velocity/accel sweeps
+        # linearly interpolate across the region (no invented sprint — a straight
+        # line between the anchors). Rows inside each region are tagged R-6 for
+        # the confidence map so the attention list flags them as inferred.
+        clamped = clamp_track_xy(frames, xy, fps, cfg)
+        out = clamped
+        for k0, k1 in regions:
+            # region intervals are k0..k1 inclusive; the "after-jump" rows are
+            # k0+1 through k1+1 inclusive (n_intervals+1 rows).
+            for r in range(k0 + 1, k1 + 2):
+                if r < n:
+                    interpolated_rows.append(int(r))
+    else:
+        cuts = [0, *(i for k0, k1 in regions for i in (k0 + 1, k1 + 1)), n]
+        for b, e in zip(cuts[::2], cuts[1::2], strict=True):  # candidate-free [b, e) stretches
+            if e - b >= 3:
+                out[b:e] = clamp_track_xy(frames[b:e], xy[b:e], fps, cfg)
+
+    return out, regions, interpolated_rows
 
 
 def _count_viols(
@@ -260,6 +311,32 @@ def _count_viols(
 
 #: Callable that returns the stored profile for a subject, or None if unknown.
 ProfileProvider = Callable[[Subject], PlayerProfile | None]
+
+
+def _mark_low_conf(
+    scene: Scene, track_id: int, frames: np.ndarray,
+    row_indices: list[int], conf: float,
+) -> None:
+    """Stamp ``subject_frame_conf[track_id]`` at the given row indices with ``conf``.
+
+    Mutates the scene's confidence map in place. If no map exists yet, one is
+    created. Missing per-track entries are seeded with 1.0 (measured) so only
+    the interpolated rows get the low value — the rest stay honest.
+    """
+    from ..scene.layers import ConfidenceMap
+    if scene.confidence is None:
+        scene.confidence = ConfidenceMap()
+    frame_conf = dict(scene.confidence.subject_frame_conf)
+    existing = frame_conf.get(track_id)
+    if existing is None or len(existing) != len(frames):
+        existing = np.ones(len(frames), dtype=float)
+    else:
+        existing = np.asarray(existing, dtype=float).copy()
+    for r in row_indices:
+        if 0 <= r < existing.shape[0]:
+            existing[r] = float(conf)
+    frame_conf[track_id] = existing
+    scene.confidence = replace(scene.confidence, subject_frame_conf=frame_conf)
 
 
 def _subject_cfg(cfg: KinematicConfig, profile: PlayerProfile | None
@@ -394,7 +471,9 @@ def kinematic_gate(
             )
             continue
 
-        new_xy, regions = gate_subject_xy(frames, xy, fps, subject_cfg)
+        new_xy, regions, interpolated_rows = gate_subject_xy(
+            frames, xy, fps, subject_cfg,
+        )
         _, speed, _ = _speeds_accels(frames, xy, fps)
         for k0, k1 in regions:
             report.teleports.append(
@@ -407,6 +486,11 @@ def kinematic_gate(
                 )
             )
         preserved = [k for k0, k1 in regions for k in range(k0, k1 + 1)]
+        # In "interpolate" policy the region rows are no longer preserved
+        # verbatim, so accel violations from the smooth interpolant count
+        # against the "after" tally (they'll be near zero anyway).
+        if subject_cfg.teleport_policy == "interpolate":
+            preserved = []
         sp_a, ac_a = _count_viols(
             frames, new_xy, fps, subject_cfg, exclude_intervals=preserved,
         )
@@ -415,6 +499,15 @@ def kinematic_gate(
 
         dev = float(np.linalg.norm(new_xy - xy, axis=1).max())
         report.max_dev_m = max(report.max_dev_m, dev)
+
+        # T2.b R-6 tag: stamp interpolated teleport frames with a low
+        # subject_frame_conf so the attention list flags them as inferred.
+        if interpolated_rows:
+            report.teleport_interpolated_frames += len(interpolated_rows)
+            _mark_low_conf(
+                scene, s.track_id, frames, interpolated_rows,
+                TELEPORT_INTERPOLATED_CONF,
+            )
         # auto-tune fed from the CLAMPED track (§4.4 layer 1)
         report.profile_updates.extend(
             _emit_profile_updates(s.track_id, new_xy, frames, fps, profile, min_conf)

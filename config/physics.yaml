@@ -26,6 +26,7 @@ base:
     spike_reversal_cos:    -0.5      # neighbour cos-similarity for spike demotion
     max_passes:            50        # bounded accel-clamp sweeps
     min_correction_m:       1.0e-6   # skip emit below this positional dev
+    teleport_policy:      hold       # T2b — "hold" (R-6) | "interpolate" (mark low-conf)
 
   coherence:                # gap-fill + edge-extend + auto-smoothing (SHIPPED)
     max_fill_gap:          12
@@ -107,3 +108,9 @@ profiles:
         enabled:            true
       orientation:
         enabled:            true
+
+  humanize_teleports:
+    description: "Interpolate teleport regions instead of preserving the jump — marked R-6 low-conf."
+    overrides:
+      kinematic:
+        teleport_policy:    interpolate

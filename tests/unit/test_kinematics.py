@@ -103,7 +103,7 @@ def test_gate_marks_and_preserves_teleport():
     frames = np.arange(30)
     xy = _walk(30, v=2.0)
     xy[15:] += [1.8, 0.0]  # ID-swap teleport: 1.8m in one frame = 45 m/s
-    out, teleports = gate_subject_xy(frames, xy, FPS, CFG)
+    out, teleports, _ = gate_subject_xy(frames, xy, FPS, CFG)
     assert teleports == [(14, 14)]
     # the jump displacement is preserved verbatim — marked, not erased (R-6)
     np.testing.assert_allclose(out[15] - out[14], xy[15] - xy[14], atol=1e-9)
@@ -114,7 +114,7 @@ def test_gate_clamps_segments_around_teleport_independently():
     frames = np.arange(40)
     xy = _walk(40, v=2.0) + rng.normal(0, 0.2, (40, 2))
     xy[20:] += [2.5, 0.0]
-    out, teleports = gate_subject_xy(frames, xy, FPS, CFG)
+    out, teleports, _ = gate_subject_xy(frames, xy, FPS, CFG)
     assert teleports == [(19, 19)]
     for seg in (slice(0, 20), slice(20, 40)):
         sp, ac = _viols(frames[seg], out[seg])
@@ -129,7 +129,7 @@ def test_gate_collapses_consecutive_run_into_one_region():
     # 5 consecutive impossible intervals, decaying 42→24 m/s, all same direction
     for i, d in enumerate([1.7, 1.4, 1.2, 1.0, 0.95]):
         xy[16 + i :] += [d, 0.0]
-    out, regions = gate_subject_xy(frames, xy, FPS, CFG)
+    out, regions, _ = gate_subject_xy(frames, xy, FPS, CFG)
     assert regions == [(15, 19)]
     # the whole slide region stays measured verbatim (R-6: no invented path)
     np.testing.assert_allclose(out[15:21], xy[15:21], atol=1e-9)
@@ -143,7 +143,7 @@ def test_gate_clamps_out_and_back_spike_as_noise():
     frames = np.arange(30)
     xy = _walk(30, v=2.0)
     xy[10] += [0.0, 1.2]  # single-row spike: both adjacent intervals ~30 m/s, reversed
-    out, teleports = gate_subject_xy(frames, xy, FPS, CFG)
+    out, teleports, _ = gate_subject_xy(frames, xy, FPS, CFG)
     assert teleports == []
     sp, ac = _viols(frames, out)
     assert sp == 0 and ac <= 1

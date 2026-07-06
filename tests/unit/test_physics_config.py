@@ -34,6 +34,7 @@ def _minimal(**profiles) -> dict:
                 "max_speed": 10.5, "max_accel": 8.0, "teleport_factor": 2.0,
                 "spike_neighbor_frac": 0.5, "spike_reversal_cos": -0.5,
                 "max_passes": 50, "min_correction_m": 1e-6,
+                "teleport_policy": "hold",
             },
             "coherence": {
                 "max_fill_gap": 12, "smooth_window": 5, "smooth_method": "moving_average",

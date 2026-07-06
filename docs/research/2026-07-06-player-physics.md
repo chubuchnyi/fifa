@@ -349,11 +349,41 @@ infrastructure waits for the real HMR run to fire.*
 
 ### Tier 2 — presence / persistence hardening (E)
 
-**T2.a — rendering audit.** Confirm extrapolated frames actually render (no blink). Search `blender_animate.py` for any condition on `subject_frame_conf`.
+**T2.a — rendering audit.** DONE. ``scripts/blender_animate.py`` hides a
+subject only when the target frame has no row (line 612 ``hide_render=True``).
+Coherence's ``extend_pose_to_span`` densifies every subject to the full clip
+span, producing rows for every extrapolated frame — so coast-extended
+subjects DO render (no blink). ``subject_frame_conf`` is not consulted by the
+renderer at all; only by the overlay/attention debug views. The real
+"appear/vanish" complaint traces to teleport regions: M3-9 preserves them
+verbatim under the R-6 rule, so the resolved XY jumps between the pre- and
+post-swap positions. That's the gap ``T2.b`` closes.
 
-**T2.b — marked-teleport interpolation policy.** Option `teleport_policy=hold|interpolate|flash` — default `hold` (no invented motion), with a flag for smooth `interpolate` (marked R-6).
+**T2.b — teleport policy.** DONE.
+``KinematicConfig.teleport_policy: "hold" | "interpolate"`` (rejects other
+values at construction). ``"hold"`` (default, R-6 strict) keeps the jump
+exactly as measured. ``"interpolate"`` clamps the whole track as one anchored
+segment — the velocity/accel sweeps produce a linear XY path across the
+region, no invented sprint. In both modes the ``TeleportEvent`` is still
+recorded on ``KinematicReport.teleports`` so the audit trail is preserved.
+Interpolated rows get stamped in ``scene.confidence.subject_frame_conf`` at
+``TELEPORT_INTERPOLATED_CONF = 0.15`` — below coherence's ``0.2`` extrapolated
+confidence, so the attention list separates "smoothed across an ID swap" from
+"coast-extended past the tracker."
 
-*Cost: T2.a — 1 iteration; T2.b — 1–2 iterations. $0.*
+Config: ``teleport_policy`` added to ``config/physics.yaml`` ``base:``; new
+named profile ``humanize_teleports`` overrides to ``interpolate``. Lineage
+records the source (``base`` vs ``profile:humanize_teleports``). CLI unchanged
+— select via ``--physics-profile humanize_teleports``.
+
+8 new unit tests (``tests/unit/test_teleport_policy.py``): invalid value
+rejected, hold preserves the jump, interpolate smooths it and stamps
+low-conf, TeleportEvent survives interpolation, YAML profile roundtrip,
+default stays hold, no teleport → no interpolation regardless of policy.
+
+Full suite: 768 passed, 12 skipped, 0 failures. **Tier 2 closed.**
+
+*Cost: 1 iteration, $0. Verified on ``out/p2_3/export/scene.json``.*
 
 ### Tier 3 — collision (F)
 
