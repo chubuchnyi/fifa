@@ -112,25 +112,31 @@ def pose_motion_sync_gate(
             report.subjects.append(r)
             continue
 
-        # cumulative distance for phase (only over the whole track, not just
-        # desync frames — otherwise the phase discontinuously resets)
+        # cumulative distance for phase (continuous over the whole track)
         cum_dist = np.concatenate([[0.0], np.cumsum(speed[1:] * dt)])
         phase = 2.0 * np.pi * cfg.strides_per_metre * cum_dist
 
+        # Continuous walk cycle applied to EVERY moving frame, scaled by:
+        #   speed_factor = clip(speed / full_speed_mps, 0, 1)
+        #   sync_alpha = 1 - clip(dpose_mag / joint_activity_threshold, 0, 1)
+        # sync_alpha≈1 when pose is still (needs help); ≈0 when pose already
+        # animates (no help needed). Applied ADDITIVELY on top of the raw pose
+        # so real HMR motion (a kick, header) survives.
+        speed_factor = np.clip(speed / max(cfg.full_speed_mps, 1e-6), 0.0, 1.0)
+        sync_alpha = 1.0 - np.clip(
+            dpose_mag / max(cfg.joint_activity_threshold, 1e-6), 0.0, 1.0,
+        )
+        # gate by moving so a standing subject gets nothing
+        blend = np.where(moving, speed_factor * sync_alpha, 0.0)
+        knee_amp = cfg.knee_amplitude_rad * blend
+        hip_amp = cfg.hip_amplitude_rad * blend
+        max_amp = float(knee_amp.max())
+
         new_body = body_pose.copy()
-        max_amp = 0.0
-        for idx in np.where(desync)[0]:
-            amplitude = cfg.knee_amplitude_rad * min(
-                1.0, speed[idx] / max(cfg.full_speed_mps, 1e-6),
-            )
-            max_amp = max(max_amp, amplitude)
-            new_body[idx, JOINT_KNEE_L, 0] = amplitude * np.sin(phase[idx])
-            new_body[idx, JOINT_KNEE_R, 0] = amplitude * np.sin(phase[idx] + np.pi)
-            hip_amp = cfg.hip_amplitude_rad * min(
-                1.0, speed[idx] / max(cfg.full_speed_mps, 1e-6),
-            )
-            new_body[idx, JOINT_HIP_L, 0] = -0.5 * hip_amp * np.sin(phase[idx])
-            new_body[idx, JOINT_HIP_R, 0] = -0.5 * hip_amp * np.sin(phase[idx] + np.pi)
+        new_body[:, JOINT_KNEE_L, 0] = body_pose[:, JOINT_KNEE_L, 0] + knee_amp * np.sin(phase)
+        new_body[:, JOINT_KNEE_R, 0] = body_pose[:, JOINT_KNEE_R, 0] + knee_amp * np.sin(phase + np.pi)
+        new_body[:, JOINT_HIP_L, 0] = body_pose[:, JOINT_HIP_L, 0] + (-0.5) * hip_amp * np.sin(phase)
+        new_body[:, JOINT_HIP_R, 0] = body_pose[:, JOINT_HIP_R, 0] + (-0.5) * hip_amp * np.sin(phase + np.pi)
 
         # emit per-joint corrections that touch the affected joints
         for j in (JOINT_HIP_L, JOINT_HIP_R, JOINT_KNEE_L, JOINT_KNEE_R):
