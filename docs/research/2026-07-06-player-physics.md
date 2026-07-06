@@ -315,13 +315,37 @@ circular import by moving pure config dataclasses to
 
 *Cost: 1 iteration, $0. Verified on ``out/p2_3/export/scene.json``.*
 
-**T1.b — per-joint angular gate.** New module `core/correction/joint_kinematics.py`: `max_omega_deg_per_s` (first version = 600°/s per joint), quaternion-slerp clamp, marked spikes with R-6. One `KEYFRAME_INTERP` per joint per subject through ADR-0002. Tests follow the M3-9 pattern.
+**T1.b — per-joint angular gate.** DONE.
+``src/pitch3d/core/correction/joint_kinematics.py``: sibling of the M3-9 gate on
+``body_pose`` (T, K, 3). For each joint independently: forward slerp sweep in
+rotation space — every ``t → t+1`` whose angular rate exceeds
+``JointKinematicConfig.max_omega_dps`` (default 600°/s) becomes
+``slerp(R_t, R_t+1, max·dt / actual_angle)``, keeping direction, capping speed.
+Emits ONE ``KEYFRAME_INTERP`` ``POSE_BODY_JOINT`` correction per (subject, joint)
+that actually needed clamping — untouched joints stay silent. Group-metric
+``|angle(R_b, R_a)|`` via quaternion delta (test pins componentwise as WRONG).
 
-*Cost: 2–3 iterations, local $0, pod E2E $0.10 for eye-verify.*
+11 unit tests: measure-only (disabled), clamps below limit, untouched joints
+skipped, within-limits zero corrections, idempotent, per-track/per-joint
+violations, empty/bad-fps safety.
 
-**T1.c — root orientation gate.** Extend `KinematicConfig` with `max_turn_rate_deg_per_s=720`; flip `smooth_root_orientation=True`, excluding marked spikes.
+**T1.c — root orientation gate.** DONE.
+``src/pitch3d/core/correction/orientation.py``: same forward-sweep design but on
+the scalar ``global_orient`` (T, 3). Emits one ``KEYFRAME_INTERP``
+``ROOT_ORIENTATION`` correction per subject.
+``OrientationConfig.max_turn_rate_dps`` default 720°/s (comes from
+``config/physics.yaml``, never a hidden constant). ``smooth_root_orientation``
+stays off — this gate replaces the naive smoother it always avoided.
 
-*Cost: 1–2 iterations, $0.*
+7 unit tests mirror the joint gate.
+
+Both gates wired into ``scripts/physics_compare.py``. Profile sweep now shows
+``jOver`` / ``jFix`` / ``jMaxA`` and ``oOver`` / ``oFix`` / ``oMaxA`` columns
+alongside XY + foot columns.
+
+*Cost: 2 iterations combined, $0. Verified on ``out/p2_3/export/scene.json``:
+harness runs clean; jOver/oOver are 0 because the dry-run pose is all zeros —
+infrastructure waits for the real HMR run to fire.*
 
 ### Tier 2 — presence / persistence hardening (E)
 

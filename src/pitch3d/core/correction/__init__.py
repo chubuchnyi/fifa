@@ -41,6 +41,16 @@ from .foot_floor import (
     SubjectFootReport,
     foot_floor_gate,
 )
+from .joint_kinematics import (
+    JointKinematicReport,
+    JointViolation,
+    joint_kinematic_gate,
+)
+from .orientation import (
+    OrientationReport,
+    OrientationViolation,
+    orientation_gate,
+)
 from .rotations import (
     average_quats,
     axis_angle_to_matrix,
@@ -93,4 +103,10 @@ __all__ = [
     "FootFloorReport",
     "SubjectFootReport",
     "foot_floor_gate",
+    "JointKinematicReport",
+    "JointViolation",
+    "joint_kinematic_gate",
+    "OrientationReport",
+    "OrientationViolation",
+    "orientation_gate",
 ]

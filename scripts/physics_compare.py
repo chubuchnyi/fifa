@@ -37,7 +37,9 @@ from pitch3d.core.config import load_physics_config
 from pitch3d.core.correction.coherence import add_temporal_coherence
 from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.foot_floor import foot_floor_gate
+from pitch3d.core.correction.joint_kinematics import joint_kinematic_gate
 from pitch3d.core.correction.kinematics import kinematic_gate
+from pitch3d.core.correction.orientation import orientation_gate
 from pitch3d.core.scene.serialization import load_scene
 
 
@@ -116,6 +118,10 @@ def run_profile(scene_path: str, profile: str, config: str | None,
     corrections_added += kr.corrections_added
     scene, ffr = foot_floor_gate(scene, cfg.foot_floor)
     corrections_added += ffr.corrections_added
+    scene, jkr = joint_kinematic_gate(scene, cfg.joint, fps=fps)
+    corrections_added += jkr.corrections_added
+    scene, orr = orientation_gate(scene, cfg.orientation, fps=fps)
+    corrections_added += orr.corrections_added
 
     after = _scene_stats(scene, fps, cfg)
     return {
@@ -134,6 +140,14 @@ def run_profile(scene_path: str, profile: str, config: str | None,
         "foot_plateau": ffr.subjects_plateau,
         "foot_hovering": ffr.subjects_hovering,
         "foot_corrected": ffr.subjects_corrected,
+        "joint_over": jkr.intervals_over_limit,
+        "joint_clamped": jkr.intervals_clamped,
+        "joint_max_before": jkr.max_rate_before_dps,
+        "joint_max_after": jkr.max_rate_after_dps,
+        "orient_over": orr.intervals_over_limit,
+        "orient_clamped": orr.intervals_clamped,
+        "orient_max_before": orr.max_rate_before_dps,
+        "orient_max_after": orr.max_rate_after_dps,
         "before": before,
         "after": after,
         "kin_max_speed": cfg.kinematic.max_speed,
@@ -143,22 +157,28 @@ def run_profile(scene_path: str, profile: str, config: str | None,
 
 def _print_table(results: list[dict]) -> None:
     hdr = (f"{'profile':>14} {'lim_sp':>7} {'lim_ac':>7} "
-           f"{'sp>lim':>7} {'ac>lim':>7} {'tele':>5} "
+           f"{'sp>lim':>6} {'ac>lim':>6} {'tele':>4} "
            f"{'sp_max':>7} {'ac_max':>8} {'max_dev':>8} "
-           f"{'blwFl':>5} {'plat':>4} {'hovr':>4} {'ffFix':>5} "
-           f"{'corrs':>6}")
+           f"{'blwFl':>5} {'plat':>4} {'ffFix':>5} "
+           f"{'jOver':>5} {'jFix':>5} {'jMaxA':>6} "
+           f"{'oOver':>5} {'oFix':>5} {'oMaxA':>6} "
+           f"{'corrs':>5}")
     print(hdr)
     print("-" * len(hdr))
     for r in results:
         print(f"{r['profile']:>14} "
               f"{r['kin_max_speed']:>7.2f} {r['kin_max_accel']:>7.2f} "
-              f"{r['after']['speed_viol']:>7} {r['after']['accel_viol']:>7} "
-              f"{r['teleports']:>5} "
+              f"{r['after']['speed_viol']:>6} {r['after']['accel_viol']:>6} "
+              f"{r['teleports']:>4} "
               f"{r['after']['sp_max_mps']:>7.2f} {r['after']['ac_max_mps2']:>8.1f} "
               f"{r['max_dev_m']:>8.3f} "
               f"{r['foot_below_floor']:>5} {r['foot_plateau']:>4} "
-              f"{r['foot_hovering']:>4} {r['foot_corrected']:>5} "
-              f"{r['corrections_added']:>6}")
+              f"{r['foot_corrected']:>5} "
+              f"{r['joint_over']:>5} {r['joint_clamped']:>5} "
+              f"{r['joint_max_after']:>6.0f} "
+              f"{r['orient_over']:>5} {r['orient_clamped']:>5} "
+              f"{r['orient_max_after']:>6.0f} "
+              f"{r['corrections_added']:>5}")
 
 
 def _print_lineage(results: list[dict]) -> None:
