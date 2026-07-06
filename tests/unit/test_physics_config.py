@@ -67,6 +67,9 @@ def _minimal(**profiles) -> dict:
                              "yaw_tolerance_rad": 0.79, "yaw_ewma_window": 5},
             "inertia_smooth": {"enabled": False, "smooth_window": 3,
                               "max_alpha_rad_s2": 15.0, "min_correction_rad": 1e-3},
+            "gravity_project": {"enabled": False, "airborne_z_threshold_m": 0.10,
+                                "min_airborne_run_frames": 3,
+                                "min_correction_m": 1e-3},
             "joint":      {"enabled": False, "max_omega_dps": 600.0},
             "orientation": {"enabled": False, "max_turn_rate_dps": 720.0},
             "ball":       {"max_speed": 36.0, "max_accel": 200.0},
@@ -185,6 +188,7 @@ def test_lineage_covers_every_leaf(tmp_path):
         ("pose_motion_sync", cfg.pose_motion_sync),
         ("facing_align", cfg.facing_align),
         ("inertia_smooth", cfg.inertia_smooth),
+        ("gravity_project", cfg.gravity_project),
         ("ball", cfg.ball), ("probe", cfg.probe),
     ):
         for f in dc.__dataclass_fields__:

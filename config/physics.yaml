@@ -116,6 +116,12 @@ base:
     max_alpha_rad_s2:     15.0
     min_correction_rad:    1.0e-3
 
+  gravity_project:          # airborne Z → ballistic parabola
+    enabled:               false
+    airborne_z_threshold_m: 0.10
+    min_airborne_run_frames: 3
+    min_correction_m:      1.0e-3
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -233,6 +239,8 @@ profiles:
       facing_align:
         enabled:            true
       inertia_smooth:
+        enabled:            true
+      gravity_project:
         enabled:            true
 
   full_realism_collide:

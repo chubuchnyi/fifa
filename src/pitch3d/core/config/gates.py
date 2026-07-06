@@ -176,6 +176,16 @@ class InertiaSmoothConfig:
 
 
 @dataclass(frozen=True)
+class GravityProjectConfig:
+    """Force airborne Z onto a ballistic parabola."""
+
+    enabled: bool = False
+    airborne_z_threshold_m: float = 0.10
+    min_airborne_run_frames: int = 3
+    min_correction_m: float = 1e-3
+
+
+@dataclass(frozen=True)
 class ContactProbeConfig:
     """Step 3 probe — foot-contact detection + slide measurement.
 

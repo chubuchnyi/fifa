@@ -36,6 +36,7 @@ from .gates import (
     FacingAlignConfig,
     FootFloorConfig,
     FootPlantConfig,
+    GravityProjectConfig,
     IdentityConfig,
     InertiaSmoothConfig,
     JointKinematicConfig,
@@ -86,6 +87,7 @@ class PhysicsConfig:
     pose_motion_sync: PoseMotionSyncConfig
     facing_align: FacingAlignConfig
     inertia_smooth: InertiaSmoothConfig
+    gravity_project: GravityProjectConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -229,6 +231,9 @@ def load_physics_config(
     inertia_smooth = _build_dataclass(
         InertiaSmoothConfig, base.get("inertia_smooth", {}), "inertia_smooth",
     )
+    gravity_project = _build_dataclass(
+        GravityProjectConfig, base.get("gravity_project", {}), "gravity_project",
+    )
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -246,6 +251,7 @@ def load_physics_config(
         pose_motion_sync=pose_motion_sync,
         facing_align=facing_align,
         inertia_smooth=inertia_smooth,
+        gravity_project=gravity_project,
         ball=ball,
         probe=probe,
         profile_name=profile,

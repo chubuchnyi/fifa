@@ -43,6 +43,10 @@ from ..core.correction.contact_probe import (
     contact_probe,
 )
 from ..core.correction.facing_align import FacingAlignReport, facing_align_gate
+from ..core.correction.gravity_project import (
+    GravityProjectReport,
+    gravity_project_gate,
+)
 from ..core.correction.inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
 from ..core.correction.momentum_smooth import (
     MomentumSmoothConfig,
@@ -253,6 +257,12 @@ class Application:
             if physics_cfg.inertia_smooth.enabled:
                 scene, _ = inertia_smooth_gate(
                     scene, physics_cfg.inertia_smooth, fps=clip.fps,
+                )
+            # Gravity project: airborne Z onto ballistic parabola.
+            if physics_cfg.gravity_project.enabled and foot_position_provider is not None:
+                scene, _ = gravity_project_gate(
+                    scene, physics_cfg.gravity_project, foot_position_provider,
+                    fps=clip.fps,
                 )
 
         scene.camera = self._static_camera(scene)
