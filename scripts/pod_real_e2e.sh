@@ -74,6 +74,12 @@ if [ -n "${PLAYER_PROFILES_DIR:-}" ] && [ "${PHYSICS:-0}" = "1" ]; then
     echo "== auto-tune: ON (ball-id=${BALL_ID:-match_ball_1})"
   fi
 fi
+# IDENTITY=1 → identity_gate (GTA split + cross-track merge, HSV features).
+# Kills per-player kit colour flicker by cleaning ID-swapped tracks before POSE.
+if [ "${IDENTITY:-0}" = "1" ] && [ "${PHYSICS:-0}" = "1" ]; then
+  COH_ARGS+=(--identity)
+  echo "== identity: --identity ON (GTA split + merge)"
+fi
 # DEMO_EDITS=0 skips the dry-run edit walkthrough so no demo offset/refit correction lands in the
 # exported scene (deliverable runs); default 1 keeps the full golden-path seam coverage.
 if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo edits: OFF (DEMO_EDITS=0)"; fi

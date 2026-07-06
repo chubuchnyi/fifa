@@ -84,6 +84,7 @@ def run_dry_run(
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
     auto_tune: bool = False, ball_id: str = "match_ball_1",
+    identity: bool = False,
     demo_edits: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -135,6 +136,23 @@ def run_dry_run(
     if _phys is not None:
         print(f"== physics config: {_phys.summary()}  from {_phys.source_path}")
 
+    # Identity gate wiring: GTA-style split + cross-track merge with the HSV
+    # appearance provider (numpy-only starter — swap to OSNet/CLIP-ReIdent later).
+    identity_cfg = None
+    appearance_provider = None
+    if identity and _phys is not None:
+        from ..adapters.models.appearance_hsv import make_hsv_appearance_provider
+        identity_cfg = _phys.identity
+        # Enable regardless of the profile's default (base=false) — the flag is
+        # the operator's explicit opt-in; profile still tunes the thresholds.
+        if not identity_cfg.enabled:
+            from dataclasses import replace as _replace
+            identity_cfg = _replace(identity_cfg, enabled=True)
+        appearance_provider = make_hsv_appearance_provider(clip)
+        print(f"== identity: enabled dbscan_eps={identity_cfg.dbscan_eps} "
+              f"merge={identity_cfg.merge_enabled} "
+              f"(threshold={identity_cfg.merge_cosine_threshold})")
+
     # T4.b/T4.c wiring: per-player profile provider + auto-tune sink.
     # Enabled only when --player-profiles-dir is given AND --physics is on
     # (the gate is where the provider gets consulted).
@@ -183,6 +201,7 @@ def run_dry_run(
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
         stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
+        identity_cfg=identity_cfg, appearance_provider=appearance_provider,
         profile_provider=profile_provider, auto_tune_sink=auto_tune_sink,
     )
     scene = app.get_scene(scene_id)
@@ -552,6 +571,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--ball-id", default="match_ball_1", metavar="ID",
                         help="identifier used to key the ball profile in the store (default "
                              "one profile per match)")
+    parser.add_argument("--identity", action="store_true",
+                        help="enable identity_gate (GTA-style intra-track split + "
+                             "cross-track merge). Requires --physics for the config. Wires the "
+                             "HSV appearance provider automatically; swap to a real Re-ID "
+                             "backbone via a follow-up.")
     parser.add_argument("--no-demo-edits", dest="demo_edits", action="store_false",
                         help="skip the dry-run edit walkthrough (steps 4-8e) so no demo "
                              "offset/refit correction is committed — use for real deliverables")
@@ -595,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
         player_priors=args.player_priors,
         auto_tune=args.auto_tune,
         ball_id=args.ball_id,
+        identity=args.identity,
         demo_edits=args.demo_edits,
     )
 

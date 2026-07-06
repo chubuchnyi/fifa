@@ -298,14 +298,34 @@ Named profiles: `identity_lock` (§ 1 only), `foot_v2` (§ 2 only),
    ~$0.30 pod re-run to validate. Kills the visible colour flicker. Uses
    `PlayerProfile` schema shipped this session (T4).
 
-   **STAGE 1a DONE 2026-07-06:** Pure-core intra-track split
-   (``src/pitch3d/core/orchestration/identity.py``). DBSCAN over per-frame
-   appearance features via injected ``AppearanceProvider``; two clusters
-   separated by ``min_split_gap_frames`` → track fused two people → split.
-   Parametric config in ``config/physics.yaml → identity:``. Dry-run mode
-   for eval before enabling the emit path. 15 unit tests (809 total passing,
-   0 regressions). Stage 1b (cross-track merge + real Re-ID adapter +
-   ``PlayerProfile.appearance`` lock) is the next step of this same tier.
+   **STAGE 1a + 1b DONE 2026-07-06.** Full identity gate, end-to-end
+   through the CLI.
+
+   * ``src/pitch3d/core/orchestration/identity.py`` — split (DBSCAN over
+     per-frame appearance features via injected ``AppearanceProvider``,
+     ``min_split_gap_frames`` flicker guard) + cross-track merge (iterative
+     greedy over disjoint tracklets whose mean features are within
+     ``merge_cosine_threshold``, capped by ``merge_max_gap_frames``).
+     Split→merge feature plumbing is internal so post-split truncated
+     tracklets don't trip the shape guard.
+   * ``src/pitch3d/adapters/models/appearance_hsv.py`` — starter numpy-only
+     Re-ID adapter. Samples HSV histograms from bbox crops (dedup-decoded
+     frames), returns dense (T, D) features. Enough for team-A vs team-B
+     splits; a torch OSNet/CLIP-ReIdent swap is the next tier.
+   * Pipeline wire: ``ReconstructionPipeline`` accepts ``identity_cfg`` +
+     ``appearance_provider``; runs the gate BETWEEN stitch and CALIBRATE so
+     POSE sees clean tracks. ``controller.run_reconstruction`` and the CLI
+     both forward it.
+   * CLI: ``--identity`` flag (requires ``--physics`` for the config).
+     Pod-script env-var ``IDENTITY=1`` in ``scripts/pod_real_e2e.sh``.
+
+   28 unit tests total (15 split + 7 merge + 6 HSV provider). 822 in the
+   full suite, 12 skipped, 0 regressions.
+
+   Stage 1c (next): swap the HSV provider for OSNet from ``torchreid`` /
+   CLIP-ReIdent for real Re-ID quality; add ``PlayerProfile.appearance``
+   operator-lock via ``set_operator_field`` so kit-inject uses per-player
+   hue instead of the team aggregate.
 2. **§ 2A foot_plant_v2 stage A — measured pelvis-above-foot.** ~1 day.
    Kills hovering PROPERLY. Uses `smplx` package. Pod re-run confirms.
 3. **§ 3 momentum + contact-lock (Path 1).** ~2-3 days. Cheapest physics
