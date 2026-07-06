@@ -55,6 +55,25 @@ else COH_ARGS+=(--no-stitch); echo "== continuity: stitch OFF (STITCH=${STITCH})
 if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
 # PHYSICS=1 → M3-9 kinematic gate: clamp impossible root speed/accel, mark teleports (#207).
 if [ "${PHYSICS:-0}" = "1" ]; then COH_ARGS+=(--physics); echo "== physics: --physics ON (M3-9 kinematic gate)"; fi
+# PHYSICS_PROFILE selects the config/physics.yaml named profile (default / conservative /
+# strict / no_smoothing / future_full / safe_new / humanize_teleports). safe_new turns on
+# foot_floor + joint + orientation (T1a/b/c) without collision (which introduces accel
+# spikes without a compose-order fix). humanize_teleports interpolates ID-swap regions.
+if [ -n "${PHYSICS_PROFILE:-}" ] && [ "${PHYSICS:-0}" = "1" ]; then
+  COH_ARGS+=(--physics-profile "$PHYSICS_PROFILE")
+  echo "== physics profile: $PHYSICS_PROFILE"
+fi
+# PLAYER_PROFILES_DIR + AUTO_TUNE = T4 per-player + per-ball online tuning (7-layer filter).
+# Persists <PLAYER_PROFILES_DIR>/players/<team>/<jersey>.json across runs.
+if [ -n "${PLAYER_PROFILES_DIR:-}" ] && [ "${PHYSICS:-0}" = "1" ]; then
+  COH_ARGS+=(--player-profiles-dir "$PLAYER_PROFILES_DIR")
+  echo "== player profiles dir: $PLAYER_PROFILES_DIR"
+  if [ "${AUTO_TUNE:-0}" = "1" ]; then
+    COH_ARGS+=(--auto-tune)
+    [ -n "${BALL_ID:-}" ] && COH_ARGS+=(--ball-id "$BALL_ID")
+    echo "== auto-tune: ON (ball-id=${BALL_ID:-match_ball_1})"
+  fi
+fi
 # DEMO_EDITS=0 skips the dry-run edit walkthrough so no demo offset/refit correction lands in the
 # exported scene (deliverable runs); default 1 keeps the full golden-path seam coverage.
 if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo edits: OFF (DEMO_EDITS=0)"; fi

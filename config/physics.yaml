@@ -119,6 +119,28 @@ profiles:
       collision:
         enabled:            true
 
+  safe_new:
+    description: "Recommended for pod runs: T1a+T1b+T1c on, collision OFF (known accel-spike tradeoff)."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+
+  safe_new_humanize:
+    description: "safe_new + humanize_teleports — closes hover/joint/orient AND smooths ID-swap jumps."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+      kinematic:
+        teleport_policy:    interpolate
+
   humanize_teleports:
     description: "Interpolate teleport regions instead of preserving the jump — marked R-6 low-conf."
     overrides:
