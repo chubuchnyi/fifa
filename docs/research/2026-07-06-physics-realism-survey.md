@@ -328,6 +328,33 @@ Named profiles: `identity_lock` (§ 1 only), `foot_v2` (§ 2 only),
    hue instead of the team aggregate.
 2. **§ 2A foot_plant_v2 stage A — measured pelvis-above-foot.** ~1 day.
    Kills hovering PROPERLY. Uses `smplx` package. Pod re-run confirms.
+
+   **DONE 2026-07-06.** `src/pitch3d/adapters/models/smplx_foot_z.py` —
+   `make_smplx_foot_z_provider()` runs SMPL-X FK on subject's ``betas + pose``,
+   returns per-frame ``pelvis_above_foot = -min(verts.y)``. Median over
+   sampled frames is used as the per-subject target — replaces the constant
+   0.92 m in T6a. Model located via existing
+   ``PITCH3D_SMPLX_MODEL`` / ``MODELS`` env vars; provider returns ``None``
+   when unavailable so foot_plant_gate falls back to the shared cfg target.
+
+   ``foot_plant_gate`` now accepts a ``pelvis_target_provider`` — either a
+   scalar or ``(T,)`` per-frame array; per-subject median replaces the
+   default when present. Existing tests (13) still pass; 4 provider-path
+   tests + 4 SMPL-X-real-model tests (skip when the model is absent).
+
+   **Bigger fix landed in the same commit — ALL physics gates now wired
+   through `controller.run_reconstruction`.** Prior to this change, only
+   the M3-9 gate (`kinematic_gate`) ran from the delivery path;
+   `foot_floor` / `joint` / `orientation` / `collision` existed only in
+   `scripts/physics_compare.py`. Named profiles like ``safe_new`` /
+   ``safe_new_plant`` were effectively ``default`` on the pod. Fixed by
+   passing `physics_cfg: PhysicsConfig` to the controller and iterating
+   the full chain after the M3-9 gate. Verified dry-run:
+
+       == physics config: profile='safe_new_plant' ... foot_floor=on joint=on orientation=on collision=off
+       == foot_plant: SMPL-X FK provider ON (measured per-subject offset)
+
+   Full suite: 830 passed, 12 skipped, 0 regressions.
 3. **§ 3 momentum + contact-lock (Path 1).** ~2-3 days. Cheapest physics
    step; kills foot-slide + CoM drift. No new dep.
 4. **§ 2B foot_plant_v2 stage B — WHAM contact head + IK anti-slide.**

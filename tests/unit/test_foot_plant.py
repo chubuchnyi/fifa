@@ -175,3 +175,68 @@ def test_none_config_defaults_to_disabled():
     new_scene, report = foot_plant_gate(_scene(s))
     assert report.corrections_added == 0
     assert new_scene.corrections == []
+
+
+# ─── T6.a stage A — per-subject pelvis target via provider ───────────────
+
+def test_provider_scalar_overrides_cfg_target():
+    """Provider returns 1.10 for subject 1 → target=1.10, subject's Z=0.92
+    now hovers relative to it → shift UP by 0.18."""
+    s = _subject(1, np.full(10, 0.92))
+    def provider(subject):
+        return 1.10
+    new_scene, report = foot_plant_gate(
+        _scene(s), FootPlantConfig(enabled=True, mode="median_lock"),
+        pelvis_target_provider=provider,
+    )
+    assert report.subjects_using_provider == 1
+    assert report.corrections_added == 1
+    resolved = resolve_subject_motion(s.proposal, new_scene.corrections_for(1))
+    got = np.asarray(resolved.pose.transl)[:, 2]
+    assert abs(float(np.median(got)) - 1.10) < 1e-9
+    r = report.subjects[0]
+    assert r.target_source == "provider"
+    assert r.target_used_m == pytest.approx(1.10)
+
+
+def test_provider_per_frame_array_uses_median():
+    s = _subject(1, np.full(10, 0.92))
+    def provider(subject):
+        return np.array([1.05, 1.10, 1.15, 1.10, 1.05])   # median 1.10
+    new_scene, report = foot_plant_gate(
+        _scene(s), FootPlantConfig(enabled=True, mode="median_lock"),
+        pelvis_target_provider=provider,
+    )
+    assert report.corrections_added == 1
+    resolved = resolve_subject_motion(s.proposal, new_scene.corrections_for(1))
+    got = np.asarray(resolved.pose.transl)[:, 2]
+    assert abs(float(np.median(got)) - 1.10) < 1e-9
+
+
+def test_provider_none_falls_back_to_cfg_target():
+    """Provider returns None → gate uses cfg.target_pelvis_m unchanged."""
+    s = _subject(1, np.full(10, 1.10))
+    new_scene, report = foot_plant_gate(
+        _scene(s), FootPlantConfig(enabled=True, mode="median_lock",
+                                   target_pelvis_m=0.92),
+        pelvis_target_provider=lambda _: None,
+    )
+    assert report.subjects_using_provider == 0
+    resolved = resolve_subject_motion(s.proposal, new_scene.corrections_for(1))
+    got = np.asarray(resolved.pose.transl)[:, 2]
+    assert abs(float(np.median(got)) - 0.92) < 1e-9
+    assert report.subjects[0].target_source == "cfg"
+
+
+def test_provider_only_used_when_enabled():
+    """When gate is disabled, provider is still consulted for the report
+    (so the operator sees the measured offset), but no correction emitted."""
+    s = _subject(1, np.full(10, 1.15))
+    _, report = foot_plant_gate(
+        _scene(s), FootPlantConfig(enabled=False),
+        pelvis_target_provider=lambda _: 1.05,
+    )
+    assert report.corrections_added == 0
+    # measurement still surfaces per-subject target
+    assert report.subjects[0].target_source == "provider"
+    assert report.subjects[0].target_used_m == pytest.approx(1.05)

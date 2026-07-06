@@ -35,11 +35,17 @@ from ..core.correction.engine import (
     resolve_ball,
     resolve_subject_motion,
 )
+from ..core.correction.collision import CollisionReport, collision_gate
+from ..core.correction.foot_floor import FootFloorReport, foot_floor_gate
+from ..core.correction.foot_plant import FootPlantReport, foot_plant_gate
+from ..core.correction.joint_kinematics import JointKinematicReport, joint_kinematic_gate
 from ..core.correction.kinematics import (
     KinematicConfig,
     KinematicReport,
     kinematic_gate,
 )
+from ..core.correction.orientation import OrientationReport, orientation_gate
+from ..core.config import PhysicsConfig
 from ..core.config.gates import IdentityConfig
 from ..core.orchestration import (
     ReconstructionPipeline,
@@ -125,6 +131,8 @@ class Application:
         appearance_provider: AppearanceProvider | None = None,
         profile_provider: Any = None,
         auto_tune_sink: Any = None,
+        physics_cfg: PhysicsConfig | None = None,
+        pelvis_target_provider: Any = None,
     ) -> str:
         """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
 
@@ -173,6 +181,28 @@ class Application:
             )
             if auto_tune_sink is not None and kinematic_rep is not None:
                 auto_tune_sink(scene, kinematic_rep)
+
+        # T1a / T6.a / T1b / T1c / T3 — the rest of the physics gate chain.
+        # Enabled per PhysicsConfig; skipped when physics_cfg is None (backwards compat).
+        foot_floor_rep: FootFloorReport | None = None
+        foot_plant_rep: FootPlantReport | None = None
+        joint_rep: JointKinematicReport | None = None
+        orientation_rep: OrientationReport | None = None
+        collision_rep: CollisionReport | None = None
+        if physics_cfg is not None:
+            scene, foot_floor_rep = foot_floor_gate(scene, physics_cfg.foot_floor)
+            scene, foot_plant_rep = foot_plant_gate(
+                scene, physics_cfg.foot_plant,
+                pelvis_target_provider=pelvis_target_provider,
+            )
+            scene, joint_rep = joint_kinematic_gate(
+                scene, physics_cfg.joint, fps=clip.fps,
+            )
+            scene, orientation_rep = orientation_gate(
+                scene, physics_cfg.orientation, fps=clip.fps,
+            )
+            scene, collision_rep = collision_gate(scene, physics_cfg.collision)
+
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip

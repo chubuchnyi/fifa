@@ -27,15 +27,23 @@ constants here.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from typing import Callable
 
 import numpy as np
 
 from ..config.gates import FootPlantConfig
 from ..scene.layers import Correction, CorrectionTarget, TargetKind
-from ..scene.scene import Scene
+from ..scene.scene import Scene, Subject
 from .engine import make_keyframes, resolve_subject_motion
 
 VALID_MODES = ("off", "median_lock", "hard_lock")
+
+#: Callable returning per-frame ``pelvis_above_foot`` (m) for a subject, or ``None``.
+#: When present the gate uses ``median(offsets)`` as the per-subject target,
+#: replacing the shared ``cfg.target_pelvis_m`` for that subject. This is what
+#: closes the hover complaint properly — each player's standing offset comes
+#: from SMPL-X FK on their betas + pose, not a nominal 0.92 m constant (T6a v2).
+PelvisTargetProvider = Callable[[Subject], "np.ndarray | float | None"]
 
 
 @dataclass
@@ -46,6 +54,8 @@ class SubjectPlantReport:
     z_max_before: float = 0.0
     z_median_before: float = 0.0
     z_bias_m: float = 0.0            # target - median (signed shift applied)
+    target_used_m: float = 0.0       # per-subject target chosen (measured or cfg)
+    target_source: str = "cfg"       # "cfg" | "provider"
     corrected: bool = False
 
 
@@ -53,6 +63,7 @@ class SubjectPlantReport:
 class FootPlantReport:
     n_subjects: int = 0
     subjects_corrected: int = 0
+    subjects_using_provider: int = 0
     corrections_added: int = 0
     max_shift_m: float = 0.0
     max_abs_bias_m: float = 0.0
@@ -61,6 +72,7 @@ class FootPlantReport:
 
 def foot_plant_gate(
     scene: Scene, cfg: FootPlantConfig | None = None,
+    *, pelvis_target_provider: PelvisTargetProvider | None = None,
 ) -> tuple[Scene, FootPlantReport]:
     """Recenter root Z to remove the systematic hover bias; return NEW scene + report.
 
@@ -69,15 +81,32 @@ def foot_plant_gate(
       so the operator can decide whether to enable.
     * Enabled: emits ONE ``KEYFRAME_INTERP`` per subject whose net shift
       exceeds ``cfg.min_correction_m``.
+    * ``pelvis_target_provider`` (T6.a stage A): callable ``Subject → offset``
+      returning per-subject measured pelvis-above-foot (either a scalar or
+      a per-frame ``(T,)`` array whose median is used). When set, each
+      subject's target is that measurement instead of the shared
+      ``cfg.target_pelvis_m`` — closes the hover complaint per-player,
+      accounting for different betas / standing heights.
     """
     cfg = cfg if cfg is not None else FootPlantConfig()
     if cfg.mode not in VALID_MODES:
         raise ValueError(f"foot_plant mode={cfg.mode!r} not in {VALID_MODES}")
     report = FootPlantReport(n_subjects=len(scene.subjects))
     auto_corrs: list[Correction] = []
-    target = float(cfg.target_pelvis_m)
+    cfg_target = float(cfg.target_pelvis_m)
 
     for s in scene.subjects:
+        # per-subject target: measured (provider) or the shared cfg default
+        target_source = "cfg"
+        target = cfg_target
+        if pelvis_target_provider is not None:
+            offset = pelvis_target_provider(s)
+            if offset is not None:
+                arr = np.asarray(offset, dtype=float).reshape(-1)
+                if arr.size:
+                    target = float(np.median(arr))
+                    target_source = "provider"
+                    report.subjects_using_provider += 1
         corrs = list(scene.corrections_for(s.track_id))
         resolved = resolve_subject_motion(s.proposal, corrs)
         frames = np.asarray(resolved.pose.frames, dtype=int)
@@ -95,6 +124,8 @@ def foot_plant_gate(
             z_max_before=float(z.max()),
             z_median_before=med,
             z_bias_m=float(bias),
+            target_used_m=float(target),
+            target_source=target_source,
         )
         report.max_abs_bias_m = max(report.max_abs_bias_m, abs(bias))
 

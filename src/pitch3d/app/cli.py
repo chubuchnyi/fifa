@@ -198,11 +198,26 @@ def run_dry_run(
                 print(f"== auto-tune: {counts} "
                       f"({len(report.profile_updates)} proposal(s))")
 
+    # T6a v2 wiring: measured pelvis-above-foot via SMPL-X FK. Falls back to the
+    # constant target from cfg when the model isn't available.
+    pelvis_target_provider = None
+    if physics and _phys is not None and _phys.foot_plant.enabled:
+        try:
+            from ..adapters.models.smplx_foot_z import make_smplx_foot_z_provider
+            pelvis_target_provider = make_smplx_foot_z_provider()
+            if pelvis_target_provider is not None:
+                print("== foot_plant: SMPL-X FK provider ON (measured per-subject offset)")
+            else:
+                print("== foot_plant: SMPL-X model not found — using cfg.target_pelvis_m")
+        except ImportError:
+            print("== foot_plant: SMPL-X FK provider unavailable — using cfg.target_pelvis_m")
+
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
         stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
         identity_cfg=identity_cfg, appearance_provider=appearance_provider,
         profile_provider=profile_provider, auto_tune_sink=auto_tune_sink,
+        physics_cfg=_phys, pelvis_target_provider=pelvis_target_provider,
     )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
