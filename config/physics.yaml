@@ -122,6 +122,13 @@ base:
     min_airborne_run_frames: 3
     min_correction_m:      1.0e-3
 
+  jerk_clamp:               # iterative low-pass on transl until peak jerk under ceiling
+    enabled:               false
+    max_jerk_mps3:       200.0
+    smooth_window:          5
+    max_passes:            10
+    min_correction_m:      1.0e-3
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -241,6 +248,8 @@ profiles:
       inertia_smooth:
         enabled:            true
       gravity_project:
+        enabled:            true
+      jerk_clamp:
         enabled:            true
 
   full_realism_collide:

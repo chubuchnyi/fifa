@@ -176,6 +176,17 @@ class InertiaSmoothConfig:
 
 
 @dataclass(frozen=True)
+class JerkClampConfig:
+    """Iteratively low-pass root translation until peak jerk under ceiling."""
+
+    enabled: bool = False
+    max_jerk_mps3: float = 200.0
+    smooth_window: int = 5
+    max_passes: int = 10
+    min_correction_m: float = 1e-3
+
+
+@dataclass(frozen=True)
 class GravityProjectConfig:
     """Force airborne Z onto a ballistic parabola."""
 

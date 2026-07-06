@@ -47,6 +47,7 @@ from ..core.correction.gravity_project import (
     GravityProjectReport,
     gravity_project_gate,
 )
+from ..core.correction.jerk_clamp import JerkClampReport, jerk_clamp_gate
 from ..core.correction.inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
 from ..core.correction.momentum_smooth import (
     MomentumSmoothConfig,
@@ -263,6 +264,11 @@ class Application:
                 scene, _ = gravity_project_gate(
                     scene, physics_cfg.gravity_project, foot_position_provider,
                     fps=clip.fps,
+                )
+            # Jerk clamp: iterative low-pass to bound peak jerk.
+            if physics_cfg.jerk_clamp.enabled:
+                scene, _ = jerk_clamp_gate(
+                    scene, physics_cfg.jerk_clamp, fps=clip.fps,
                 )
 
         scene.camera = self._static_camera(scene)
