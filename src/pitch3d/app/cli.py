@@ -81,6 +81,7 @@ def run_dry_run(
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake",
     stitch: bool = True, coherence: bool = False, physics: bool = False,
+    physics_profile: str = "default", physics_config: str | None = None,
     demo_edits: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -119,19 +120,18 @@ def run_dry_run(
 
     # 2) Reconstruction: DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the proposal scene.
     stitch_cfg = StitchConfig() if stitch else None
-    coherence_cfg = CoherenceConfig() if coherence else None
-    # M3-9 gate limits: auto defaults + manual env override (PITCH3D_KIN_*), never forced.
-    kinematic_cfg = (
-        KinematicConfig(
-            max_speed=float(os.environ.get("PITCH3D_KIN_MAX_SPEED", KinematicConfig.max_speed)),
-            max_accel=float(os.environ.get("PITCH3D_KIN_MAX_ACCEL", KinematicConfig.max_accel)),
-            teleport_factor=float(
-                os.environ.get("PITCH3D_KIN_TELEPORT", KinematicConfig.teleport_factor)
-            ),
-        )
-        if physics
+    # Physics thresholds live in config/physics.yaml — never a hidden Python constant.
+    # Precedence: base → profile → env vars (PITCH3D_KIN_*, PITCH3D_COH_*) → CLI --physics-config.
+    from ..core.config import load_physics_config
+    _phys = (
+        load_physics_config(path=physics_config, profile=physics_profile)
+        if (coherence or physics)
         else None
     )
+    coherence_cfg = _phys.coherence if (coherence and _phys is not None) else None
+    kinematic_cfg = _phys.kinematic if (physics and _phys is not None) else None
+    if _phys is not None:
+        print(f"== physics config: {_phys.summary()}  from {_phys.source_path}")
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
         stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
@@ -477,8 +477,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--physics", action="store_true",
                         help="M3-9 kinematic plausibility gate (off by default): clamp root "
                              "speed/accel to human limits via auto corrections, mark teleports "
-                             "for identity review (limits: PITCH3D_KIN_MAX_SPEED/MAX_ACCEL/"
-                             "TELEPORT)")
+                             "for identity review. Thresholds come from config/physics.yaml — "
+                             "select a named profile with --physics-profile or a custom file "
+                             "with --physics-config. Env vars (PITCH3D_KIN_MAX_SPEED/MAX_ACCEL/"
+                             "TELEPORT, PITCH3D_COH_*) still override.")
+    parser.add_argument("--physics-profile", default="default",
+                        help="named profile from config/physics.yaml (default/conservative/"
+                             "strict/no_smoothing/future_full)")
+    parser.add_argument("--physics-config", default=None,
+                        help="path to an alternate physics config (defaults to the shipped "
+                             "config/physics.yaml)")
     parser.add_argument("--no-demo-edits", dest="demo_edits", action="store_false",
                         help="skip the dry-run edit walkthrough (steps 4-8e) so no demo "
                              "offset/refit correction is committed — use for real deliverables")
@@ -516,6 +524,8 @@ def main(argv: list[str] | None = None) -> int:
         stitch=args.stitch,
         coherence=args.coherence,
         physics=args.physics,
+        physics_profile=args.physics_profile,
+        physics_config=args.physics_config,
         demo_edits=args.demo_edits,
     )
 

@@ -1,0 +1,99 @@
+# Physics config — every threshold the gates read lives here, not in code.
+#
+# Loader:      src/pitch3d/core/config/physics.py
+# Comparison:  scripts/physics_compare.py --profiles a,b,c
+#
+# Precedence (lowest → highest):
+#   1. `base` defaults
+#   2. `profiles.<name>.overrides`
+#   3. env var overrides (PITCH3D_KIN_*, PITCH3D_COH_*)
+#   4. explicit Python overrides (tests/harness only)
+#
+# Every constructed field carries a lineage string so we always know WHERE a
+# number came from — never a hidden constant.
+
+version: 1
+
+# ─── base defaults ────────────────────────────────────────────────────────────
+# Match kinematics.py / coherence.py field names 1:1 so the loader stays trivial.
+base:
+
+  kinematic:                # M3-9 root-XY speed/accel gate (SHIPPED)
+    max_speed:             10.5      # m/s   elite sprint ceiling
+    max_accel:              8.0      # m/s²  elite acceleration ceiling
+    teleport_factor:        2.0      # interval speed > factor*max_speed = teleport
+    spike_neighbor_frac:    0.5      # out-and-back spike test
+    spike_reversal_cos:    -0.5      # neighbour cos-similarity for spike demotion
+    max_passes:            50        # bounded accel-clamp sweeps
+    min_correction_m:       1.0e-6   # skip emit below this positional dev
+
+  coherence:                # gap-fill + edge-extend + auto-smoothing (SHIPPED)
+    max_fill_gap:          12
+    smooth_window:          5
+    smooth_method:         moving_average
+    smooth_sigma:           1.0
+    smooth_root_translation: true
+    smooth_root_orientation: false
+    filled_confidence:      0.3
+    real_confidence:        1.0
+    extend_to_span:         true
+    extrapolate_decay:      0.9
+    extrapolated_confidence: 0.2
+    extrapolate_velocity_window: 3
+    coast_max_speed:       10.5      # m/s   #207 fix — coast velocity cap
+
+  foot_floor:               # Tier 1a — NOT YET APPLIED by the pipeline
+    enabled:               false
+    floor_m:                0.0      # world Z under which root is clamped
+    warn_hover_m:           0.30     # sanity: foot_z > this = hovering warning
+
+  joint:                    # Tier 1b — NOT YET BUILT (schema reserved)
+    enabled:               false
+    max_omega_dps:        600.0      # per-joint angular velocity ceiling
+
+  orientation:              # Tier 1c — NOT YET BUILT (schema reserved)
+    enabled:               false
+    max_turn_rate_dps:    720.0      # global_orient rate ceiling
+
+# ─── named profiles for A/B comparison ────────────────────────────────────────
+# Each profile lists a partial override tree on top of `base`. Comparison harness
+# runs the same scene through each profile and reports the diff.
+
+profiles:
+
+  default:
+    description: "Ships-today defaults (M3-9 as merged, no future gates)."
+    overrides: {}
+
+  conservative:
+    description: "Non-elite match tuning: 9 m/s ceiling, 6 m/s² accel, wider smoothing."
+    overrides:
+      kinematic:
+        max_speed:          9.0
+        max_accel:          6.0
+      coherence:
+        smooth_window:      7
+
+  strict:
+    description: "Tightest limits — comparison anchor. Will over-clamp real motion."
+    overrides:
+      kinematic:
+        max_speed:          8.0
+        max_accel:          5.0
+        teleport_factor:    1.5
+
+  no_smoothing:
+    description: "Gate only, no coherence root-translation smoothing (isolate the gate effect)."
+    overrides:
+      coherence:
+        smooth_root_translation: false
+
+  future_full:
+    description: "Preview: all future gates on (foot floor + joint + orientation) at safe defaults."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true

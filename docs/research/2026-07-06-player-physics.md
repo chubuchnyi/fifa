@@ -324,17 +324,42 @@ Defer. Only revisit after A–F+profile deliver eye-visible gains.
 
 ---
 
-## 6. Open questions to settle before coding
+## 6. Parametric-first: config file + comparison harness (LANDED)
 
-1. **Foot-floor policy:** hard clamp to Z=0 (never sink) vs soft attractor (blend) vs adaptive (foot_z<ε → free, foot_z>ε → clamp)? Preserving jumps matters.
-2. **Per-joint gate — on raw HMR or on post-coherence?** Coherence has already smoothed via MA(5); a second smoother risks flattening a real fast motion (a kick, a header).
-3. **Teleport policy:** given the complaint about "appearing from nowhere," should the default switch from `hold` to `interpolate` (marked R-6)? Or would that erase legitimate ID-swap signal for stitch review?
-4. **FPS mismatch:** fix the mux fps at the source (29.97) as the primary perception fix, or keep 25 as a friendly compatible number?
-5. **Collision player↔player vs player↔ball:** ball-touch is already used in `ball_lift.py` for anchoring. Extend to full collision, or leave ball-touch as-is and only add player↔player?
-6. **Ceiling default:** 10.5 m/s is an elite peak. This is Colombia vs DR Congo — not Olympians. Drop the default to 9.0 m/s (env override already exists)? Note this becomes moot once §4 lands — the per-player profile takes over.
-7. **Profile auto-tune ON by default?** Auto-tuning creates a state file that changes across runs. Convenient for realism, less convenient for reproducibility. Recommendation: on for delivery pipeline, off for tests / synthetic replay.
-8. **Profile identity key.** `team + jersey` works within a match, but jerseys are reassigned across matches. Extend the key with `season + competition` for cross-clip persistence?
-9. **Ball profile per match or per ball model?** A tournament uses one ball model; individual balls can be swapped. Do we key on the match, on the ball SKU, or one profile per active ball ID?
+Every physics threshold now lives in ``config/physics.yaml`` as parametric data,
+not as a Python constant. Loader records field lineage (base → profile → env →
+override) so we always know where a number came from. A named-profile system
+plus a comparison harness let us sweep approaches on the same scene and pick
+the winner by measurement, not opinion.
+
+* ``config/physics.yaml`` — base defaults + named profiles
+  (``default``, ``conservative``, ``strict``, ``no_smoothing``, ``future_full``).
+  Schema keys reserved for future gates (``foot_floor``, ``joint``,
+  ``orientation``) even though those gates aren't built yet — no churn later.
+* ``src/pitch3d/core/config/physics.py`` — pure loader:
+  ``load_physics_config(path?, profile="default", env?, overrides?) → PhysicsConfig``.
+  Precedence base → profile → env → override, per-field lineage. 11 unit tests
+  in ``tests/unit/test_physics_config.py``.
+* ``scripts/physics_compare.py`` — research harness:
+
+  ```
+  python scripts/physics_compare.py --scene out/…/scene.json
+  python scripts/physics_compare.py --scene <s> --profiles default,strict --show-lineage
+  python scripts/physics_compare.py --scene <s> --json > exp.json
+  ```
+
+  Runs the M3-9 gate (and coherence, unless ``--no-coherence``) for each
+  profile, prints a side-by-side table (speed/accel violations, teleports,
+  max_dev, corrections added), optionally the lineage tree.
+* CLI: ``pitch3d --physics --physics-profile <name>`` (or
+  ``--physics-config <path>``); env vars still work as the ops override
+  channel. Every dry-run prints a ``== physics config:`` line so the run log
+  self-documents which numbers went in.
+
+**Consequence for the rest of this doc:** any concrete number we discuss
+(``max_speed=10.5``, ``max_omega_dps=600``, per-position priors) is a **YAML
+proposal**, not a code change. Adding a new gate is: (a) reserve a section
+in ``base:``, (b) ship it disabled, (c) enable it under a named profile.
 
 ---
 
