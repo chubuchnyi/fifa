@@ -54,12 +54,24 @@ class IdentitySplit:
 
 
 @dataclass
+class IdentityMerge:
+    """One cross-track merge event: two disjoint tracklets fused into one."""
+
+    child_track_ids: tuple[int, int]
+    merged_track_id: int
+    gap_frames: int
+    cosine_distance: float
+
+
+@dataclass
 class IdentityReport:
     n_input_tracks: int = 0
     n_output_tracks: int = 0
     tracks_split: int = 0
+    tracks_merged: int = 0
     tracks_no_features: int = 0
     splits: list[IdentitySplit] = field(default_factory=list)
+    merges: list[IdentityMerge] = field(default_factory=list)
 
 
 # ─── DBSCAN (numpy-only mini implementation to avoid sklearn dep) ────────────
@@ -197,6 +209,122 @@ def _truncate_tracklet(t: Tracklet, split_row: int) -> Tracklet:
     )
 
 
+def _merge_tracklets(a: Tracklet, b: Tracklet) -> Tracklet:
+    """Concatenate two disjoint tracklets; keep the smaller track_id."""
+    frames = np.concatenate([np.asarray(a.frames), np.asarray(b.frames)])
+    boxes = np.concatenate(
+        [np.asarray(a.bboxes_xyxy).reshape(-1, 4),
+         np.asarray(b.bboxes_xyxy).reshape(-1, 4)]
+    )
+    order = np.argsort(frames, kind="stable")
+    frames = frames[order]
+    boxes = boxes[order]
+    new_id = min(int(a.track_id), int(b.track_id))
+    return Tracklet(
+        track_id=new_id,
+        frames=frames,
+        bboxes_xyxy=boxes,
+        cls=a.cls,
+        team_id=None,
+    )
+
+
+def _cross_track_merge(
+    tracks: list[Tracklet],
+    feats_by_id: dict[int, np.ndarray],
+    cfg: IdentityConfig,
+) -> tuple[list[Tracklet], list[IdentityMerge]]:
+    """Iterative greedy merge across tracklets with disjoint frame ranges.
+
+    A pair (a, b) is merged iff:
+      * ``a.frames.max() < b.frames.min()`` (temporally disjoint), AND
+      * ``b.frames.min() - a.frames.max() <= merge_max_gap_frames`` (short gap), AND
+      * ``cosine(mean_feat(a), mean_feat(b)) <= merge_cosine_threshold``.
+
+    The candidate list is sorted by (distance, gap) and processed greedily so
+    the closest identities are matched first. After each merge the working
+    set is rebuilt.
+    """
+    if not tracks:
+        return tracks, []
+    merges: list[IdentityMerge] = []
+    current = list(tracks)
+
+    # per-track mean feature (or None when not measurable)
+    def _centroid(t: Tracklet) -> np.ndarray | None:
+        f = feats_by_id.get(int(t.track_id))
+        if f is None or f.shape[0] == 0:
+            return None
+        return f.mean(axis=0)
+
+    changed = True
+    while changed:
+        changed = False
+        centroids = {int(t.track_id): _centroid(t) for t in current}
+        candidates: list[tuple[float, int, int, int]] = []
+        for i, a in enumerate(current):
+            ca = centroids[int(a.track_id)]
+            if ca is None:
+                continue
+            a_end = int(np.asarray(a.frames).max())
+            for j, b in enumerate(current):
+                if j <= i:
+                    continue
+                cb = centroids[int(b.track_id)]
+                if cb is None:
+                    continue
+                b_start = int(np.asarray(b.frames).min())
+                # ensure a is earlier; if not, swap the working pointers
+                if b_start <= a_end:
+                    a2, b2 = b, a
+                    a2_end = int(np.asarray(a2.frames).max())
+                    b2_start = int(np.asarray(b2.frames).min())
+                    if b2_start <= a2_end:
+                        continue  # overlapping — never merge
+                    idx_a, idx_b = j, i
+                    a_end_use, b_start_use = a2_end, b2_start
+                    ca_use, cb_use = cb, ca
+                else:
+                    idx_a, idx_b = i, j
+                    a_end_use, b_start_use = a_end, b_start
+                    ca_use, cb_use = ca, cb
+                gap = b_start_use - a_end_use - 1
+                if gap > cfg.merge_max_gap_frames:
+                    continue
+                # cosine distance between centroids
+                na = np.linalg.norm(ca_use) + 1e-9
+                nb = np.linalg.norm(cb_use) + 1e-9
+                cos = float(np.dot(ca_use, cb_use) / (na * nb))
+                dist = 1.0 - cos
+                if dist > cfg.merge_cosine_threshold:
+                    continue
+                candidates.append((dist, gap, idx_a, idx_b))
+        if not candidates:
+            break
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        dist, gap, idx_a, idx_b = candidates[0]
+        a, b = current[idx_a], current[idx_b]
+        merged = _merge_tracklets(a, b)
+        # rebuild feature map: mean-of-means weighted by n frames
+        fa = feats_by_id.get(int(a.track_id))
+        fb = feats_by_id.get(int(b.track_id))
+        if fa is not None and fb is not None:
+            feats_by_id[int(merged.track_id)] = np.vstack([fa, fb])
+        # drop the two used tracks, add the merged one
+        current = [t for k, t in enumerate(current) if k not in (idx_a, idx_b)]
+        current.append(merged)
+        merges.append(IdentityMerge(
+            child_track_ids=(int(a.track_id), int(b.track_id)),
+            merged_track_id=int(merged.track_id),
+            gap_frames=int(gap),
+            cosine_distance=float(dist),
+        ))
+        changed = True
+    # keep a stable output order: sort by first frame
+    current.sort(key=lambda t: (int(np.asarray(t.frames).min()), int(t.track_id)))
+    return current, merges
+
+
 def identity_gate(
     tracks: Tracks,
     cfg: IdentityConfig | None = None,
@@ -222,6 +350,10 @@ def identity_gate(
         return Tracks(tracklets=out_tracks, teams=list(tracks.teams)), report
 
     out_tracks: list[Tracklet] = []
+    #: Track the CURRENT per-tracklet feature slice by the tracklet's output
+    #: track_id so the merge stage doesn't have to re-query the provider on
+    #: truncated post-split tracklets (which would trip the shape check).
+    output_feats: dict[int, np.ndarray] = {}
     next_id = 1 + max((int(t.track_id) for t in tracks.tracklets), default=0)
 
     for t in tracks.tracklets:
@@ -240,6 +372,7 @@ def identity_gate(
         split_row = _find_split(labels, np.asarray(t.frames), cfg)
         if split_row is None:
             out_tracks.append(t)
+            output_feats[int(t.track_id)] = feats
             continue
         left_rows = labels[:split_row]
         right_rows = labels[split_row:]
@@ -263,9 +396,31 @@ def identity_gate(
         report.tracks_split += 1
         if cfg.dry_run:
             out_tracks.append(t)   # keep the original untouched in dry-run
+            output_feats[int(t.track_id)] = feats
         else:
             out_tracks.append(_truncate_tracklet(t, split_row))
             out_tracks.append(_split_tracklet(t, split_row, new_id))
+            output_feats[int(t.track_id)] = feats[:split_row]
+            output_feats[new_id] = feats[split_row:]
+
+    # ─── stage 2: cross-track merge ─────────────────────────────────────
+    if cfg.merge_enabled and not cfg.dry_run:
+        # reuse the features already sliced for the split stage
+        out_tracks, merges = _cross_track_merge(out_tracks, output_feats, cfg)
+        report.merges.extend(merges)
+        report.tracks_merged = len(merges)
+    elif cfg.merge_enabled and cfg.dry_run:
+        # measure-only pass on the pre-split tracks so the report is honest
+        feats_by_id_dry: dict[int, np.ndarray] = {}
+        for t in tracks.tracklets:
+            f = appearance_provider(t)
+            if f is not None:
+                feats_by_id_dry[int(t.track_id)] = np.asarray(f, dtype=float)
+        _, merges = _cross_track_merge(
+            list(tracks.tracklets), feats_by_id_dry, cfg,
+        )
+        report.merges.extend(merges)
+        report.tracks_merged = len(merges)
 
     report.n_output_tracks = len(out_tracks)
     return Tracks(tracklets=out_tracks, teams=list(tracks.teams)), report
@@ -273,6 +428,7 @@ def identity_gate(
 
 __all__ = [
     "AppearanceProvider",
+    "IdentityMerge",
     "IdentityReport",
     "IdentitySplit",
     "identity_gate",

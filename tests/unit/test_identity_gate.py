@@ -219,3 +219,131 @@ def test_empty_tracks_returns_empty():
     )
     assert tracks.tracklets == []
     assert report.n_input_tracks == 0
+
+
+# ─── cross-track merge ───────────────────────────────────────────────────
+
+def test_merge_two_disjoint_same_identity_tracks():
+    """Two tracks with matching appearance and a small time gap → one track."""
+    a = _tracklet(1, np.arange(0, 10))
+    b = _tracklet(2, np.arange(20, 30))
+    yellow = np.tile([1.0, 0.7, 0.0], (10, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=True,
+                        merge_cosine_threshold=0.05,
+                        merge_max_gap_frames=20)
+    tracks, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: yellow}),
+    )
+    assert report.tracks_merged == 1
+    assert len(tracks.tracklets) == 1
+    merged = tracks.tracklets[0]
+    assert merged.track_id == 1
+    assert merged.frames.shape[0] == 20
+    m = report.merges[0]
+    assert m.child_track_ids == (1, 2)
+    assert m.merged_track_id == 1
+    assert m.gap_frames == 10  # b_start(20) - a_end(9) - 1 = 10
+
+
+def test_merge_skips_overlapping_tracks():
+    """Two tracks whose frame ranges OVERLAP are never merged — they're
+    simultaneous entities."""
+    a = _tracklet(1, np.arange(0, 20))
+    b = _tracklet(2, np.arange(10, 30))
+    yellow = np.tile([1.0, 0.7, 0.0], (20, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=True)
+    tracks, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: yellow}),
+    )
+    assert report.tracks_merged == 0
+    assert len(tracks.tracklets) == 2
+
+
+def test_merge_skips_different_colours():
+    """Same time gap but different kits → no merge (different players)."""
+    a = _tracklet(1, np.arange(0, 10))
+    b = _tracklet(2, np.arange(20, 30))
+    yellow = np.tile([1.0, 0.7, 0.0], (10, 1))
+    azure = np.tile([0.0, 0.5, 1.0], (10, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=True,
+                        merge_cosine_threshold=0.10)
+    tracks, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: azure}),
+    )
+    assert report.tracks_merged == 0
+
+
+def test_merge_respects_max_gap():
+    """Same identity but time gap > max → no merge (probably a different
+    person by then)."""
+    a = _tracklet(1, np.arange(0, 10))
+    b = _tracklet(2, np.arange(200, 210))
+    yellow = np.tile([1.0, 0.7, 0.0], (10, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=True,
+                        merge_cosine_threshold=0.05,
+                        merge_max_gap_frames=30)
+    _, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: yellow}),
+    )
+    assert report.tracks_merged == 0
+
+
+def test_merge_disabled_no_effect():
+    """merge_enabled=False → split only, no merge even when candidates exist."""
+    a = _tracklet(1, np.arange(0, 10))
+    b = _tracklet(2, np.arange(20, 30))
+    yellow = np.tile([1.0, 0.7, 0.0], (10, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=False,
+                        merge_cosine_threshold=0.05)
+    tracks, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: yellow}),
+    )
+    assert report.tracks_merged == 0
+    assert len(tracks.tracklets) == 2
+
+
+def test_split_then_merge_recovers_true_identity():
+    """A common failure mode: track 1 = person A frames 0-4 then person B
+    frames 5-9. Track 2 = person A frames 6-10. After the gate:
+    * split track 1 into 1a (A, 0-4) + new (B, 5-9)
+    * merge track 1a with track 2 (both A, disjoint)
+    """
+    swap = np.vstack([
+        np.tile([1.0, 0.7, 0.0], (5, 1)),
+        np.tile([0.0, 0.5, 1.0], (5, 1)),
+    ])
+    yellow_only = np.tile([1.0, 0.7, 0.0], (5, 1))
+    t1 = _tracklet(1, np.arange(0, 10))
+    t2 = _tracklet(2, np.arange(11, 16))
+    cfg = IdentityConfig(
+        enabled=True, dbscan_eps=0.10, dbscan_min_samples=3,
+        min_split_gap_frames=3, merge_enabled=True,
+        merge_cosine_threshold=0.05, merge_max_gap_frames=10,
+    )
+    tracks, report = identity_gate(
+        _tracks(t1, t2), cfg,
+        appearance_provider=_appearance_provider({1: swap, 2: yellow_only}),
+    )
+    assert report.tracks_split == 1
+    assert report.tracks_merged >= 1
+
+
+def test_dry_run_reports_merges_without_mutation():
+    a = _tracklet(1, np.arange(0, 10))
+    b = _tracklet(2, np.arange(20, 30))
+    yellow = np.tile([1.0, 0.7, 0.0], (10, 1))
+    cfg = IdentityConfig(enabled=True, merge_enabled=True,
+                        merge_cosine_threshold=0.05, dry_run=True)
+    tracks, report = identity_gate(
+        _tracks(a, b), cfg,
+        appearance_provider=_appearance_provider({1: yellow, 2: yellow}),
+    )
+    assert report.tracks_merged == 1
+    # dry-run: tracks unchanged
+    assert len(tracks.tracklets) == 2
+    assert {t.track_id for t in tracks.tracklets} == {1, 2}

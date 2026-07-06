@@ -22,10 +22,12 @@ from ..ports.perception import (
     Tracks,
 )
 from ..ports.pose import PoseEstimator
+from ..config.gates import IdentityConfig
 from ..scene.field import FieldCalibration
 from ..scene.motion import Ball2DTrack, BallTrack, SubjectMotion
 from .ball_lift import lift_ball_to_3d
 from .continuity import StitchConfig, StitchReport, stitch_tracks_with_report
+from .identity import AppearanceProvider, IdentityReport, identity_gate
 from .stages import Stage, StageRun, clip_hash, run_cached
 
 
@@ -41,6 +43,7 @@ class ReconstructionResult:
     ball_3d: BallTrack
     runs: list[StageRun] = field(default_factory=list)
     stitch: StitchReport | None = None  # set iff continuity stitching ran (else None)
+    identity: IdentityReport | None = None  # set iff identity_gate ran
 
 
 @dataclass
@@ -58,6 +61,14 @@ class ReconstructionPipeline:
     #: Continuity stitching between TRACK and POSE. ``None`` = off (default, legacy behavior);
     #: a config re-links fragmented tracklets so each identity is posed once (see continuity.py).
     stitch_cfg: StitchConfig | None = None
+    #: Identity gate (GTA-style intra-track split + cross-track merge) between STITCH and POSE.
+    #: When ``identity_cfg is not None`` AND ``appearance_provider is not None``, the gate runs
+    #: on the tracks before POSE consumes them, so each identity is posed once with a clean
+    #: unimodal appearance distribution.
+    identity_cfg: IdentityConfig | None = None
+    #: Callable that returns per-frame appearance features for a tracklet
+    #: (``(T, D)`` float array or ``None``). Wire a real Re-ID backbone here.
+    appearance_provider: AppearanceProvider | None = None
 
     def run(
         self,
@@ -97,6 +108,17 @@ class ReconstructionPipeline:
             trk, stitch_report = stitch_tracks_with_report(trk, self.stitch_cfg)
             pose_extra = {"stitch": asdict(self.stitch_cfg)}
 
+        # Identity gate: GTA split + cross-track merge. Runs AFTER stitch so it
+        # sees the already-glued fragments and only handles the cases stitch
+        # can't reach (intra-track ID swaps + long-gap same-identity pairs).
+        identity_report: IdentityReport | None = None
+        if self.identity_cfg is not None and self.identity_cfg.enabled:
+            trk, identity_report = identity_gate(
+                trk, self.identity_cfg, self.appearance_provider,
+            )
+            pose_extra = pose_extra or {}
+            pose_extra["identity"] = asdict(self.identity_cfg)
+
         cal = stage(Stage.CALIBRATE, lambda: self.calibrator.calibrate(clip))
         motions = stage(
             Stage.POSE, lambda: self.pose.estimate(clip, trk, cal), extra_params=pose_extra
@@ -115,4 +137,5 @@ class ReconstructionPipeline:
             ball_3d=ball3d,
             runs=runs,
             stitch=stitch_report,
+            identity=identity_report,
         )

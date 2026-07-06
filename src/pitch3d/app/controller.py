@@ -40,6 +40,7 @@ from ..core.correction.kinematics import (
     KinematicReport,
     kinematic_gate,
 )
+from ..core.config.gates import IdentityConfig
 from ..core.orchestration import (
     ReconstructionPipeline,
     StitchConfig,
@@ -47,6 +48,7 @@ from ..core.orchestration import (
     assemble_scene,
     resolve_scene,
 )
+from ..core.orchestration.identity import AppearanceProvider, IdentityReport
 from ..core.ports.export import ExportFormat, ExportResult
 from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
@@ -119,6 +121,8 @@ class Application:
         stitch_cfg: StitchConfig | None = None,
         coherence_cfg: CoherenceConfig | None = None,
         kinematic_cfg: KinematicConfig | None = None,
+        identity_cfg: IdentityConfig | None = None,
+        appearance_provider: AppearanceProvider | None = None,
         profile_provider: Any = None,
         auto_tune_sink: Any = None,
     ) -> str:
@@ -151,6 +155,7 @@ class Application:
             detector=p.detector, tracker=p.tracker, calibrator=p.calibrator,
             pose=p.pose, ball=p.ball, cache=p.cache, queue=p.queue,
             model_version=p.model_version, stitch_cfg=stitch_cfg,
+            identity_cfg=identity_cfg, appearance_provider=appearance_provider,
         )
         result = pipeline.run(clip, on_ground=on_ground, params=params)
         scene_id = f"scene-{self._next('scene')}"

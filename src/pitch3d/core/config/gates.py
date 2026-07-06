@@ -47,17 +47,20 @@ class BallConfig:
 
 @dataclass(frozen=True)
 class IdentityConfig:
-    """Identity gate (GTA-style split/merge) to keep a player's kit / team
-    stable across the whole video.
+    """Identity gate (GTA-style split + cross-track merge) to keep a player's
+    kit / team stable across the whole video.
 
     Symptom being closed: within a single ByteTrack track_id, appearance can
     change if the tracker ID-swapped (one physical player crossed the frame
     and their track got hijacked by another). The scene then paints ONE person
-    in TWO colours across the clip. GTA (Global Tracklet Association, Sun et al.
-    ACCV 2024) tackles this by DBSCAN over per-frame appearance features INSIDE
-    each track — clusters ≥ 2 → the track fused two people → split.
+    in TWO colours across the clip. GTA (Sun et al. ACCV 2024) tackles this
+    with two passes:
 
-    A cross-track merge pass is the natural next step; not built yet.
+    1. **Split** — DBSCAN over per-frame appearance features INSIDE each
+       track; clusters ≥ 2 → the track fused two people → split.
+    2. **Merge** — cross-track pairwise cosine-distance over the whole
+       tracklet set; disjoint pairs closer than ``merge_cosine_threshold``
+       are the same physical player under a different track_id → merge.
     """
 
     enabled: bool = False
@@ -70,9 +73,19 @@ class IdentityConfig:
     #: least this many contiguous frames — protects against per-frame flicker
     #: masquerading as an identity change.
     min_split_gap_frames: int = 3
-    #: When True, keep the shorter split-off segment attached to the original
-    #: track (mark low-conf) instead of dropping it — useful for eval before
-    #: enabling the real split emit path.
+    #: Enable the cross-track merge pass after the split pass.
+    merge_enabled: bool = True
+    #: Cosine distance below which two tracklets' mean features are considered
+    #: the same identity for the merge pass. Tighter than dbscan_eps so we
+    #: don't fuse team members into a single track.
+    merge_cosine_threshold: float = 0.10
+    #: Merge is only considered for tracklet pairs whose frame ranges do NOT
+    #: overlap (temporal disjointness). Setting >0 also enforces a maximum
+    #: gap between end(a) and start(b); a large gap = probably a different
+    #: physical player who happens to wear the same kit shade.
+    merge_max_gap_frames: int = 60
+    #: When True, detect splits/merges but do NOT mutate the tracks. Useful
+    #: for A/B evaluation before enabling the emit path in production.
     dry_run: bool = False
 
 
