@@ -1,0 +1,86 @@
+# Population priors for the per-player physical model — every player starts here.
+#
+# Consumer: src/pitch3d/core/scene/player_profile.py::default_player_profile()
+#
+# Numbers are the "default" source column of PlayerProfile. Once a player has been
+# observed for enough frames (see MIN_PROMOTE_N in the loader), the auto-tuner
+# promotes each field to `source: measured` with its own EWMA'd value + CI.
+
+version: 1
+
+# ─── per-position defaults ────────────────────────────────────────────────────
+# Rough numbers from published football biomechanics — these are what a player
+# starts with BEFORE the auto-tuner has any evidence.
+
+positions:
+
+  GK:   # goalkeeper
+    peak_speed_mps:        8.0
+    cruise_speed_mps:      3.0
+    peak_accel_mps2:       5.5
+    peak_turn_rate_dps:  360.0
+    peak_joint_omega_dps: 400.0
+    sprint_budget_s:       5.0
+    recover_tau_s:        30.0
+
+  DEF:  # defender
+    peak_speed_mps:        9.0
+    cruise_speed_mps:      5.0
+    peak_accel_mps2:       6.5
+    peak_turn_rate_dps:  480.0
+    peak_joint_omega_dps: 500.0
+    sprint_budget_s:       6.5
+    recover_tau_s:        30.0
+
+  MID:  # midfielder
+    peak_speed_mps:        9.5
+    cruise_speed_mps:      5.5
+    peak_accel_mps2:       7.0
+    peak_turn_rate_dps:  540.0
+    peak_joint_omega_dps: 550.0
+    sprint_budget_s:       7.5
+    recover_tau_s:        28.0
+
+  FWD:  # forward
+    peak_speed_mps:       10.0
+    cruise_speed_mps:      6.0
+    peak_accel_mps2:       7.5
+    peak_turn_rate_dps:  540.0
+    peak_joint_omega_dps: 600.0
+    sprint_budget_s:       8.0
+    recover_tau_s:        25.0
+
+  UNKNOWN:  # position not identified yet — use the softest limits (FWD-like)
+    peak_speed_mps:       10.0
+    cruise_speed_mps:      5.5
+    peak_accel_mps2:       7.5
+    peak_turn_rate_dps:  540.0
+    peak_joint_omega_dps: 600.0
+    sprint_budget_s:       7.5
+    recover_tau_s:        30.0
+
+# ─── shared body defaults (SMPL-X-scale) ──────────────────────────────────────
+# Only the mean; per-player betas overwrite this once measured.
+body:
+  height_m: 1.80
+  n_betas:  10                # shape vector length used across the pipeline
+
+# ─── auto-tune policy (referenced by tests + player_profile.py) ───────────────
+auto_tune:
+  min_promote_n:        30    # samples required to promote default -> measured
+  ewma_time_constant:  500    # per-frame alpha = 1/(1 + tau); higher = slower
+  quarantine_ci_mult:  3.0    # sample outside [mean - k·ci, mean + k·ci] = quarantine
+  ceiling_floor_mult:  0.90   # never let a per-player ceiling fall below this frac
+                              # of the population prior — leaves headroom for a
+                              # substitute or a genuine faster episode
+  min_confidence:       0.5   # subject_frame_conf below this = don't tune from
+                              # that frame (extrapolated / occluded)
+
+# ─── ball population priors ───────────────────────────────────────────────────
+ball:
+  peak_speed_mps:       34.0  # very hard shot; safety ceiling is 36 in physics.yaml
+  typical_pass_mps:     18.0
+  peak_accel_mps2:     190.0
+  restitution:           0.85
+  drag_coeff:            0.28
+  radius_m:              0.11

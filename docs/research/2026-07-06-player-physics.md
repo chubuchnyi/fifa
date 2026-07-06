@@ -363,17 +363,50 @@ infrastructure waits for the real HMR run to fire.*
 
 ### Tier 4 — per-player + per-ball profile (from §4)
 
-**T4.a — schema + local-JSON adapter.** Pure schema (`PlayerProfile`, `BallProfile`), a local-JSON store, promotion/filter policy, unit tests.
+**T4.a — schema + local-JSON adapter + auto-tune policy.** DONE.
 
-*Cost: 2 iterations, $0.*
+* ``config/player_priors.yaml`` — population priors per position (GK/DEF/MID/FWD/UNKNOWN)
+  + shared body + auto-tune policy knobs + ball defaults. Parametric, versioned, editable.
+* ``src/pitch3d/core/scene/player_profile.py`` — pure schema:
+  ``PlayerProfile``, ``BallProfile``, ``ProfileField(value, source, ci, n)``,
+  ``ProfileSource ∈ {DEFAULT, MEASURED, OPERATOR}``, ``Position`` enum,
+  ``AutoTunePolicy``, ``PopulationPriors``.
+  * ``default_player_profile(team, jersey, position, priors)`` — seed from
+    priors, every field ``source=DEFAULT``, ``n=0``.
+  * ``default_ball_profile(ball_id, priors)`` — same for the ball.
+  * ``update_field(field, observation, confidence, policy, default_value)``
+    — the seven-layer filter from §4.4 (operator lock, low-confidence skip,
+    quarantine outside CI×mult, arithmetic mean up to ``min_promote_n`` then
+    EWMA promotion, ceiling floor at ``ceiling_floor_mult × default``).
+    Returns ``(new_field, UpdateOutcome)`` — the outcome enum is the audit
+    trail (``APPLIED / QUARANTINED / LOW_CONFIDENCE / OPERATOR_LOCKED``).
+  * ``set_operator_field(field, value)`` — human override, immutable
+    from that call onward.
+* ``src/pitch3d/adapters/profiles/local_json.py`` —
+  ``LocalJsonPlayerStore(root)`` implements the ``ProfileStore`` protocol.
+  Layout: ``root/players/<team>/<jersey>.json``, ``root/balls/<ball_id>.json``.
+  Atomic write via ``.tmp + os.replace``. Missing file → ``load_player``
+  returns ``None`` (caller falls back to ``default_player_profile``).
+  ``delete_player`` returns ``True``/``False``; ``list_players`` walks the
+  tree.
 
-**T4.b — wire into the M3-9 gate.** `profile_provider` on `KinematicConfig`; per-subject ceilings; auto-tuning as `ProfileUpdateProposal`s applied after §4.4 filtering.
+**20 unit tests**: priors load, position-driven defaults, roundtrip storage
+preserves source+ci+n, operator lock immunity, low-confidence skip,
+quarantine outside CI×mult, promotion at N, ceiling floor, EWMA reacts
+slowly, confidence weighting, atomic write leaves no ``.tmp``, delete
+idempotent, list across teams, path-separator sanitised. Full suite:
+726 passed, 12 skipped, 0 failures.
 
-*Cost: 2 iterations, $0 unit; pod E2E $0.10 to check per-player realism (goalkeeper vs winger different ceilings).*
+**T4.b — wire into the M3-9 gate.** NEXT.
+``KinematicConfig`` gets a ``profile_provider: Callable[[subject], PlayerProfile] | None``;
+when present, per-subject limits override the shared ``max_speed`` /
+``max_accel``. The gate emits its usual corrections AND a list of
+``ProfileUpdateProposal``s (one per resolved subject); the profile store's
+consumer applies them through :func:`update_field`, so the seven-filter policy
+runs at the seam.
 
-**T4.c — ball profile.** Same pattern for the ball; ball_id policy per match.
-
-*Cost: 1–2 iterations, $0.*
+**T4.c — ball profile wiring.** After T4.b, same pattern for the ball
+against ``BallConfig``.
 
 ### Tier 5 — fatigue (G)
 
