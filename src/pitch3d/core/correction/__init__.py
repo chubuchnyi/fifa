@@ -52,11 +52,25 @@ from .foot_floor import (
     SubjectFootReport,
     foot_floor_gate,
 )
+from .facing_align import FacingAlignReport, facing_align_gate
 from .foot_plant import (
     FootPlantReport,
     SubjectPlantReport,
     foot_plant_gate,
 )
+from .gravity_probe import GravityReport, gravity_probe
+from .gravity_project import GravityProjectReport, gravity_project_gate
+from .inertia_probe import InertiaReport, inertia_probe
+from .inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
+from .interpen_probe import InterpenReport, interpen_probe
+from .momentum_probe import MomentumProbeReport, momentum_probe
+from .momentum_smooth import MomentumSmoothReport, momentum_smooth_gate
+from .pose_motion_probe import PoseMotionReport, pose_motion_probe
+from .pose_motion_sync import PoseMotionSyncReport, pose_motion_sync_gate
+from .stride_probe import StrideProbeReport, stride_probe
+from .body_scale_probe import BodyScaleReport, body_scale_probe
+from .contact_lock import ContactLockReport, contact_lock_gate
+from .ball_contact_probe import BallContactReport, ball_contact_probe
 from .joint_kinematics import (
     JointKinematicReport,
     JointViolation,
@@ -129,6 +143,20 @@ __all__ = [
     "FootPlantReport",
     "SubjectPlantReport",
     "foot_plant_gate",
+    "FacingAlignReport", "facing_align_gate",
+    "GravityReport", "gravity_probe",
+    "GravityProjectReport", "gravity_project_gate",
+    "InertiaReport", "inertia_probe",
+    "InertiaSmoothReport", "inertia_smooth_gate",
+    "InterpenReport", "interpen_probe",
+    "MomentumProbeReport", "momentum_probe",
+    "MomentumSmoothReport", "momentum_smooth_gate",
+    "PoseMotionReport", "pose_motion_probe",
+    "PoseMotionSyncReport", "pose_motion_sync_gate",
+    "StrideProbeReport", "stride_probe",
+    "BodyScaleReport", "body_scale_probe",
+    "ContactLockReport", "contact_lock_gate",
+    "BallContactReport", "ball_contact_probe",
     "JointKinematicReport",
     "JointViolation",
     "joint_kinematic_gate",
