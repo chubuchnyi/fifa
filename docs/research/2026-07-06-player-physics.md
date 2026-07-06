@@ -397,17 +397,48 @@ slowly, confidence weighting, atomic write leaves no ``.tmp``, delete
 idempotent, list across teams, path-separator sanitised. Full suite:
 726 passed, 12 skipped, 0 failures.
 
-**T4.b — wire into the M3-9 gate.** DONE.
-``kinematic_gate(...profile_provider=…)``: when the callable returns a
-``PlayerProfile`` for a subject, its ``peak_speed_mps`` / ``peak_accel_mps2``
-override the shared ``KinematicConfig`` limits for that subject only. The gate
-emits its usual corrections AND a list of ``ProfileUpdateProposal`` on
-``KinematicReport.profile_updates``. Consumer helper
-``apply_profile_updates(store, priors, subject_lookup, updates)`` feeds each
-proposal through :func:`update_field` — so the seven-filter policy runs at the
-persistence seam, never in the gate itself. Observations come from the CLAMPED
-motion (§4.4 layer 1), confidence is min ``subject_frame_conf`` over the
-subject's frames.
+**T4.b — wire into the M3-9 gate + CLI end-to-end.** DONE.
+
+Core (previously shipped): ``kinematic_gate(...profile_provider=…)`` — per-subject
+``peak_speed_mps`` / ``peak_accel_mps2`` from the ``PlayerProfile`` override
+the shared ``KinematicConfig`` limits. Gate emits ``ProfileUpdateProposal`` on
+``KinematicReport.profile_updates``. ``apply_profile_updates(...)`` applies each
+through :func:`update_field` at the persistence seam.
+
+**CLI end-to-end wiring (this iteration):**
+
+* ``pitch3d.app.controller.run_reconstruction`` now accepts
+  ``profile_provider`` + ``auto_tune_sink``. When the gate runs, the provider
+  is forwarded; the sink is called ``sink(scene, report)`` after the gate so
+  the caller decides how to persist.
+* CLI flags: ``--player-profiles-dir DIR`` (activates the provider),
+  ``--player-priors PATH`` (alternate YAML), ``--auto-tune`` (activates the
+  sink), ``--ball-id ID`` (keys ``domain="ball"`` proposals).
+* When active the CLI builds a ``LocalJsonPlayerStore``, a provider that falls
+  back to ``default_player_profile`` from priors, and a sink that calls
+  ``apply_profile_updates`` with the scene's per-subject
+  ``(team_id, jersey_number, Position.UNKNOWN)`` lookup. The run prints
+  ``== profiles: dir=…`` and ``== auto-tune: {applied, quarantined, …}
+  (N proposal(s))`` lines for operator inspection.
+
+**End-to-end verification.** Smoke-run:
+
+```
+pitch3d --out-dir /tmp/out --physics --physics-profile default \
+        --player-profiles-dir /tmp/profiles --auto-tune \
+        --pose fake --detector fake ...
+```
+
+Landed 4 subject profiles under ``/tmp/profiles/players/{UNK,A,B}/``, each
+with ``kinematics.peak_speed_mps`` and ``peak_accel_mps2`` fields carrying
+their audit trail (``source``, ``ci``, ``n``). Re-running with the same
+profiles-dir warm-starts each subject from disk (measured/EWMA continues from
+where it left off).
+
+2 new end-to-end tests (``tests/e2e/test_cli_auto_tune.py``): auto-tune
+persists profiles and prints the audit line; no-auto-tune does not write.
+
+Full suite: 760 passed, 12 skipped, 0 failures.
 
 Small robustness fix as a side-effect: the quarantine filter now requires
 CI > 1e-6 so a run of identical observations (ci collapses to 0) doesn't

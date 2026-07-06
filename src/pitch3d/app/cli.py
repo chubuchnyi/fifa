@@ -82,6 +82,8 @@ def run_dry_run(
     motion_prior: str = "fake",
     stitch: bool = True, coherence: bool = False, physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
+    player_profiles_dir: str | None = None, player_priors: str | None = None,
+    auto_tune: bool = False, ball_id: str = "match_ball_1",
     demo_edits: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
@@ -132,9 +134,56 @@ def run_dry_run(
     kinematic_cfg = _phys.kinematic if (physics and _phys is not None) else None
     if _phys is not None:
         print(f"== physics config: {_phys.summary()}  from {_phys.source_path}")
+
+    # T4.b/T4.c wiring: per-player profile provider + auto-tune sink.
+    # Enabled only when --player-profiles-dir is given AND --physics is on
+    # (the gate is where the provider gets consulted).
+    profile_provider = None
+    auto_tune_sink = None
+    _priors_cache = {"priors": None, "store": None, "subject_lookup": None, "ball_lookup": None}
+    if physics and player_profiles_dir is not None:
+        from ..adapters.profiles import LocalJsonPlayerStore
+        from ..core.scene.player_profile import (
+            Position,
+            apply_profile_updates,
+            default_player_profile,
+            load_priors,
+        )
+        priors = load_priors(player_priors)
+        store = LocalJsonPlayerStore(player_profiles_dir)
+        _priors_cache["priors"] = priors
+        _priors_cache["store"] = store
+        print(f"== profiles: dir={player_profiles_dir!r} priors={priors.policy}")
+
+        def _team_key(subject) -> tuple[str, int, "Position"]:
+            team = str(subject.team_id if subject.team_id is not None else "UNK")
+            jersey = int(subject.jersey_number if subject.jersey_number is not None
+                         else subject.track_id)
+            return team, jersey, Position.UNKNOWN
+
+        def profile_provider(subject):
+            team, jersey, pos = _team_key(subject)
+            got = store.load_player(team, jersey)
+            return got if got is not None else default_player_profile(
+                team, jersey, pos, priors=priors,
+            )
+
+        if auto_tune:
+            def auto_tune_sink(scene, report):
+                subject_lookup = {
+                    int(s.track_id): _team_key(s) for s in scene.subjects
+                }
+                counts = apply_profile_updates(
+                    store, priors, subject_lookup, report.profile_updates,
+                    ball_id_lookup={-1: ball_id},
+                )
+                print(f"== auto-tune: {counts} "
+                      f"({len(report.profile_updates)} proposal(s))")
+
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
         stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
+        profile_provider=profile_provider, auto_tune_sink=auto_tune_sink,
     )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
@@ -487,6 +536,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--physics-config", default=None,
                         help="path to an alternate physics config (defaults to the shipped "
                              "config/physics.yaml)")
+    parser.add_argument("--player-profiles-dir", default=None, metavar="DIR",
+                        help="local directory for per-player + per-ball profile JSONs (T4). "
+                             "When set alongside --physics, the M3-9 gate uses each subject's "
+                             "peak_speed_mps / peak_accel_mps2 from the stored profile "
+                             "(seeded from config/player_priors.yaml on first sighting).")
+    parser.add_argument("--player-priors", default=None, metavar="PATH",
+                        help="alternate player-priors YAML (defaults to shipped "
+                             "config/player_priors.yaml)")
+    parser.add_argument("--auto-tune", action="store_true",
+                        help="after the M3-9 gate, feed the p95 speed/accel observations from "
+                             "the RESOLVED motion through update_field and save the mutated "
+                             "profiles. Applies the seven-layer filter (§4.4) at the "
+                             "persistence seam. Requires --player-profiles-dir.")
+    parser.add_argument("--ball-id", default="match_ball_1", metavar="ID",
+                        help="identifier used to key the ball profile in the store (default "
+                             "one profile per match)")
     parser.add_argument("--no-demo-edits", dest="demo_edits", action="store_false",
                         help="skip the dry-run edit walkthrough (steps 4-8e) so no demo "
                              "offset/refit correction is committed — use for real deliverables")
@@ -526,6 +591,10 @@ def main(argv: list[str] | None = None) -> int:
         physics=args.physics,
         physics_profile=args.physics_profile,
         physics_config=args.physics_config,
+        player_profiles_dir=args.player_profiles_dir,
+        player_priors=args.player_priors,
+        auto_tune=args.auto_tune,
+        ball_id=args.ball_id,
         demo_edits=args.demo_edits,
     )
 

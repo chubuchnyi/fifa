@@ -119,6 +119,8 @@ class Application:
         stitch_cfg: StitchConfig | None = None,
         coherence_cfg: CoherenceConfig | None = None,
         kinematic_cfg: KinematicConfig | None = None,
+        profile_provider: Any = None,
+        auto_tune_sink: Any = None,
     ) -> str:
         """Run DETECT→TRACK→(stitch)→CALIBRATE→POSE→BALL, assemble the scene, return its id.
 
@@ -133,6 +135,14 @@ class Application:
         ``kinematic_cfg`` (default ``None`` = off) runs the M3-9 plausibility gate after
         coherence: impossible root speed/accel is clamped via per-subject KEYFRAME_INTERP
         corrections, teleports are marked in :meth:`kinematic_report` (never erased, R-6).
+
+        ``profile_provider`` (default ``None``) — optional callable
+        ``Subject → PlayerProfile | None``. When present the M3-9 gate uses each
+        subject's per-player ceilings from the profile store (T4.b). The gate
+        also emits ``ProfileUpdateProposal`` on the report; when
+        ``auto_tune_sink`` is provided it is called as
+        ``auto_tune_sink(scene, kinematic_report)`` after the gate to persist
+        the observations through :func:`apply_profile_updates` (T4.b + T4.c).
         """
         clip = self._clips[episode_id]
         ep = self._episodes[episode_id]
@@ -152,7 +162,12 @@ class Application:
             scene, coherence_rep = add_temporal_coherence(scene, coherence_cfg, fps=clip.fps)
         kinematic_rep: KinematicReport | None = None
         if kinematic_cfg is not None:
-            scene, kinematic_rep = kinematic_gate(scene, kinematic_cfg, fps=clip.fps)
+            scene, kinematic_rep = kinematic_gate(
+                scene, kinematic_cfg, fps=clip.fps,
+                profile_provider=profile_provider,
+            )
+            if auto_tune_sink is not None and kinematic_rep is not None:
+                auto_tune_sink(scene, kinematic_rep)
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
