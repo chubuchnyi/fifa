@@ -30,8 +30,11 @@ import sys
 from dataclasses import asdict, replace
 
 from pitch3d.core.config import load_physics_config
+from pitch3d.core.correction.body_scale_probe import BodyScaleConfig, body_scale_probe
 from pitch3d.core.correction.contact_probe import contact_probe
+from pitch3d.core.correction.gravity_probe import GravityConfig, gravity_probe
 from pitch3d.core.correction.inertia_probe import InertiaConfig, inertia_probe
+from pitch3d.core.correction.interpen_probe import InterpenConfig, interpen_probe
 from pitch3d.core.correction.momentum_probe import (
     MomentumProbeConfig,
     momentum_probe,
@@ -40,6 +43,7 @@ from pitch3d.core.correction.pose_motion_probe import (
     PoseMotionConfig,
     pose_motion_probe,
 )
+from pitch3d.core.correction.stride_probe import StrideProbeConfig, stride_probe
 from pitch3d.core.scene.serialization import load_scene
 
 
@@ -54,13 +58,30 @@ def run_all(scene_path: str, fps: float) -> dict:
         foot_pos_provider = make_smplx_foot_position_provider()
     except Exception:
         foot_pos_provider = None
+    try:
+        from pitch3d.adapters.models.smplx_foot_z import make_smplx_foot_z_provider
+        scale_provider = make_smplx_foot_z_provider()
+    except Exception:
+        scale_provider = None
 
     contact = None
+    gravity = None
+    body_scale = None
     if foot_pos_provider is not None:
         contact = contact_probe(
             scene, replace(cfg.contact_probe, enabled=True),
             foot_pos_provider,
         )
+        gravity = gravity_probe(
+            scene, GravityConfig(enabled=True), foot_pos_provider, fps=fps,
+        )
+    if scale_provider is not None:
+        body_scale = body_scale_probe(
+            scene, BodyScaleConfig(enabled=True), scale_provider,
+        )
+
+    interpen = interpen_probe(scene, InterpenConfig(enabled=True))
+    stride = stride_probe(scene, StrideProbeConfig(enabled=True), fps=fps)
 
     mom = momentum_probe(
         scene, MomentumProbeConfig(enabled=True, jerk_threshold_mps3=100.0),
@@ -103,6 +124,23 @@ def run_all(scene_path: str, fps: float) -> dict:
             "max_alpha_rad_s2": inr.max_alpha_rad_s2,
             "total_alpha_viol": inr.total_alpha_viol,
         },
+        "gravity": None if gravity is None else {
+            "subjects_violating": gravity.subjects_violating,
+            "total_airborne_frames": gravity.total_airborne_frames,
+            "max_deviation_mps2": gravity.max_deviation_mps2,
+        },
+        "body_scale": None if body_scale is None else {
+            "n_pairs_flagged": body_scale.n_pairs_flagged,
+            "max_pair_diff_m": body_scale.max_pair_diff_m,
+        },
+        "stride": {
+            "subjects_off": stride.subjects_off,
+        },
+        "interpen": {
+            "subjects_with_overlap": interpen.subjects_with_overlap,
+            "total_overlap_frames": interpen.total_overlap_frames,
+            "max_overlap_m": interpen.max_overlap_m,
+        },
     }
 
 
@@ -129,6 +167,20 @@ def print_summary(r: dict) -> None:
     print(f"[inertia]      flagged={inr['subjects_flagged']}/{n} "
           f"max_α={inr['max_alpha_rad_s2']:.0f}rad/s² "
           f"total_viol={inr['total_alpha_viol']}")
+    if r["gravity"] is not None:
+        g = r["gravity"]
+        print(f"[gravity]      violating={g['subjects_violating']}/{n} "
+              f"airborne_frames={g['total_airborne_frames']} "
+              f"max_dev={g['max_deviation_mps2']:.1f}m/s²")
+    if r["body_scale"] is not None:
+        bs = r["body_scale"]
+        print(f"[body_scale]   pairs_flagged={bs['n_pairs_flagged']} "
+              f"max_diff={bs['max_pair_diff_m']:.2f}m")
+    st = r["stride"]
+    print(f"[stride]       off={st['subjects_off']}/{n}")
+    ip = r["interpen"]
+    print(f"[interpen]     overlap_subj={ip['subjects_with_overlap']}/{n} "
+          f"frames={ip['total_overlap_frames']} max={ip['max_overlap_m']:.2f}m")
 
 
 def main(argv: list[str] | None = None) -> int:
