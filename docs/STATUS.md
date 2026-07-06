@@ -365,6 +365,37 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
+  end-to-end + full_realism pod run BATCH_FINISH_OK.**
+  User directive: "keep hitting physics iteratively until morning, don't stop."
+  Autonomous iterations over the tier plan; 40+ commits. Full stack shipped:
+  * 12 new correction gates: `contact_probe`+`contact_lock`, `momentum_probe`+
+    `momentum_smooth`, `pose_motion_probe`+`pose_motion_sync`, `facing_align`,
+    `inertia_probe`+`inertia_smooth`, `gravity_probe`+`gravity_project`,
+    `body_scale_probe`, `stride_probe`, `interpen_probe`,
+    `ball_contact_probe`, `ball_gravity_probe`.
+  * All wired through `controller.run_reconstruction` via `physics_cfg` +
+    `foot_position_provider` + `pelvis_target_provider`. All parametric in
+    `config/physics.yaml`. Two new profiles: `safe_new_plant_lock` (T1a-c +
+    foot_plant + contact_lock + momentum_smooth) and `full_realism` (adds
+    pose_motion_sync + facing_align + inertia_smooth + gravity_project).
+  * `scripts/physics_diagnose.py` reports 8 dimensions in one call.
+  * CLI fix: `foot_position_provider` was missing; without it contact_lock
+    silently skipped on the pod. Fixed in `7d91c98`; verified in-log
+    `== contact/momentum: SMPL-X foot-position provider ON`.
+  * 949 unit tests, 12 skipped, 0 regressions.
+  **Pod E2E full_realism (fresh boot after prior OOM):** all 14 stages
+  green, ~15 min ~$0.30. Final: `out/anim_full_realism/sideline_full_realism_pinned8.mp4`.
+  Motion metrics vs prior baselines: contact slide **max 5.62m → 0.99m
+  (–82%)**; gravity `max_dev` **10.6 → 7.6 m/s² (–28%)**; joint clamps
+  (T1b) **127 → 0**; orientation clamps (T1c) **12 → 0**. Momentum jerk
+  remains high (recon HMR noise on non-Blackwell pod, not from our gates).
+
+  Reference commits (this session, in order):
+  `909d219 a2a990e 96a8cfb 19e83cb aedfc18 ea7cf8f a706d22 663acdb eaaa5c8
+  da01330 4652ac4 7d91c98 99f7b61 0f332f5 f887b10 daab1be 54f58e9 a40cf78
+  fd9dc56 c8b88b6 e9983db 7da6fcb b7c6489`.
+
 - **2026-07-06 (afternoon)** — **PHYSICS TIER SHIPPED + FIRST POD RUN with safe_new profile.**
   Autonomous cycle closed all six eye-symptoms from the user's physics complaint
   (A-F): T0 (motion_stats extended with foot_z / joint_ω / turn_rate, parametric),
