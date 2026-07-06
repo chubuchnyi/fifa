@@ -365,6 +365,35 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-06 (afternoon)** — **PHYSICS TIER SHIPPED + FIRST POD RUN with safe_new profile.**
+  Autonomous cycle closed all six eye-symptoms from the user's physics complaint
+  (A-F): T0 (motion_stats extended with foot_z / joint_ω / turn_rate, parametric),
+  T1a (foot-floor gate + plateau detection), T1b (per-joint slerp gate 600°/s),
+  T1c (root-orientation slerp gate 720°/s), T2 (rendering-audit + teleport_policy
+  hold|interpolate), T3 (capsule collision Jacobi soft-repulsion), T4a-c
+  (PlayerProfile + BallProfile schema with seven-layer filter, LocalJsonPlayerStore,
+  profile_provider wired into M3-9, apply_profile_updates, CLI end-to-end
+  `--auto-tune`). All thresholds live in `config/physics.yaml` +
+  `config/player_priors.yaml` (no hidden Python constants). Named profiles:
+  default / conservative / strict / no_smoothing / future_full / humanize_teleports
+  / safe_new / safe_new_humanize. Comparison harness `scripts/physics_compare.py`
+  runs the full stack (kinematic + coherence + foot_floor + joint + orientation +
+  collision) with per-field lineage. 12 commits, ~110 new tests (781 total, 0
+  regressions). Real-scene numbers on `out/kitboost/scene.json` (60 frames, 22
+  subjects, real SMPLest-X): safe_new fires 125 joint clamps + 15 orient clamps
+  + flags 22 plateau subjects vs baseline default. **POD E2E with safe_new
+  completed 15:43Z ($0.30-0.50)** — BATCH_FINISH_OK through all 14 stages, new
+  final `out/anim_safe_new/sideline_safe_new_pinned8.mp4` (3.8MB, 57f). Zoom
+  A/B sheet f28 `/tmp/safe_new_ab/safe_new_pitch_ab.png` — same v2v pass but
+  slightly different pose geometry (joint/orient clamps applied at the beauty
+  render's motion source). Eye validation of the motion pending (need to WATCH
+  the video, not a single frame). Config: `PHYSICS_PROFILE`,
+  `PLAYER_PROFILES_DIR`, `AUTO_TUNE`, `BALL_ID` env plumbing added to
+  `scripts/pod_real_e2e.sh`. Pod DOWN. Doc `docs/research/2026-07-06-player-physics.md`
+  logs the whole tier. Next: (a) eye-judge the safe_new video vs
+  baseline; (b) fix collision compose-order to avoid +99 accel spikes on real
+  scene; (c) T5 fatigue (deferred). Commits `d26d387..2909322`.
+
 - **2026-07-06 (morning)** — **PLAYER SHADOWS t23: measured the shape gap, built the
   screen-space contact-shadow pin, honestly partial mitigation.** The prior session's
   eye-note ("no crisp contact shadows in ours — soft dark halos AROUND players") got a
