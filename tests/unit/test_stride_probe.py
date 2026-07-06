@@ -70,10 +70,10 @@ def test_walking_pose_matches_speed_no_flag():
 
 
 def test_moving_without_knee_swing_flagged():
-    """Root moves at 2 m/s but knees are still → cadence 0, off."""
+    """Root running at 5 m/s but knees still → cadence 0, off (strict)."""
     T = 60
     transl = np.zeros((T, 3))
-    transl[:, 0] = np.linspace(0, 4, T)
+    transl[:, 0] = np.linspace(0, 10, T)  # 5 m/s (above strict 3 m/s)
     body = np.zeros((T, 21, 3))
     r = stride_probe(
         _scene(_subject(1, transl, body)),
@@ -83,17 +83,32 @@ def test_moving_without_knee_swing_flagged():
     assert r.subjects[0].cadence_hz < 0.1
 
 
+def test_walking_slow_no_flag():
+    """Root walking at 1.7 m/s (above velocity threshold but under strict) —
+    even if the pose has NO knee sway we don't flag (walking with stiff
+    knees is legitimate for many players in the clip)."""
+    T = 60
+    transl = np.zeros((T, 3))
+    transl[:, 0] = np.linspace(0, 3.4, T)  # 1.7 m/s
+    body = np.zeros((T, 21, 3))
+    r = stride_probe(
+        _scene(_subject(1, transl, body)),
+        StrideProbeConfig(enabled=True), fps=30,
+    )
+    assert r.subjects_off == 0
+
+
 def test_wildly_fast_knee_flagged():
-    """Slow-moving root but knees swinging at 10 Hz → ratio 10× → off."""
+    """Fast-moving root but knees swinging way too fast → ratio 4× → off."""
     T = 60
     fps = 30
     transl = np.zeros((T, 3))
-    transl[:, 0] = np.linspace(0, 3, T)   # 1.5 m/s
+    transl[:, 0] = np.linspace(0, 10, T)   # 5 m/s (above strict 3 m/s)
     body = np.zeros((T, 21, 3))
-    body[:, 4, 0] = 0.5 * np.sin(2 * np.pi * 10 * np.arange(T) / fps)
+    body[:, 4, 0] = 0.5 * np.sin(2 * np.pi * 15 * np.arange(T) / fps)
     r = stride_probe(
         _scene(_subject(1, transl, body)),
-        StrideProbeConfig(enabled=True), fps=fps,
+        StrideProbeConfig(enabled=True, ratio_max=2.0), fps=fps,
     )
     assert r.subjects_off == 1
 

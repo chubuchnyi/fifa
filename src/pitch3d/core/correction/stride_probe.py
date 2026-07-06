@@ -29,6 +29,12 @@ from .engine import resolve_subject_motion
 class StrideProbeConfig:
     enabled: bool = False
     velocity_threshold_mps: float = 1.5
+    #: Only flag subjects whose MEAN speed over moving frames exceeds this —
+    #: we don't care about walk-cycle for a subject who barely moves.
+    strict_flag_speed_mps: float = 3.0
+    #: Below this cadence we consider it "no walk cycle at all"; above,
+    #: we look at the speed-vs-cadence ratio.
+    min_cadence_hz: float = 1.0
     strides_per_metre: float = 0.7
     ratio_min: float = 0.5
     ratio_max: float = 2.0
@@ -114,10 +120,16 @@ def stride_probe(
             r.ratio = r.cadence_hz / r.expected_cadence_hz
         else:
             r.ratio = 0.0
-        r.is_off = (
-            r.ratio < cfg.ratio_min or r.ratio > cfg.ratio_max
-            or r.cadence_hz < 0.1
-        )
+        # Only flag subjects who are clearly RUNNING (mean speed above the
+        # strict threshold) AND whose cadence doesn't match. Walking
+        # subjects with low cadence are physiologically normal — don't
+        # false-positive them.
+        if mean_speed >= cfg.strict_flag_speed_mps:
+            r.is_off = (
+                r.cadence_hz < cfg.min_cadence_hz
+                or r.ratio < cfg.ratio_min
+                or r.ratio > cfg.ratio_max
+            )
         if r.is_off:
             report.subjects_off += 1
         report.subjects.append(r)
