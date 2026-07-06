@@ -46,6 +46,37 @@ class BallConfig:
 
 
 @dataclass(frozen=True)
+class IdentityConfig:
+    """Identity gate (GTA-style split/merge) to keep a player's kit / team
+    stable across the whole video.
+
+    Symptom being closed: within a single ByteTrack track_id, appearance can
+    change if the tracker ID-swapped (one physical player crossed the frame
+    and their track got hijacked by another). The scene then paints ONE person
+    in TWO colours across the clip. GTA (Global Tracklet Association, Sun et al.
+    ACCV 2024) tackles this by DBSCAN over per-frame appearance features INSIDE
+    each track — clusters ≥ 2 → the track fused two people → split.
+
+    A cross-track merge pass is the natural next step; not built yet.
+    """
+
+    enabled: bool = False
+    #: DBSCAN eps in feature-cosine-distance units. Larger = more permissive
+    #: (fewer splits). 0.20 is a reasonable start for HSV features.
+    dbscan_eps: float = 0.20
+    #: Minimum frames a cluster must contain to count. Discards tiny outliers.
+    dbscan_min_samples: int = 4
+    #: A split is only accepted when the two clusters are separated by at
+    #: least this many contiguous frames — protects against per-frame flicker
+    #: masquerading as an identity change.
+    min_split_gap_frames: int = 3
+    #: When True, keep the shorter split-off segment attached to the original
+    #: track (mark low-conf) instead of dropping it — useful for eval before
+    #: enabling the real split emit path.
+    dry_run: bool = False
+
+
+@dataclass(frozen=True)
 class FootPlantConfig:
     """T6.a — foot plant: recenter root Z so subjects don't hover.
 

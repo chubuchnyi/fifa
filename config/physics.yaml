@@ -56,6 +56,13 @@ base:
     enabled:               false
     max_turn_rate_dps:    720.0      # global_orient rate ceiling
 
+  identity:                 # Roadmap step 1 — GTA-style intra-track split
+    enabled:               false
+    dbscan_eps:             0.20     # cosine-distance eps
+    dbscan_min_samples:     4        # frames to form a cluster
+    min_split_gap_frames:   3        # protect against per-frame flicker
+    dry_run:                false
+
   foot_plant:               # T6.a — recenter root Z so subjects don't hover
     enabled:               false
     mode:                  median_lock   # "off" | "median_lock" | "hard_lock"

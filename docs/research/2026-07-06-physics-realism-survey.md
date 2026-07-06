@@ -297,6 +297,15 @@ Named profiles: `identity_lock` (§ 1 only), `foot_v2` (§ 2 only),
 1. **§ 1 identity_gate — GTA + PlayerProfile team lock.** ~1-2 days coding,
    ~$0.30 pod re-run to validate. Kills the visible colour flicker. Uses
    `PlayerProfile` schema shipped this session (T4).
+
+   **STAGE 1a DONE 2026-07-06:** Pure-core intra-track split
+   (``src/pitch3d/core/orchestration/identity.py``). DBSCAN over per-frame
+   appearance features via injected ``AppearanceProvider``; two clusters
+   separated by ``min_split_gap_frames`` → track fused two people → split.
+   Parametric config in ``config/physics.yaml → identity:``. Dry-run mode
+   for eval before enabling the emit path. 15 unit tests (809 total passing,
+   0 regressions). Stage 1b (cross-track merge + real Re-ID adapter +
+   ``PlayerProfile.appearance`` lock) is the next step of this same tier.
 2. **§ 2A foot_plant_v2 stage A — measured pelvis-above-foot.** ~1 day.
    Kills hovering PROPERLY. Uses `smplx` package. Pod re-run confirms.
 3. **§ 3 momentum + contact-lock (Path 1).** ~2-3 days. Cheapest physics

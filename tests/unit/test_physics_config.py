@@ -48,6 +48,9 @@ def _minimal(**profiles) -> dict:
             "foot_plant": {"enabled": False, "mode": "median_lock",
                            "target_pelvis_m": 0.92, "bias_threshold_m": 0.05,
                            "min_correction_m": 1e-4},
+            "identity":   {"enabled": False, "dbscan_eps": 0.20,
+                           "dbscan_min_samples": 4, "min_split_gap_frames": 3,
+                           "dry_run": False},
             "joint":      {"enabled": False, "max_omega_dps": 600.0},
             "orientation": {"enabled": False, "max_turn_rate_dps": 720.0},
             "ball":       {"max_speed": 36.0, "max_accel": 200.0},
@@ -161,6 +164,7 @@ def test_lineage_covers_every_leaf(tmp_path):
         ("kinematic", cfg.kinematic), ("coherence", cfg.coherence),
         ("foot_floor", cfg.foot_floor), ("foot_plant", cfg.foot_plant),
         ("joint", cfg.joint), ("orientation", cfg.orientation),
+        ("identity", cfg.identity),
         ("ball", cfg.ball), ("probe", cfg.probe),
     ):
         for f in dc.__dataclass_fields__:
