@@ -42,6 +42,11 @@ from ..core.correction.contact_probe import (
     FootPositionProvider,
     contact_probe,
 )
+from ..core.correction.momentum_smooth import (
+    MomentumSmoothConfig,
+    MomentumSmoothReport,
+    momentum_smooth_gate,
+)
 from ..core.correction.foot_floor import FootFloorReport, foot_floor_gate
 from ..core.correction.foot_plant import FootPlantReport, foot_plant_gate
 from ..core.correction.joint_kinematics import JointKinematicReport, joint_kinematic_gate
@@ -210,7 +215,15 @@ class Application:
                 scene, physics_cfg.orientation, fps=clip.fps,
             )
             scene, collision_rep = collision_gate(scene, physics_cfg.collision)
-            # Step 3 — contact-lock foot slide during stance runs
+            # Step 4b — low-pass root translation (reduces jerk BEFORE
+            # contact_lock so the anchor is already smoother).
+            if physics_cfg.momentum_smooth.enabled:
+                scene, _ = momentum_smooth_gate(
+                    scene, physics_cfg.momentum_smooth,
+                    foot_position_provider=foot_position_provider,
+                    fps=clip.fps,
+                )
+            # Step 3b — contact-lock foot slide during stance runs
             if physics_cfg.contact_probe.enabled and foot_position_provider is not None:
                 scene, contact_lock_rep = contact_lock_gate(
                     scene, physics_cfg.contact_probe, foot_position_provider,

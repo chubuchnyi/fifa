@@ -37,6 +37,7 @@ from .gates import (
     FootPlantConfig,
     IdentityConfig,
     JointKinematicConfig,
+    MomentumSmoothConfig,
     OrientationConfig,
     ProbeConfig,
 )
@@ -78,6 +79,7 @@ class PhysicsConfig:
     collision: CollisionConfig
     identity: IdentityConfig
     contact_probe: ContactProbeConfig
+    momentum_smooth: MomentumSmoothConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -209,6 +211,9 @@ def load_physics_config(
     contact_probe = _build_dataclass(
         ContactProbeConfig, base.get("contact_probe", {}), "contact_probe",
     )
+    momentum_smooth = _build_dataclass(
+        MomentumSmoothConfig, base.get("momentum_smooth", {}), "momentum_smooth",
+    )
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -222,6 +227,7 @@ def load_physics_config(
         collision=collision,
         identity=identity,
         contact_probe=contact_probe,
+        momentum_smooth=momentum_smooth,
         ball=ball,
         probe=probe,
         profile_name=profile,

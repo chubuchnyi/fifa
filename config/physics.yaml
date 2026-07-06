@@ -87,6 +87,14 @@ base:
     min_contact_run_frames: 2
     slide_threshold_m:     0.05
 
+  momentum_smooth:          # step 4b — low-pass root translation to kill CoM jerk
+    enabled:               false
+    smooth_window:          5
+    preserve_contact:      true
+    contact_z_threshold_m: 0.05
+    min_contact_run_frames: 2
+    min_correction_m:      1.0e-3
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -163,6 +171,24 @@ profiles:
         enabled:            true
       foot_plant:
         enabled:            true
+
+  safe_new_plant_lock:
+    description: "safe_new_plant + step 3b contact_lock + step 4b momentum_smooth. Kills glide."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+      foot_plant:
+        enabled:            true
+      contact_probe:
+        enabled:            true
+      momentum_smooth:
+        enabled:            true
+        preserve_contact:  false
+        smooth_window:      7
 
   safe_new_humanize:
     description: "safe_new + humanize_teleports — closes hover/joint/orient AND smooths ID-swap jumps."

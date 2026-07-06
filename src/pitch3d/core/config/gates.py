@@ -131,6 +131,18 @@ class CollisionConfig:
 
 
 @dataclass(frozen=True)
+class MomentumSmoothConfig:
+    """Step 4b — low-pass root translation to kill CoM jerk."""
+
+    enabled: bool = False
+    smooth_window: int = 5
+    preserve_contact: bool = True
+    contact_z_threshold_m: float = 0.05
+    min_contact_run_frames: int = 2
+    min_correction_m: float = 1e-3
+
+
+@dataclass(frozen=True)
 class ContactProbeConfig:
     """Step 3 probe — foot-contact detection + slide measurement.
 
