@@ -36,6 +36,7 @@ import numpy as np
 from pitch3d.core.config import load_physics_config
 from pitch3d.core.correction.coherence import add_temporal_coherence
 from pitch3d.core.correction.engine import resolve_subject_motion
+from pitch3d.core.correction.collision import collision_gate
 from pitch3d.core.correction.foot_floor import foot_floor_gate
 from pitch3d.core.correction.joint_kinematics import joint_kinematic_gate
 from pitch3d.core.correction.kinematics import kinematic_gate
@@ -122,6 +123,8 @@ def run_profile(scene_path: str, profile: str, config: str | None,
     corrections_added += jkr.corrections_added
     scene, orr = orientation_gate(scene, cfg.orientation, fps=fps)
     corrections_added += orr.corrections_added
+    scene, colr = collision_gate(scene, cfg.collision)
+    corrections_added += colr.corrections_added
 
     after = _scene_stats(scene, fps, cfg)
     return {
@@ -148,6 +151,11 @@ def run_profile(scene_path: str, profile: str, config: str | None,
         "orient_clamped": orr.intervals_clamped,
         "orient_max_before": orr.max_rate_before_dps,
         "orient_max_after": orr.max_rate_after_dps,
+        "collision_frames": colr.frames_with_overlap,
+        "collision_pairs": colr.pairs_resolved,
+        "collision_moved": colr.subjects_moved,
+        "collision_max_overlap": colr.max_overlap_before_m,
+        "collision_max_push": colr.max_push_m,
         "before": before,
         "after": after,
         "kin_max_speed": cfg.kinematic.max_speed,
@@ -156,28 +164,26 @@ def run_profile(scene_path: str, profile: str, config: str | None,
 
 
 def _print_table(results: list[dict]) -> None:
-    hdr = (f"{'profile':>14} {'lim_sp':>7} {'lim_ac':>7} "
-           f"{'sp>lim':>6} {'ac>lim':>6} {'tele':>4} "
-           f"{'sp_max':>7} {'ac_max':>8} {'max_dev':>8} "
-           f"{'blwFl':>5} {'plat':>4} {'ffFix':>5} "
-           f"{'jOver':>5} {'jFix':>5} {'jMaxA':>6} "
-           f"{'oOver':>5} {'oFix':>5} {'oMaxA':>6} "
+    hdr = (f"{'profile':>18} {'lim_sp':>6} {'lim_ac':>6} "
+           f"{'sp>':>4} {'ac>':>4} {'tele':>4} "
+           f"{'sp_max':>6} {'ac_max':>7} {'dev':>6} "
+           f"{'plat':>4} {'ffFix':>5} "
+           f"{'jFix':>4} {'oFix':>4} "
+           f"{'colFr':>5} {'colPr':>5} {'colMv':>5} {'colOv':>5} "
            f"{'corrs':>5}")
     print(hdr)
     print("-" * len(hdr))
     for r in results:
-        print(f"{r['profile']:>14} "
-              f"{r['kin_max_speed']:>7.2f} {r['kin_max_accel']:>7.2f} "
-              f"{r['after']['speed_viol']:>6} {r['after']['accel_viol']:>6} "
+        print(f"{r['profile']:>18} "
+              f"{r['kin_max_speed']:>6.2f} {r['kin_max_accel']:>6.2f} "
+              f"{r['after']['speed_viol']:>4} {r['after']['accel_viol']:>4} "
               f"{r['teleports']:>4} "
-              f"{r['after']['sp_max_mps']:>7.2f} {r['after']['ac_max_mps2']:>8.1f} "
-              f"{r['max_dev_m']:>8.3f} "
-              f"{r['foot_below_floor']:>5} {r['foot_plateau']:>4} "
-              f"{r['foot_corrected']:>5} "
-              f"{r['joint_over']:>5} {r['joint_clamped']:>5} "
-              f"{r['joint_max_after']:>6.0f} "
-              f"{r['orient_over']:>5} {r['orient_clamped']:>5} "
-              f"{r['orient_max_after']:>6.0f} "
+              f"{r['after']['sp_max_mps']:>6.2f} {r['after']['ac_max_mps2']:>7.1f} "
+              f"{r['max_dev_m']:>6.3f} "
+              f"{r['foot_plateau']:>4} {r['foot_corrected']:>5} "
+              f"{r['joint_clamped']:>4} {r['orient_clamped']:>4} "
+              f"{r['collision_frames']:>5} {r['collision_pairs']:>5} "
+              f"{r['collision_moved']:>5} {r['collision_max_overlap']:>5.2f} "
               f"{r['corrections_added']:>5}")
 
 

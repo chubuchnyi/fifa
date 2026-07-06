@@ -46,6 +46,26 @@ class BallConfig:
 
 
 @dataclass(frozen=True)
+class CollisionConfig:
+    """Capsule-collision post-process (Tier 3).
+
+    Not a physics sim: at each frame the subjects are treated as vertical
+    capsules of radius ``capsule_radius_m`` on the pitch plane; overlapping
+    pairs get a soft push apart, one Jacobi iteration per pass. ``strength=1.0``
+    fully resolves each overlap in one pass; ``0.5`` halves it (softer, less
+    twitchy). ``n_passes`` iterates the Jacobi step so a stack of three near
+    each other converges.
+    """
+
+    enabled: bool = False
+    capsule_radius_m: float = 0.35     # ~ shoulder half-width for a standing player
+    strength: float = 0.5              # fraction of overlap resolved per pass
+    n_passes: int = 4                  # bounded iterations per frame
+    max_push_per_frame_m: float = 0.30  # safety cap — never move a subject more than this
+    min_correction_m: float = 1e-4      # skip emitting a correction below this net push
+
+
+@dataclass(frozen=True)
 class ProbeConfig:
     """Thresholds only ``scripts/motion_stats.py`` (and future probes) consume."""
 

@@ -385,11 +385,43 @@ Full suite: 768 passed, 12 skipped, 0 failures. **Tier 2 closed.**
 
 *Cost: 1 iteration, $0. Verified on ``out/p2_3/export/scene.json``.*
 
-### Tier 3 — collision (F)
+### Tier 3 — collision (F) — DONE
 
-**T3.a — capsule collision.** Post-process over resolved motion: overlapping capsules → soft push apart. Not a physics sim — one Jacobi iteration.
+**T3.a — capsule collision.** ``src/pitch3d/core/correction/collision.py``:
+per-frame capsule soft-repulsion, ADR-0002 clean. Subjects modelled as
+vertical capsules of radius ``CollisionConfig.capsule_radius_m=0.35`` on the
+pitch plane; overlapping pairs get a Jacobi split push (each contributes
+``strength · overlap / 2`` along the separation axis). ``n_passes=4``
+iterations per frame converge stacks-of-three; ``max_push_per_frame_m=0.30``
+caps each subject's per-frame net displacement so a tight blob never
+launches anyone across the pitch.
 
-*Cost: 3–5 iterations (defaults need tuning), local $0, pod $0.10.*
+Emits ONE ``KEYFRAME_INTERP`` ``ROOT_TRANSLATION`` correction per subject
+whose max deviation exceeds ``min_correction_m=1e-4``. Z untouched — foot
+floor is a separate gate. Report surfaces ``frames_with_overlap``,
+``pairs_resolved``, ``max_overlap_before_m``, ``subjects_moved``,
+``max_push_m``.
+
+Config: ``collision:`` section added to ``config/physics.yaml`` base
+(disabled by default); ``future_full`` profile activates it. Lineage
+records the source.
+
+13 unit tests (``tests/unit/test_collision.py``): Jacobi pass math on two /
+none / coincident pairs, resolve_frame convergence, per-frame push cap,
+disabled measure-only, enabled push, far-apart untouched, Z preserved,
+disjoint frame ranges no false overlap, idempotent, empty scene, none-cfg.
+
+Wired into ``scripts/physics_compare.py`` — profile sweep shows
+``colFr / colPr / colMv / colOv`` columns. Verified on
+``out/p2_3/export/scene.json``: 6 overlap frames, 29 pairs, max overlap
+0.54 m across all profiles. ``future_full`` (collision enabled) moves 8
+subjects and introduces +22 accel violations — the honest tradeoff (a
+single-frame push is a step-function velocity change; a proper
+compose-order or accel-aware push is future work).
+
+Full suite: 781 passed, 12 skipped, 0 failures. **Tier 3 closed.**
+
+*Cost: 1 iteration, $0.*
 
 ### Tier 4 — per-player + per-ball profile (from §4)
 

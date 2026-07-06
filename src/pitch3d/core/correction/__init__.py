@@ -36,6 +36,10 @@ from .engine import (
     smooth_rotation,
     smooth_vector,
 )
+from .collision import (
+    CollisionReport,
+    collision_gate,
+)
 from .foot_floor import (
     FootFloorReport,
     SubjectFootReport,
@@ -100,6 +104,8 @@ __all__ = [
     "slerp_quat",
     "smooth_rotation",
     "smooth_vector",
+    "CollisionReport",
+    "collision_gate",
     "FootFloorReport",
     "SubjectFootReport",
     "foot_floor_gate",

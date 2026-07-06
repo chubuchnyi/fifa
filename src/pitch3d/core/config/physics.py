@@ -31,6 +31,7 @@ from ..correction.coherence import CoherenceConfig
 from ..correction.kinematics import KinematicConfig
 from .gates import (
     BallConfig,
+    CollisionConfig,
     FootFloorConfig,
     JointKinematicConfig,
     OrientationConfig,
@@ -70,6 +71,7 @@ class PhysicsConfig:
     foot_floor: FootFloorConfig
     joint: JointKinematicConfig
     orientation: OrientationConfig
+    collision: CollisionConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -87,7 +89,8 @@ class PhysicsConfig:
             f"coherence(smooth_window={c.smooth_window}, coast={c.coast_max_speed}m/s) "
             f"foot_floor={'on' if self.foot_floor.enabled else 'off'} "
             f"joint={'on' if self.joint.enabled else 'off'} "
-            f"orientation={'on' if self.orientation.enabled else 'off'}"
+            f"orientation={'on' if self.orientation.enabled else 'off'} "
+            f"collision={'on' if self.collision.enabled else 'off'}"
         )
 
 
@@ -194,6 +197,7 @@ def load_physics_config(
     foot = _build_dataclass(FootFloorConfig, base.get("foot_floor", {}), "foot_floor")
     joint = _build_dataclass(JointKinematicConfig, base.get("joint", {}), "joint")
     orient = _build_dataclass(OrientationConfig, base.get("orientation", {}), "orientation")
+    collision = _build_dataclass(CollisionConfig, base.get("collision", {}), "collision")
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -203,6 +207,7 @@ def load_physics_config(
         foot_floor=foot,
         joint=joint,
         orientation=orient,
+        collision=collision,
         ball=ball,
         probe=probe,
         profile_name=profile,
