@@ -36,6 +36,11 @@ from .engine import (
     smooth_rotation,
     smooth_vector,
 )
+from .foot_floor import (
+    FootFloorReport,
+    SubjectFootReport,
+    foot_floor_gate,
+)
 from .rotations import (
     average_quats,
     axis_angle_to_matrix,
@@ -85,4 +90,7 @@ __all__ = [
     "slerp_quat",
     "smooth_rotation",
     "smooth_vector",
+    "FootFloorReport",
+    "SubjectFootReport",
+    "foot_floor_gate",
 ]

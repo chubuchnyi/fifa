@@ -29,6 +29,13 @@ import yaml
 
 from ..correction.coherence import CoherenceConfig
 from ..correction.kinematics import KinematicConfig
+from .gates import (
+    BallConfig,
+    FootFloorConfig,
+    JointKinematicConfig,
+    OrientationConfig,
+    ProbeConfig,
+)
 
 #: Repo-relative default location. ``load_physics_config(path=…)`` overrides.
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -46,49 +53,6 @@ ENV_MAP: dict[str, tuple[str, str, type]] = {
     "PITCH3D_JOINT_ON":          ("joint",      "enabled",        _bool),
     "PITCH3D_ORIENT_ON":         ("orientation", "enabled",       _bool),
 }
-
-
-@dataclass(frozen=True)
-class FootFloorConfig:
-    """Auto-default foot-floor clamp (Tier 1a). Not yet applied by the pipeline."""
-
-    enabled: bool = False
-    floor_m: float = 0.0
-    warn_hover_m: float = 0.30
-
-
-@dataclass(frozen=True)
-class JointKinematicConfig:
-    """Per-joint angular-velocity gate (Tier 1b). Schema reserved, not built."""
-
-    enabled: bool = False
-    max_omega_dps: float = 600.0
-
-
-@dataclass(frozen=True)
-class OrientationConfig:
-    """Root-orientation turn-rate gate (Tier 1c). Schema reserved, not built."""
-
-    enabled: bool = False
-    max_turn_rate_dps: float = 720.0
-
-
-@dataclass(frozen=True)
-class BallConfig:
-    """Ball measurement thresholds — used by probes, not a gate yet."""
-
-    max_speed: float = 36.0
-    max_accel: float = 200.0
-
-
-@dataclass(frozen=True)
-class ProbeConfig:
-    """Thresholds only ``scripts/motion_stats.py`` (and future probes) consume."""
-
-    turn_min_speed: float = 2.0
-    joint_min_omega_dps: float = 600.0
-    orient_min_dps: float = 720.0
-    foot_hover_m: float = 0.30
 
 
 @dataclass(frozen=True)

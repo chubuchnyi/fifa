@@ -268,19 +268,52 @@ Tests: `tests/unit/test_player_profile.py` (schema/serialization, filter policy,
 
 Weighted by eye impact (does it move the video?), measurability and implementation cost.
 
-### Tier 0 — measure before we fix anything
+### Tier 0 — measure before we fix anything (LANDED)
 
-**T0.** Extend `scripts/motion_stats.py`: add `foot_z_stats` (min/max/fraction z>ε), `joint_omega_stats` (per-joint angular velocity), `turn_rate_stats` (`global_orient` rate).
+**T0** — DONE. ``scripts/motion_stats.py`` rewritten with per-category stats:
 
-*Cost: 1 iteration, local, $0.*
+* ``foot_z_stats`` — z_min/z_max, hover_frac, below_floor_frac, plateau detection.
+* ``orient_stats`` — root ``global_orient`` angular rate via the true group metric
+  (``R_i+1 · R_i^-1``), not componentwise (pin test rejects the componentwise
+  answer).
+* ``joint_stats`` — per-joint ``body_pose`` angular rate + hottest-joint index.
 
-**Output:** an actual "violations per category" table on the current scene. Without this we're fixing by feel.
+All thresholds pulled from ``config/physics.yaml`` (added ``ball:`` and
+``probe:`` sections, ``BallConfig`` / ``ProbeConfig``). CLI: ``--profile``,
+``--config``, ``--json``. Every run prints the limits with their source so the
+log is self-documenting.
+
+**Real result on the dry-run scene** (``out/p2_3/export/scene.json``):
+
+* Every subject Z = 0.92 constant across all frames (``z_max - z_min ≈ 0``).
+* ``physics_compare.py`` reports ``plat=15`` — 15/15 subjects flagged as
+  constant-Z plateaus. This IS the "hovering" complaint made measurable: the
+  fake HMR path never emits ``pelvis_above_foot`` (line 42 of
+  ``adapters/models/pose.py``), so ``_ground_root`` picks the nominal 0.92 m
+  and stays there. A real HMR backend must emit per-frame ``pelvis_above_foot``
+  for stride/crouch variation.
+
+10 unit tests (``tests/unit/test_motion_stats.py``); 11 loader tests; 44 pre-existing
+kinematic/coherence tests all still green.
 
 ### Tier 1 — cover the obvious untouched gaps (A, C, D)
 
-**T1.a — foot floor as an auto-default.** Wire `foot_floor=0.0` into the default constraint set for the render pipeline (currently only if explicitly passed). Add a sanity gate "foot_z > 0.30 → warn" (something's wrong with shape/homography).
+**T1.a — foot-floor gate.** DONE. ``src/pitch3d/core/correction/foot_floor.py``:
+sibling of the M3-9 gate. Reads ``FootFloorConfig`` from
+``config/physics.yaml``; when enabled, emits ONE dense ``KEYFRAME_INTERP``
+``ROOT_TRANSLATION`` correction per subject whose resolved Z sinks under
+``floor_m + 0.92``. When disabled, still measures — plateau (``z_std < 0.02``),
+below-floor and hover counts land in the report. Wired into
+``scripts/physics_compare.py`` so profile sweeps show foot columns
+(``blwFl / plat / hovr / ffFix``).
 
-*Cost: 1 iteration, $0. Verify on the existing scene.*
+10 unit tests (``tests/unit/test_foot_floor.py``): disabled = measure-only,
+enabled = clamps below-floor rows, plateau flagged only on constant Z,
+idempotent, subject-isolated, empty-scene safe. Broke config→correction
+circular import by moving pure config dataclasses to
+``src/pitch3d/core/config/gates.py``.
+
+*Cost: 1 iteration, $0. Verified on ``out/p2_3/export/scene.json``.*
 
 **T1.b — per-joint angular gate.** New module `core/correction/joint_kinematics.py`: `max_omega_deg_per_s` (first version = 600°/s per joint), quaternion-slerp clamp, marked spikes with R-6. One `KEYFRAME_INTERP` per joint per subject through ADR-0002. Tests follow the M3-9 pattern.
 

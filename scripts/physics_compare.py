@@ -36,6 +36,7 @@ import numpy as np
 from pitch3d.core.config import load_physics_config
 from pitch3d.core.correction.coherence import add_temporal_coherence
 from pitch3d.core.correction.engine import resolve_subject_motion
+from pitch3d.core.correction.foot_floor import foot_floor_gate
 from pitch3d.core.correction.kinematics import kinematic_gate
 from pitch3d.core.scene.serialization import load_scene
 
@@ -113,6 +114,8 @@ def run_profile(scene_path: str, profile: str, config: str | None,
         corrections_added += cr.corrections_added
     scene, kr = kinematic_gate(scene, cfg.kinematic, fps=fps)
     corrections_added += kr.corrections_added
+    scene, ffr = foot_floor_gate(scene, cfg.foot_floor)
+    corrections_added += ffr.corrections_added
 
     after = _scene_stats(scene, fps, cfg)
     return {
@@ -127,6 +130,10 @@ def run_profile(scene_path: str, profile: str, config: str | None,
             for t in kr.teleports
         ],
         "max_dev_m": kr.max_dev_m,
+        "foot_below_floor": ffr.subjects_below_floor,
+        "foot_plateau": ffr.subjects_plateau,
+        "foot_hovering": ffr.subjects_hovering,
+        "foot_corrected": ffr.subjects_corrected,
         "before": before,
         "after": after,
         "kin_max_speed": cfg.kinematic.max_speed,
@@ -137,7 +144,9 @@ def run_profile(scene_path: str, profile: str, config: str | None,
 def _print_table(results: list[dict]) -> None:
     hdr = (f"{'profile':>14} {'lim_sp':>7} {'lim_ac':>7} "
            f"{'sp>lim':>7} {'ac>lim':>7} {'tele':>5} "
-           f"{'sp_max':>7} {'ac_max':>8} {'max_dev':>8} {'corrs':>6}")
+           f"{'sp_max':>7} {'ac_max':>8} {'max_dev':>8} "
+           f"{'blwFl':>5} {'plat':>4} {'hovr':>4} {'ffFix':>5} "
+           f"{'corrs':>6}")
     print(hdr)
     print("-" * len(hdr))
     for r in results:
@@ -146,7 +155,10 @@ def _print_table(results: list[dict]) -> None:
               f"{r['after']['speed_viol']:>7} {r['after']['accel_viol']:>7} "
               f"{r['teleports']:>5} "
               f"{r['after']['sp_max_mps']:>7.2f} {r['after']['ac_max_mps2']:>8.1f} "
-              f"{r['max_dev_m']:>8.3f} {r['corrections_added']:>6}")
+              f"{r['max_dev_m']:>8.3f} "
+              f"{r['foot_below_floor']:>5} {r['foot_plateau']:>4} "
+              f"{r['foot_hovering']:>4} {r['foot_corrected']:>5} "
+              f"{r['corrections_added']:>6}")
 
 
 def _print_lineage(results: list[dict]) -> None:
