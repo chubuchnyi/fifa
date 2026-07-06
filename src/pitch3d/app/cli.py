@@ -212,12 +212,28 @@ def run_dry_run(
         except ImportError:
             print("== foot_plant: SMPL-X FK provider unavailable — using cfg.target_pelvis_m")
 
+    # Foot-position provider (step 3b + 4b need per-frame (T, 3) foot world XY).
+    foot_position_provider = None
+    if physics and _phys is not None and _phys.contact_probe.enabled:
+        try:
+            from ..adapters.models.smplx_foot_pos import (
+                make_smplx_foot_position_provider,
+            )
+            foot_position_provider = make_smplx_foot_position_provider()
+            if foot_position_provider is not None:
+                print("== contact/momentum: SMPL-X foot-position provider ON")
+            else:
+                print("== contact/momentum: SMPL-X model not found — probes skipped")
+        except ImportError:
+            print("== contact/momentum: SMPL-X provider unavailable — probes skipped")
+
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
         stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
         identity_cfg=identity_cfg, appearance_provider=appearance_provider,
         profile_provider=profile_provider, auto_tune_sink=auto_tune_sink,
         physics_cfg=_phys, pelvis_target_provider=pelvis_target_provider,
+        foot_position_provider=foot_position_provider,
     )
     scene = app.get_scene(scene_id)
     mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
