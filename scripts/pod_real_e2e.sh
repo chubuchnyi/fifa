@@ -36,6 +36,11 @@ FORMAT="${FORMAT:-smplx_npz}"
 # PNLCALIB_WEIGHTS_* paths (pod defaults are baked into pnlcalib_backend.make()).
 PNLCALIB_REPO="${PNLCALIB_REPO-/workspace/repos/PnLCalib}"
 export PNLCALIB_REPO
+# SMPL-X model dir for the T6a v2 foot-plant provider (foot_plant_gate uses SMPL-X FK
+# to measure per-subject pelvis-above-foot; foot-plane target is the median of that).
+# The anim_export stage (pod_make_video.sh) already ships this — the reconstruction
+# stage needs it too now that foot_plant runs via controller.run_reconstruction.
+export PITCH3D_SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-/workspace/repos/SMPLest-X/human_models/human_model_files}"
 CALIB_ARGS=()
 if [ -n "${PNLCALIB_REPO}" ] && [ -d "${PNLCALIB_REPO}" ]; then
   CALIB_ARGS=(--calibrator keypoints
