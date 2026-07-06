@@ -25,6 +25,7 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..config.gates import PoseMotionSyncConfig
 from ..scene.layers import ConfidenceMap, Correction, CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
@@ -36,20 +37,6 @@ PATCHED_CONF = 0.20
 #:   1 = left hip, 2 = right hip, 4 = left knee, 5 = right knee.
 JOINT_HIP_L, JOINT_HIP_R = 1, 2
 JOINT_KNEE_L, JOINT_KNEE_R = 4, 5
-
-
-@dataclass(frozen=True)
-class PoseMotionSyncConfig:
-    enabled: bool = False
-    velocity_threshold_mps: float = 1.0
-    joint_activity_threshold: float = 0.10
-    #: Peak knee amplitude (radians) at ``full_speed_mps``.
-    knee_amplitude_rad: float = 0.35
-    #: Peak hip counter-swing amplitude (radians).
-    hip_amplitude_rad: float = 0.20
-    full_speed_mps: float = 6.0
-    #: How many strides per metre traveled (foot fall count).
-    strides_per_metre: float = 0.7
 
 
 @dataclass

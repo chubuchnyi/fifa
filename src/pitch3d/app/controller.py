@@ -42,10 +42,16 @@ from ..core.correction.contact_probe import (
     FootPositionProvider,
     contact_probe,
 )
+from ..core.correction.facing_align import FacingAlignReport, facing_align_gate
+from ..core.correction.inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
 from ..core.correction.momentum_smooth import (
     MomentumSmoothConfig,
     MomentumSmoothReport,
     momentum_smooth_gate,
+)
+from ..core.correction.pose_motion_sync import (
+    PoseMotionSyncReport,
+    pose_motion_sync_gate,
 )
 from ..core.correction.foot_floor import FootFloorReport, foot_floor_gate
 from ..core.correction.foot_plant import FootPlantReport, foot_plant_gate
@@ -233,6 +239,21 @@ class Application:
                     scene, physics_cfg.contact_probe, foot_position_provider,
                 )
                 self._scene_contact[scene_id] = contact_rep
+            # Pose-motion sync (procedural walk cycle on desynced frames).
+            if physics_cfg.pose_motion_sync.enabled:
+                scene, _ = pose_motion_sync_gate(
+                    scene, physics_cfg.pose_motion_sync, fps=clip.fps,
+                )
+            # Facing align: rotate body yaw to motion direction.
+            if physics_cfg.facing_align.enabled:
+                scene, _ = facing_align_gate(
+                    scene, physics_cfg.facing_align, fps=clip.fps,
+                )
+            # Inertia smooth: bound angular acceleration.
+            if physics_cfg.inertia_smooth.enabled:
+                scene, _ = inertia_smooth_gate(
+                    scene, physics_cfg.inertia_smooth, fps=clip.fps,
+                )
 
         scene.camera = self._static_camera(scene)
         self._scenes[scene_id] = scene

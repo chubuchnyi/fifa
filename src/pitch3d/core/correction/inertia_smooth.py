@@ -16,17 +16,10 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..config.gates import InertiaSmoothConfig
 from ..scene.layers import Correction, CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
-
-
-@dataclass(frozen=True)
-class InertiaSmoothConfig:
-    enabled: bool = False
-    smooth_window: int = 3      # centered moving average on yaw
-    max_alpha_rad_s2: float = 15.0
-    min_correction_rad: float = 1e-3
 
 
 @dataclass

@@ -95,6 +95,27 @@ base:
     min_contact_run_frames: 2
     min_correction_m:      1.0e-3
 
+  pose_motion_sync:         # procedural walk cycle on desynced frames
+    enabled:               false
+    velocity_threshold_mps: 1.0
+    joint_activity_threshold: 0.10
+    knee_amplitude_rad:    0.35
+    hip_amplitude_rad:     0.20
+    full_speed_mps:        6.0
+    strides_per_metre:     0.7
+
+  facing_align:             # yaw ↔ motion-direction lock
+    enabled:               false
+    velocity_threshold_mps: 1.0
+    yaw_tolerance_rad:     0.79
+    yaw_ewma_window:       5
+
+  inertia_smooth:           # low-pass yaw to bound α
+    enabled:               false
+    smooth_window:          3
+    max_alpha_rad_s2:     15.0
+    min_correction_rad:    1.0e-3
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -189,6 +210,30 @@ profiles:
         enabled:            true
         preserve_contact:  false
         smooth_window:      7
+
+  full_realism:
+    description: "All physics gates on: hover+glide+desync+moonwalk+twitch corrections all active."
+    overrides:
+      foot_floor:
+        enabled:            true
+      joint:
+        enabled:            true
+      orientation:
+        enabled:            true
+      foot_plant:
+        enabled:            true
+      contact_probe:
+        enabled:            true
+      momentum_smooth:
+        enabled:            true
+        preserve_contact:  false
+        smooth_window:      7
+      pose_motion_sync:
+        enabled:            true
+      facing_align:
+        enabled:            true
+      inertia_smooth:
+        enabled:            true
 
   safe_new_humanize:
     description: "safe_new + humanize_teleports — closes hover/joint/orient AND smooths ID-swap jumps."

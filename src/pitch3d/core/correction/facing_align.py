@@ -16,30 +16,12 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..config.gates import FacingAlignConfig
 from ..scene.layers import Correction, CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
 
 FACING_INFERRED_CONF = 0.30
-
-#: SMPL-X anatomical +X = anatomical left; +Z = anatomical front (in y-up
-#: canonical frame). The "forward" of the character is +Z. In our z-up world
-#: after the y-up → z-up remap, that maps to... complicated. For the FIRST
-#: cut we take a simpler stance: rotate global_orient around the world Z
-#: axis so the resulting yaw matches the motion direction. This assumes the
-#: player is upright (which the joint / orient gates already enforce).
-
-
-@dataclass(frozen=True)
-class FacingAlignConfig:
-    enabled: bool = False
-    velocity_threshold_mps: float = 1.0
-    #: How far (radians) the current yaw can differ from motion-direction yaw
-    #: before we correct. π/4 = 45° gives a wide tolerance for legit turns.
-    yaw_tolerance_rad: float = 0.79   # ~ 45°
-    #: EWMA smoothing on the target yaw so a single-frame direction flip
-    #: doesn't yank the body.
-    yaw_ewma_window: int = 5
 
 
 @dataclass

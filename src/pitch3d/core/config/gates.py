@@ -143,6 +143,39 @@ class MomentumSmoothConfig:
 
 
 @dataclass(frozen=True)
+class PoseMotionSyncConfig:
+    """Procedural walk-cycle patch when the pose is desynced from root motion."""
+
+    enabled: bool = False
+    velocity_threshold_mps: float = 1.0
+    joint_activity_threshold: float = 0.10
+    knee_amplitude_rad: float = 0.35
+    hip_amplitude_rad: float = 0.20
+    full_speed_mps: float = 6.0
+    strides_per_metre: float = 0.7
+
+
+@dataclass(frozen=True)
+class FacingAlignConfig:
+    """Rotate body yaw to match motion direction (moonwalking fix)."""
+
+    enabled: bool = False
+    velocity_threshold_mps: float = 1.0
+    yaw_tolerance_rad: float = 0.79
+    yaw_ewma_window: int = 5
+
+
+@dataclass(frozen=True)
+class InertiaSmoothConfig:
+    """Low-pass yaw to bound angular acceleration."""
+
+    enabled: bool = False
+    smooth_window: int = 3
+    max_alpha_rad_s2: float = 15.0
+    min_correction_rad: float = 1e-3
+
+
+@dataclass(frozen=True)
 class ContactProbeConfig:
     """Step 3 probe — foot-contact detection + slide measurement.
 

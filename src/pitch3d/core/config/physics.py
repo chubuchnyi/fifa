@@ -33,12 +33,15 @@ from .gates import (
     BallConfig,
     CollisionConfig,
     ContactProbeConfig,
+    FacingAlignConfig,
     FootFloorConfig,
     FootPlantConfig,
     IdentityConfig,
+    InertiaSmoothConfig,
     JointKinematicConfig,
     MomentumSmoothConfig,
     OrientationConfig,
+    PoseMotionSyncConfig,
     ProbeConfig,
 )
 
@@ -80,6 +83,9 @@ class PhysicsConfig:
     identity: IdentityConfig
     contact_probe: ContactProbeConfig
     momentum_smooth: MomentumSmoothConfig
+    pose_motion_sync: PoseMotionSyncConfig
+    facing_align: FacingAlignConfig
+    inertia_smooth: InertiaSmoothConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -214,6 +220,15 @@ def load_physics_config(
     momentum_smooth = _build_dataclass(
         MomentumSmoothConfig, base.get("momentum_smooth", {}), "momentum_smooth",
     )
+    pose_motion_sync = _build_dataclass(
+        PoseMotionSyncConfig, base.get("pose_motion_sync", {}), "pose_motion_sync",
+    )
+    facing_align = _build_dataclass(
+        FacingAlignConfig, base.get("facing_align", {}), "facing_align",
+    )
+    inertia_smooth = _build_dataclass(
+        InertiaSmoothConfig, base.get("inertia_smooth", {}), "inertia_smooth",
+    )
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -228,6 +243,9 @@ def load_physics_config(
         identity=identity,
         contact_probe=contact_probe,
         momentum_smooth=momentum_smooth,
+        pose_motion_sync=pose_motion_sync,
+        facing_align=facing_align,
+        inertia_smooth=inertia_smooth,
         ball=ball,
         probe=probe,
         profile_name=profile,
