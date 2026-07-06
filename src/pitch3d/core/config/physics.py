@@ -74,6 +74,24 @@ class OrientationConfig:
 
 
 @dataclass(frozen=True)
+class BallConfig:
+    """Ball measurement thresholds — used by probes, not a gate yet."""
+
+    max_speed: float = 36.0
+    max_accel: float = 200.0
+
+
+@dataclass(frozen=True)
+class ProbeConfig:
+    """Thresholds only ``scripts/motion_stats.py`` (and future probes) consume."""
+
+    turn_min_speed: float = 2.0
+    joint_min_omega_dps: float = 600.0
+    orient_min_dps: float = 720.0
+    foot_hover_m: float = 0.30
+
+
+@dataclass(frozen=True)
 class PhysicsConfig:
     """Fully-resolved physics config + per-field lineage.
 
@@ -88,6 +106,8 @@ class PhysicsConfig:
     foot_floor: FootFloorConfig
     joint: JointKinematicConfig
     orientation: OrientationConfig
+    ball: BallConfig
+    probe: ProbeConfig
     profile_name: str
     profile_description: str
     lineage: dict[str, str] = field(default_factory=dict)
@@ -210,6 +230,8 @@ def load_physics_config(
     foot = _build_dataclass(FootFloorConfig, base.get("foot_floor", {}), "foot_floor")
     joint = _build_dataclass(JointKinematicConfig, base.get("joint", {}), "joint")
     orient = _build_dataclass(OrientationConfig, base.get("orientation", {}), "orientation")
+    ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
+    probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
     return PhysicsConfig(
         kinematic=kin,
@@ -217,6 +239,8 @@ def load_physics_config(
         foot_floor=foot,
         joint=joint,
         orientation=orient,
+        ball=ball,
+        probe=probe,
         profile_name=profile,
         profile_description=description,
         lineage=lineage,

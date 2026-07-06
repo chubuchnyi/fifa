@@ -55,6 +55,16 @@ base:
     enabled:               false
     max_turn_rate_dps:    720.0      # global_orient rate ceiling
 
+  ball:                     # measurement thresholds for scripts/motion_stats.py etc.
+    max_speed:             36.0      # m/s   hardest recorded shot
+    max_accel:            200.0      # m/s²  a kick — very high but bounded
+
+  probe:                    # scripts/motion_stats.py thresholds — parametric, not hard-coded
+    turn_min_speed:         2.0      # m/s   turn rate only meaningful above this speed
+    joint_min_omega_dps:  600.0      # per-joint angular-velocity flag threshold
+    orient_min_dps:       720.0      # root-orientation turn-rate flag threshold
+    foot_hover_m:           0.30     # foot_z above this = hovering warning
+
 # ─── named profiles for A/B comparison ────────────────────────────────────────
 # Each profile lists a partial override tree on top of `base`. Comparison harness
 # runs the same scene through each profile and reports the diff.

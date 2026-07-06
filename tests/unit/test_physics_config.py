@@ -46,6 +46,9 @@ def _minimal(**profiles) -> dict:
             "foot_floor": {"enabled": False, "floor_m": 0.0, "warn_hover_m": 0.30},
             "joint":      {"enabled": False, "max_omega_dps": 600.0},
             "orientation": {"enabled": False, "max_turn_rate_dps": 720.0},
+            "ball":       {"max_speed": 36.0, "max_accel": 200.0},
+            "probe":      {"turn_min_speed": 2.0, "joint_min_omega_dps": 600.0,
+                           "orient_min_dps": 720.0, "foot_hover_m": 0.30},
         },
         "profiles": {"default": {"description": "d", "overrides": {}}, **profiles},
     }
@@ -154,6 +157,7 @@ def test_lineage_covers_every_leaf(tmp_path):
         ("kinematic", cfg.kinematic), ("coherence", cfg.coherence),
         ("foot_floor", cfg.foot_floor), ("joint", cfg.joint),
         ("orientation", cfg.orientation),
+        ("ball", cfg.ball), ("probe", cfg.probe),
     ):
         for f in dc.__dataclass_fields__:
             key = f"{section}.{f}"
