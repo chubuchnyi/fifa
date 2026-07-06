@@ -421,8 +421,20 @@ default from priors, unknown track/field skipped safely.
 
 Full suite: 734 passed, 12 skipped, 0 failures.
 
-**T4.c — ball profile wiring.** After T4.b, same pattern for the ball
-against ``BallConfig``.
+**T4.c — ball profile wiring.** DONE.
+The ball doesn't go through a M3-9-style clamp gate (contact-anchored per
+#206), so proposals come directly from the resolved ball motion. Helper
+``emit_ball_proposals(ball_track_id, frames, positions_3d, fps, …)`` returns
+``ProfileUpdateProposal`` for ``peak_speed_mps`` and ``peak_accel_mps2`` from
+p95 of the diffs. ``apply_profile_updates(...ball_id_lookup=…)`` routes
+``domain="ball"`` proposals to ``store.load_ball`` / ``store.save_ball``, so
+one batch can carry mixed player + ball updates.
+
+8 new unit tests (``tests/unit/test_ball_profile.py``): p95 from linear
+motion, short-track safe, roundtrip, default seeding on missing, operator
+lock, unknown ball id skipped, unknown field skipped, mixed batch routing.
+
+Full suite: 742 passed, 12 skipped, 0 failures. **T4 is done.**
 
 ### Tier 5 — fatigue (G)
 

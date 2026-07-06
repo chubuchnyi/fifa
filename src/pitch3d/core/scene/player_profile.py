@@ -37,6 +37,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import yaml
 
 
@@ -325,11 +326,81 @@ def set_operator_field(field_: ProfileField, value: float) -> ProfileField:
     return replace(field_, value=float(value), source=ProfileSource.OPERATOR)
 
 
+def _apply_player_update(
+    profile: PlayerProfile, u: "ProfileUpdateProposal", priors: PopulationPriors,
+) -> tuple[PlayerProfile | None, "UpdateOutcome | None"]:
+    """Apply one player-domain proposal; return (new_profile, outcome) or (None, None) skip."""
+    target = None
+    section = None
+    if u.field_key in profile.kinematics:
+        target = profile.kinematics[u.field_key]
+        section = "kinematics"
+    elif u.field_key in profile.endurance:
+        target = profile.endurance[u.field_key]
+        section = "endurance"
+    if target is None or section is None:
+        return None, None
+    new_field, outcome = update_field(
+        target, u.observation,
+        confidence=u.confidence,
+        policy=priors.policy,
+        default_value=u.default_value,
+    )
+    if new_field == target:
+        return profile, outcome
+    new_section = dict(getattr(profile, section))
+    new_section[u.field_key] = new_field
+    return replace(
+        profile,
+        kinematics=new_section if section == "kinematics" else profile.kinematics,
+        endurance=new_section if section == "endurance" else profile.endurance,
+        last_updated=_now_iso(),
+    ), outcome
+
+
+def _apply_ball_update(
+    profile: BallProfile, u: "ProfileUpdateProposal", priors: PopulationPriors,
+) -> tuple[BallProfile | None, "UpdateOutcome | None"]:
+    """Apply one ball-domain proposal; return (new_profile, outcome) or (None, None) skip."""
+    target = None
+    section = None
+    if u.field_key in profile.kinematics:
+        target = profile.kinematics[u.field_key]
+        section = "kinematics"
+    elif u.field_key in profile.physics:
+        target = profile.physics[u.field_key]
+        section = "physics"
+    elif u.field_key in profile.appearance:
+        target = profile.appearance[u.field_key]
+        section = "appearance"
+    if target is None or section is None:
+        return None, None
+    new_field, outcome = update_field(
+        target, u.observation,
+        confidence=u.confidence,
+        policy=priors.policy,
+        default_value=u.default_value,
+    )
+    if new_field == target:
+        return profile, outcome
+    new_section = dict(getattr(profile, section))
+    new_section[u.field_key] = new_field
+    return replace(
+        profile,
+        kinematics=new_section if section == "kinematics" else profile.kinematics,
+        physics=new_section if section == "physics" else profile.physics,
+        appearance=new_section if section == "appearance" else profile.appearance,
+        last_updated=_now_iso(),
+    ), outcome
+
+
 def apply_profile_updates(
     store,                                    # ProfileStore (protocol imported lazily)
     priors: PopulationPriors,
     subject_lookup: dict[int, tuple[str, int, "Position"]],
     updates,                                  # Iterable[ProfileUpdateProposal]
+    *,
+    ball_id_lookup: dict[int, str] | None = None,
 ) -> dict[str, int]:
     """Feed each proposal through :func:`update_field`; persist mutated profiles.
 
@@ -337,8 +408,12 @@ def apply_profile_updates(
     * ``priors`` — for population defaults + the shared :class:`AutoTunePolicy`.
     * ``subject_lookup`` — ``track_id → (team, jersey, position)``. Callers
       typically compute this from the scene's ``Subject.team_id`` /
-      ``jersey_number``; unknown tracks are skipped.
-    * ``updates`` — the ``report.profile_updates`` produced by the gate.
+      ``jersey_number``; unknown player tracks are skipped.
+    * ``updates`` — the ``report.profile_updates`` produced by the gate/probe.
+    * ``ball_id_lookup`` — optional ``track_id → ball_id`` for ``domain="ball"``
+      proposals (typically ``{-1: "match_ball_1"}`` since the scene's ball has
+      no track_id; the probe emits with a canonical id). Unknown ball ids are
+      skipped.
 
     Returns per-outcome counts (``applied / quarantined / low_confidence /
     operator_locked / skipped``) — the audit trail for a run.
@@ -347,51 +422,100 @@ def apply_profile_updates(
         "applied": 0, "quarantined": 0, "low_confidence": 0,
         "operator_locked": 0, "skipped": 0,
     }
-    cache: dict[tuple[str, int], PlayerProfile] = {}
+    player_cache: dict[tuple[str, int], PlayerProfile] = {}
+    ball_cache: dict[str, BallProfile] = {}
+
     for u in updates:
-        entry = subject_lookup.get(int(u.track_id))
-        if entry is None:
-            counts["skipped"] += 1
-            continue
-        team, jersey, position = entry
-        key = (team, int(jersey))
-        profile = cache.get(key)
-        if profile is None:
-            profile = store.load_player(team, jersey)
+        if u.domain == "player":
+            entry = subject_lookup.get(int(u.track_id))
+            if entry is None:
+                counts["skipped"] += 1
+                continue
+            team, jersey, position = entry
+            key = (team, int(jersey))
+            profile = player_cache.get(key)
             if profile is None:
-                profile = default_player_profile(team, jersey, position, priors=priors)
-        if u.domain != "player":
+                profile = store.load_player(team, jersey)
+                if profile is None:
+                    profile = default_player_profile(
+                        team, jersey, position, priors=priors,
+                    )
+            new_profile, outcome = _apply_player_update(profile, u, priors)
+            if new_profile is None or outcome is None:
+                counts["skipped"] += 1
+                continue
+            counts[outcome.value] += 1
+            player_cache[key] = new_profile
+        elif u.domain == "ball":
+            lookup = ball_id_lookup or {}
+            ball_id = lookup.get(int(u.track_id))
+            if ball_id is None:
+                counts["skipped"] += 1
+                continue
+            profile = ball_cache.get(ball_id)
+            if profile is None:
+                profile = store.load_ball(ball_id)
+                if profile is None:
+                    profile = default_ball_profile(ball_id, priors=priors)
+            new_profile, outcome = _apply_ball_update(profile, u, priors)
+            if new_profile is None or outcome is None:
+                counts["skipped"] += 1
+                continue
+            counts[outcome.value] += 1
+            ball_cache[ball_id] = new_profile
+        else:
             counts["skipped"] += 1
             continue
-        target = None
-        section = None
-        if u.field_key in profile.kinematics:
-            target = profile.kinematics[u.field_key]
-            section = "kinematics"
-        elif u.field_key in profile.endurance:
-            target = profile.endurance[u.field_key]
-            section = "endurance"
-        if target is None or section is None:
-            counts["skipped"] += 1
-            continue
-        new_field, outcome = update_field(
-            target, u.observation,
-            confidence=u.confidence,
-            policy=priors.policy,
-            default_value=u.default_value,
-        )
-        counts[outcome.value] += 1
-        if new_field == target:
-            continue
-        new_section = dict(getattr(profile, section))
-        new_section[u.field_key] = new_field
-        profile = replace(
-            profile,
-            kinematics=new_section if section == "kinematics" else profile.kinematics,
-            endurance=new_section if section == "endurance" else profile.endurance,
-            last_updated=_now_iso(),
-        )
-        cache[key] = profile
-    for profile in cache.values():
+
+    for profile in player_cache.values():
         store.save_player(profile)
+    for profile in ball_cache.values():
+        store.save_ball(profile)
     return counts
+
+
+def emit_ball_proposals(
+    ball_track_id: int,
+    frames: np.ndarray,          # (T,) frame indices
+    positions_3d: np.ndarray,    # (T, 3) world XYZ
+    fps: float,
+    default_peak_speed: float | None = None,
+    default_peak_accel: float | None = None,
+    confidence: float = 1.0,
+) -> "list[ProfileUpdateProposal]":
+    """Extract p95 speed + p95 accel from a ball track → auto-tune proposals.
+
+    Ships as a helper the probe / motion_stats can call: the ball doesn't go
+    through a M3-9-style clamp gate (it's contact-anchored per #206), so the
+    proposals come from the RESOLVED ball motion the pipeline exports.
+    """
+    positions_3d = np.asarray(positions_3d, dtype=float)
+    frames = np.asarray(frames, dtype=float)
+    proposals: list[ProfileUpdateProposal] = []
+    if frames.shape[0] < 3:
+        return proposals
+    dt = np.diff(frames) / fps
+    ok = dt > 0
+    if not ok.any():
+        return proposals
+    vel = np.diff(positions_3d, axis=0)[ok] / dt[ok, None]
+    speed = np.linalg.norm(vel, axis=1)
+    if speed.size:
+        proposals.append(ProfileUpdateProposal(
+            track_id=int(ball_track_id), domain="ball",
+            field_key="peak_speed_mps",
+            observation=float(np.percentile(speed, 95)),
+            confidence=float(confidence),
+            default_value=default_peak_speed,
+        ))
+    if speed.size > 1:
+        accel = np.linalg.norm(np.diff(vel, axis=0), axis=1) / dt[ok][1:]
+        if accel.size:
+            proposals.append(ProfileUpdateProposal(
+                track_id=int(ball_track_id), domain="ball",
+                field_key="peak_accel_mps2",
+                observation=float(np.percentile(accel, 95)),
+                confidence=float(confidence),
+                default_value=default_peak_accel,
+            ))
+    return proposals
