@@ -30,6 +30,14 @@ import sys
 from dataclasses import asdict, replace
 
 from pitch3d.core.config import load_physics_config
+from pitch3d.core.correction.angular_momentum_probe import (
+    AngularMomentumConfig,
+    angular_momentum_probe,
+)
+from pitch3d.core.correction.ball_gravity_probe import (
+    BallGravityConfig,
+    ball_gravity_probe,
+)
 from pitch3d.core.correction.body_scale_probe import BodyScaleConfig, body_scale_probe
 from pitch3d.core.correction.contact_probe import contact_probe
 from pitch3d.core.correction.gravity_probe import GravityConfig, gravity_probe
@@ -82,6 +90,8 @@ def run_all(scene_path: str, fps: float) -> dict:
 
     interpen = interpen_probe(scene, InterpenConfig(enabled=True))
     stride = stride_probe(scene, StrideProbeConfig(enabled=True), fps=fps)
+    ang_mom = angular_momentum_probe(scene, AngularMomentumConfig(enabled=True), fps=fps)
+    ball_grav = ball_gravity_probe(scene, BallGravityConfig(enabled=True), fps=fps)
 
     mom = momentum_probe(
         scene, MomentumProbeConfig(enabled=True, jerk_threshold_mps3=100.0),
@@ -141,6 +151,14 @@ def run_all(scene_path: str, fps: float) -> dict:
             "total_overlap_frames": interpen.total_overlap_frames,
             "max_overlap_m": interpen.max_overlap_m,
         },
+        "angular_momentum": {
+            "subjects_uncoordinated": ang_mom.subjects_uncoordinated,
+        },
+        "ball_gravity": {
+            "n_frames": ball_grav.n_frames,
+            "mean_a_z": ball_grav.mean_vertical_accel_mps2,
+            "max_dev": ball_grav.max_deviation_mps2,
+        },
     }
 
 
@@ -181,6 +199,11 @@ def print_summary(r: dict) -> None:
     ip = r["interpen"]
     print(f"[interpen]     overlap_subj={ip['subjects_with_overlap']}/{n} "
           f"frames={ip['total_overlap_frames']} max={ip['max_overlap_m']:.2f}m")
+    am = r["angular_momentum"]
+    print(f"[ang_mom]      uncoordinated={am['subjects_uncoordinated']}/{n}")
+    bg = r["ball_gravity"]
+    print(f"[ball_gravity] frames={bg['n_frames']} "
+          f"mean_a={bg['mean_a_z']:.2f}m/s² max_dev={bg['max_dev']:.1f}m/s²")
 
 
 def main(argv: list[str] | None = None) -> int:
