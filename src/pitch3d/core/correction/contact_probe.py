@@ -22,13 +22,14 @@ plugs here; a mock provider drives the tests.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 import numpy as np
 
 from ..config.gates import ContactProbeConfig
 from ..scene.scene import Scene, Subject
+from .engine import resolve_subject_motion
 
 FootPositionProvider = Callable[[Subject], "np.ndarray | None"]
 
@@ -110,7 +111,11 @@ def contact_probe(
 
     all_slide_m: list[float] = []
     for s in scene.subjects:
-        pos = foot_position_provider(s)
+        # resolve BEFORE calling provider so foot XY reflects any prior
+        # corrections (contact-lock, foot-plant, M3-9 clamps).
+        resolved = resolve_subject_motion(s.proposal, scene.corrections_for(s.track_id))
+        resolved_subject = replace(s, proposal=resolved)
+        pos = foot_position_provider(resolved_subject)
         if pos is None:
             report.subjects.append(SubjectContactReport(track_id=int(s.track_id)))
             continue

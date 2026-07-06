@@ -36,6 +36,7 @@ from ..core.correction.engine import (
     resolve_subject_motion,
 )
 from ..core.correction.collision import CollisionReport, collision_gate
+from ..core.correction.contact_lock import ContactLockReport, contact_lock_gate
 from ..core.correction.contact_probe import (
     ContactProbeReport,
     FootPositionProvider,
@@ -209,8 +210,12 @@ class Application:
                 scene, physics_cfg.orientation, fps=clip.fps,
             )
             scene, collision_rep = collision_gate(scene, physics_cfg.collision)
-            # Step 3 probe (measurement only — no correction emitted yet)
+            # Step 3 — contact-lock foot slide during stance runs
             if physics_cfg.contact_probe.enabled and foot_position_provider is not None:
+                scene, contact_lock_rep = contact_lock_gate(
+                    scene, physics_cfg.contact_probe, foot_position_provider,
+                )
+                # Probe re-runs on the CORRECTED scene so the report is honest
                 contact_rep = contact_probe(
                     scene, physics_cfg.contact_probe, foot_position_provider,
                 )
