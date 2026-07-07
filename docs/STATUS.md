@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-06 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-07 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -395,6 +395,30 @@ fabricate or silently hide.
   `909d219 a2a990e 96a8cfb 19e83cb aedfc18 ea7cf8f a706d22 663acdb eaaa5c8
   da01330 4652ac4 7d91c98 99f7b61 0f332f5 f887b10 daab1be 54f58e9 a40cf78
   fd9dc56 c8b88b6 e9983db 7da6fcb b7c6489`.
+
+- **2026-07-07 (morning)** — **POSEANNOT v0 SHIPPED + orient_verticality landed.** Full
+  pipeline debug (raw HMR → scene.json) exposed the real physics blocker:
+  SMPLest-X has fundamental orientation ambiguity for standing / slow-moving
+  players and puts **35% of subjects (8/23)** lying sideways or inverted
+  for >50% of the clip. No temporal smoother can fix an absolutely wrong
+  pose. Fix: **`orient_verticality_gate`** (commit `3a3b954`) — hard
+  verticality clamp on any frame where body-up tilts >0.61 rad from world
+  +Z; preserves world-yaw. On target scene: median frac_upright 70% → 100%,
+  subjects <50% upright 8/23 → **0/23**. Visible in the physics-only
+  Blender debug preview (a "cluster of falling meshes" → "cluster of
+  standing footballers"). Also landed the stage-by-stage debug tooling:
+  `scripts/pipeline_stage_debug.py`, `scripts/physics_debug_replay.py`,
+  `scripts/pipeline_before_after.py`. Then **poseannot v0** (`354cfee`):
+  browser-based pose annotator on top of scene.json. FastAPI + JWT auth +
+  vanilla HTML + Alpine.js + Three.js (no build step). Read-only for now:
+  navigate frames, click a subject, see 2D pose overlay on the source
+  video AND matching 3D SMPL-X view with orbit camera. 22/22 SMPL-X joints
+  project onto real players (verified by curl composite). Deploy target
+  is RunPod. Architecture + roadmap in
+  [`poseannot-architecture.md`](poseannot-architecture.md) +
+  [`poseannot-roadmap.md`](poseannot-roadmap.md). Next: v1 body_pose
+  editing (click joint → gizmo → save correction to `edits.json`).
+  Tests: 970 passed / 12 skipped.
 
 - **2026-07-06 (overnight)** — **PHYSICS ITERATION (autonomous batch, no pod).** Landed 6 commits
   atop full_realism: (a) **beta_variance_probe** — SMPL-X shape stability +
