@@ -365,6 +365,25 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-07 (evening)** — **POSEANNOT overlay 180°-roll bug — root-caused + fixed.** User's
+  4th visual test: "оверлэй отзеркален, повёрнут, сжат" (mirrored/rotated/compressed), anchored with
+  real IDs (GK=t31, t9=yellow #3, ref=t66). Root cause: `poseannot/camera.py` had the 180°-roll
+  auto-detect gate **inverted** — `flipped = bool(R[1,2] < 0)`, but the validated convention
+  (memory `project_camera_180_roll`) is `-R[1,2] < 0` ⟺ **R[1,2] > 0**. This scene's frame-0
+  `R[1,2] = +0.853 > 0` NEEDS the roll, so the buggy gate never fired → poseannot projected in the
+  solve's self-consistent (upside-down) frame but displayed on the as-decoded upright frame → every
+  body landed **head-down + point-reflected** (= exactly the mirror/rotate/squish the user saw).
+  Fix: gate → `bool(-R[1,2] < 0)` + corrected the misleading comment. Since intrinsics scale to
+  cx=960=W/2, cy=540=H/2 exactly, the composed camera-Z roll `Rz=diag(-1,-1,1)` **is** the 180°
+  image reflection `(u,v)→(W-u,H-v)`, so the overlay lands head-up while the **video the user sees
+  stays upright** (we do NOT rotate the served frame — per memory, the roll is fixed at the one place
+  that reconciles solve-frame vs raw-frame). Verified 3 independent ways: (a) rendered no-roll math
+  on a 180°-rotated frame → markers land on the (upside-down) players; (b) foot(z=0)→pelvis(z=1.4)
+  orientation test → 23/23 subjects head-up with the roll, 0/23 without; (c) **live** server
+  `GET /api/frame/0/skeletons` → pelvis above ankles for all sampled subjects. Server restarted on
+  :8899 with the fix. Residual sub-body offset (calib/frame-sync) left for user confirmation against
+  the anchor IDs. NOT yet committed at time of writing.
+
 - **2026-07-07 (afternoon)** — **POSEANNOT v1 + editor GUI batch.** Built on v0 (read-only
   `354cfee`). Landed in order:
   * **v1 editing** (`1e2034c`): click a subject → click a joint → Three.js TransformControls

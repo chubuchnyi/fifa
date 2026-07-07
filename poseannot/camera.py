@@ -56,9 +56,14 @@ def frame_projector(
             sx = vw / cal_w
             sy = vh / cal_h
             fx *= sx; fy *= sy; cx *= sx; cy *= sy
-    # Auto-detect 180° roll (memory reference_camera_180_roll). Camera track
-    # projects onto the upside-down frame if R[1,2] < 0.
-    flipped = bool(R[1, 2] < 0)
+    # Auto-detect the 180° camera roll (memory project_camera_180_roll). The
+    # solved CameraTrack is self-consistent only on the frame turned upside-down,
+    # so a no-roll projection lands every body HEAD-DOWN on the as-decoded frame.
+    # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0) and compose a
+    # camera-Z roll: since cx=W/2, cy=H/2 exactly, that Rz is precisely the 180°
+    # image reflection (u,v)→(W-u,H-v), so the overlay lands head-up while the
+    # displayed video stays upright (we never rotate the frame the user sees).
+    flipped = bool(-R[1, 2] < 0)
     if flipped:
         # compose a 180° roll around camera Z-axis
         Rz = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=float)
