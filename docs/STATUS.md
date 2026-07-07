@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-05 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-06 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -395,6 +395,29 @@ fabricate or silently hide.
   `909d219 a2a990e 96a8cfb 19e83cb aedfc18 ea7cf8f a706d22 663acdb eaaa5c8
   da01330 4652ac4 7d91c98 99f7b61 0f332f5 f887b10 daab1be 54f58e9 a40cf78
   fd9dc56 c8b88b6 e9983db 7da6fcb b7c6489`.
+
+- **2026-07-06 (overnight)** — **PHYSICS ITERATION (autonomous batch, no pod).** Landed 6 commits
+  atop full_realism: (a) **beta_variance_probe** — SMPL-X shape stability +
+  cross-track cos-distance; pod scene signal: **169/253 pairs "similar" @ cos<0.05
+  → betas NOT discriminative** for identity in this export, so downstream merges
+  must not lean on shape alone (`360fa4b`). (b) **11th probe dimension** wired
+  into `scripts/physics_diagnose.py` (`6714db9`). (c) **joint_smooth gate** wired
+  end-to-end (config → yaml → controller → full_realism profile) — per-joint
+  peak α **447 → 91 rad/s² @ window=5, → 46 @ window=9 (-80%/-90%)** on real
+  pod scene, direct attack on HMR twitch that pose_kinematics misses (`a49eb5c`).
+  (d) **Gate reorder:** gravity_project runs AFTER jerk_clamp (was before) —
+  jerk_clamp was smoothing the ballistic parabola right back out; violations
+  21→18, max_dev 13.5→9.5 m/s² offline; full gain on next controller pass
+  (`556bb5c`). (e) **facing_align unwrap fix** — averaging wrapped angles
+  (+π, −π) through EWMA gave ~0 (180° corruption); `np.unwrap → EWMA →
+  wrap-to-pi` + regression test (`1c02588`). (f) **SMPL-X foot-pos
+  densification 30→240 frame cap** — the 30-cap held-between-samples was
+  synthesizing fake stances; contact_lock now zeros **98% of foot slide
+  (15.4 m → 0.3 m aggregate, max 1.05 → 0.07 m)** on the same scene
+  (`829ea81`). New memory: `feedback_yaw_lowpass_kills_motion.md` — iterative
+  MA on HMR yaw removes 90% of α but flattens 100°+ real turns; use
+  facing_align for structural yaw discipline, not statistical low-pass.
+  Total tests: **960 passed / 12 skipped** (was 959 → +1 regression test).
 
 - **2026-07-06 (afternoon)** — **PHYSICS TIER SHIPPED + FIRST POD RUN with safe_new profile.**
   Autonomous cycle closed all six eye-symptoms from the user's physics complaint
