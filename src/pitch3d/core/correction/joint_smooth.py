@@ -15,19 +15,10 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from ..config.gates import JointSmoothConfig
 from ..scene.layers import Correction, CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
-
-
-@dataclass(frozen=True)
-class JointSmoothConfig:
-    enabled: bool = False
-    smooth_window: int = 5     # centered MA window
-    min_correction_rad: float = 5e-3
-    #: Which body joints to smooth (SMPL-X body_pose, indices 0-20).
-    #: Default: all body joints.
-    joint_indices: tuple[int, ...] = tuple(range(21))
 
 
 @dataclass
@@ -78,9 +69,7 @@ def joint_smooth_gate(
 
         smoothed_all = _moving_average_axisangle(body, cfg.smooth_window)
         subj_emit = False
-        for j in cfg.joint_indices:
-            if j < 0 or j >= body.shape[1]:
-                continue
+        for j in range(body.shape[1]):
             per_joint_dev = float(np.abs(smoothed_all[:, j, :] - body[:, j, :]).max())
             report.max_deviation_rad = max(report.max_deviation_rad, per_joint_dev)
             if per_joint_dev < cfg.min_correction_rad:

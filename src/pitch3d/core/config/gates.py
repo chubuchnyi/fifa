@@ -187,6 +187,15 @@ class JerkClampConfig:
 
 
 @dataclass(frozen=True)
+class JointSmoothConfig:
+    """Low-pass over per-joint axis-angle body_pose to kill twitch/jitter."""
+
+    enabled: bool = False
+    smooth_window: int = 5
+    min_correction_rad: float = 5e-3
+
+
+@dataclass(frozen=True)
 class GravityProjectConfig:
     """Force airborne Z onto a ballistic parabola."""
 

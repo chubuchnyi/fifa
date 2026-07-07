@@ -129,6 +129,11 @@ base:
     max_passes:            10
     min_correction_m:      1.0e-3
 
+  joint_smooth:             # per-joint MA low-pass on body_pose (kills HMR twitch)
+    enabled:               false
+    smooth_window:          5
+    min_correction_rad:    5.0e-3
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -250,6 +255,8 @@ profiles:
       gravity_project:
         enabled:            true
       jerk_clamp:
+        enabled:            true
+      joint_smooth:
         enabled:            true
 
   full_realism_collide:
