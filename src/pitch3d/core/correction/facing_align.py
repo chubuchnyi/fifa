@@ -128,8 +128,10 @@ def facing_align_gate(
             report.subjects.append(r)
             continue
         target_yaw = _yaw_from_velocity(vel[:, :2])
-        # smooth target so a single wobble doesn't rotate the body
-        target_yaw_smooth = _ewma(target_yaw, cfg.yaw_ewma_window)
+        # Unwrap BEFORE EWMA — averaging +π and -π wrapped values gives 0
+        # (180° off), corrupting the smooth target. Wrap back after.
+        target_unwrapped = np.unwrap(target_yaw)
+        target_yaw_smooth = _wrap_to_pi(_ewma(target_unwrapped, cfg.yaw_ewma_window))
         current_yaw = _yaw_from_axis_angle(orient)
         delta_yaw = _wrap_to_pi(target_yaw_smooth - current_yaw)
         needs_fix = moving & (np.abs(delta_yaw) > cfg.yaw_tolerance_rad)

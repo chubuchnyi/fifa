@@ -111,3 +111,35 @@ def test_empty_scene():
         _scene(), FacingAlignConfig(enabled=True), fps=30,
     )
     assert report.corrections_added == 0
+
+
+def test_wraparound_direction_target_stays_near_pi():
+    """Motion direction is nearly ±π throughout. Body faces that direction.
+
+    Regression: without unwrap-before-EWMA, averaging +π and -π wrapped
+    values gives ~0 (180° off), which would cause the gate to rotate a
+    correctly-facing body to face the wrong way. After the unwrap fix,
+    the smoothed target should stay near ±π, so the gate only touches at
+    most the noisy warm-up frames — never the well-defined moving core.
+    """
+    T = 30
+    transl = np.zeros((T, 3))
+    transl[:, 0] = np.linspace(0, -6.0, T)   # moving in -X → yaw target = π
+    orient = np.zeros((T, 3))
+    orient[:, 2] = np.pi                     # facing -X
+    s = _subject(1, transl, orient)
+    scene, report = facing_align_gate(
+        _scene(s), FacingAlignConfig(enabled=True), fps=30,
+    )
+    # yaw already aligned to π → post-warmup frames should not be rewritten
+    if report.corrections_added > 0:
+        got = np.asarray(
+            resolve_subject_motion(s.proposal, scene.corrections_for(1))
+            .pose.global_orient
+        )
+        later_yaws = got[5:, 2]
+        # unwrap fix: smoothed target must stay near ±π, not near 0
+        wrap = np.mod(later_yaws + np.pi, 2 * np.pi) - np.pi
+        assert (np.abs(np.abs(wrap) - np.pi) < 0.2).all(), (
+            f"unwrap bug regression — yaw collapsed to {np.degrees(wrap).tolist()}"
+        )
