@@ -227,24 +227,13 @@ class Application:
                 scene, physics_cfg.orientation, fps=clip.fps,
             )
             scene, collision_rep = collision_gate(scene, physics_cfg.collision)
-            # Step 4b — low-pass root translation (reduces jerk BEFORE
-            # contact_lock so the anchor is already smoother).
+            # Step 4b — low-pass root translation (broad CoM smoothing).
             if physics_cfg.momentum_smooth.enabled:
                 scene, _ = momentum_smooth_gate(
                     scene, physics_cfg.momentum_smooth,
                     foot_position_provider=foot_position_provider,
                     fps=clip.fps,
                 )
-            # Step 3b — contact-lock foot slide during stance runs
-            if physics_cfg.contact_probe.enabled and foot_position_provider is not None:
-                scene, contact_lock_rep = contact_lock_gate(
-                    scene, physics_cfg.contact_probe, foot_position_provider,
-                )
-                # Probe re-runs on the CORRECTED scene so the report is honest
-                contact_rep = contact_probe(
-                    scene, physics_cfg.contact_probe, foot_position_provider,
-                )
-                self._scene_contact[scene_id] = contact_rep
             # Pose-motion sync (procedural walk cycle on desynced frames).
             if physics_cfg.pose_motion_sync.enabled:
                 scene, _ = pose_motion_sync_gate(
@@ -260,14 +249,27 @@ class Application:
                 scene, _ = inertia_smooth_gate(
                     scene, physics_cfg.inertia_smooth, fps=clip.fps,
                 )
-            # Jerk clamp FIRST: iterative low-pass to bound peak jerk in XY/Z.
+            # Jerk clamp: iterative low-pass to bound peak jerk in XY/Z.
+            # Runs BEFORE contact_lock so the lock is the final authority on
+            # foot anchoring — jerk_clamp would otherwise smooth the anchor
+            # back out of position.
             if physics_cfg.jerk_clamp.enabled:
                 scene, _ = jerk_clamp_gate(
                     scene, physics_cfg.jerk_clamp, fps=clip.fps,
                 )
-            # Gravity project LAST: airborne Z onto ballistic parabola — must be
-            # the final authority on vertical motion inside airborne runs, so it
-            # runs after jerk_clamp (which otherwise smooths the parabola away).
+            # Step 3b — contact-lock foot slide during stance runs. Last
+            # authority on foot XY during contact frames.
+            if physics_cfg.contact_probe.enabled and foot_position_provider is not None:
+                scene, contact_lock_rep = contact_lock_gate(
+                    scene, physics_cfg.contact_probe, foot_position_provider,
+                )
+                # Probe re-runs on the CORRECTED scene so the report is honest
+                contact_rep = contact_probe(
+                    scene, physics_cfg.contact_probe, foot_position_provider,
+                )
+                self._scene_contact[scene_id] = contact_rep
+            # Gravity project: airborne Z onto ballistic parabola — final
+            # authority on vertical motion inside airborne runs.
             if physics_cfg.gravity_project.enabled and foot_position_provider is not None:
                 scene, _ = gravity_project_gate(
                     scene, physics_cfg.gravity_project, foot_position_provider,
