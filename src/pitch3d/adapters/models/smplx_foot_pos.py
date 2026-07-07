@@ -26,7 +26,10 @@ from .smplx_lbs import SmplxModel, locate_smplx_model
 class SmplxFootPosConfig:
     """Knobs for :func:`make_smplx_foot_position_provider`."""
 
-    max_frames_sampled: int = 30  # cap FK cost per subject
+    #: Cap FK cost per subject. Set generously — the held-between-samples
+    #: interpolation creates fake stance detections when downsampled
+    #: (contact_probe reads constant XY across held rows as a planted foot).
+    max_frames_sampled: int = 240
     # Which axis is "up" in the model's local frame:
     up_axis: str = "y"            # smplx native = y-up
     # Which axis to negate when mapping model→world (y-up → z-up):
