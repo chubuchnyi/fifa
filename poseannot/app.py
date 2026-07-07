@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
 from fastapi.responses import (
     FileResponse,
@@ -104,11 +105,17 @@ async def api_scene(user: str = Depends(current_user)) -> dict:
                 float(sub.transl[:, 0].max()), float(sub.transl[:, 1].max()),
             ],
         })
+    cfg = load_config()
     return {
         "n_frames": st.n_frames,
         "n_subjects": len(st.subjects),
         "joint_names": BODY_JOINT_NAMES,
         "tracks": tracks,
+        "clip": {
+            "video_name": Path(str(cfg.source_video)).name,
+            "scene_json": Path(str(cfg.scene_json)).name,
+            "fps": cfg.fps,
+        },
     }
 
 

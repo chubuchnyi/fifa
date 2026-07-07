@@ -4,13 +4,13 @@
   <meta charset="utf-8" />
   <title>poseannot</title>
   <link rel="stylesheet" href="/static/style.css" />
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <script type="importmap">
   {
     "imports": {
-      "three":            "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-      "three/addons/":    "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
-      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      "three":               "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/":       "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "alpinejs":            "https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/module.esm.js"
     }
   }
   </script>
@@ -21,6 +21,8 @@
   <!-- Toolbar -->
   <div class="toolbar">
     <span class="brand">poseannot</span>
+    <span class="sep">|</span>
+    <span style="color: var(--fg-dim); font-size: 0.85em;" x-text="clipLabel"></span>
     <span class="sep">|</span>
     <button @click="prevFrame()" title="prev frame (K)">◀</button>
     <span x-text="'frame ' + (frame+1) + ' / ' + nFrames"></span>
@@ -113,6 +115,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import Alpine from "alpinejs";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -309,9 +312,9 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint) {
   threeState.orbit.target.set(0, 0, 0.4);
 }
 
-window.poseAnnot = function() {
-  return {
+Alpine.data("poseAnnot", () => ({
     user: "user",
+    clipLabel: "loading…",
     nFrames: 0,
     tracks: [],
     jointNames: [],
@@ -339,6 +342,9 @@ window.poseAnnot = function() {
       this.nFrames = j.n_frames;
       this.tracks = j.tracks;
       this.jointNames = j.joint_names;
+      if (j.clip) {
+        this.clipLabel = `${j.clip.video_name}  ·  ${j.n_subjects} subjects  ·  ${j.n_frames} frames @ ${j.clip.fps.toFixed(2)}fps`;
+      }
       if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
       await this.refreshEditedFrames();
       await this.loadFrame(0);
@@ -501,8 +507,8 @@ window.poseAnnot = function() {
       n = Math.max(0, Math.min(this.nFrames - 1, n));
       await this.loadFrame(n);
     },
-  };
-};
+}));
+Alpine.start();
 </script>
 </body>
 </html>
