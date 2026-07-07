@@ -31,10 +31,18 @@ from fastapi.responses import (
 )
 from fastapi.staticfiles import StaticFiles
 
+from pydantic import BaseModel, Field
+
 from .auth import authenticate, current_user, issue_token
 from .camera import frame_projector, project_points
 from .config import load as load_config
-from .scene_state import BODY_JOINT_NAMES, get_state
+from .scene_state import (
+    BODY_JOINT_NAMES,
+    apply_and_persist_edit,
+    edited_frames,
+    get_state,
+    undo_last_edit,
+)
 from .video import encode_jpeg, frame_size, read_frame
 
 app = FastAPI(title="poseannot v0", docs_url=None, redoc_url=None)
@@ -201,3 +209,91 @@ async def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
 @app.get("/api/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+# ─── write API (v1 — joint edits) ───────────────────────────────────────────
+class EditRequest(BaseModel):
+    track_id: int
+    frame: int
+    joint_index: int = Field(..., ge=0, lt=21, description="body_pose joint index 0..20")
+    axis_angle: list[float] = Field(..., min_length=3, max_length=3)
+
+
+class UndoRequest(BaseModel):
+    track_id: int
+    frame: int
+    joint_index: int | None = None
+
+
+def _serialize_subject_frame(cache, frame: int, joints2d_pts: list) -> dict:
+    return {
+        "verts": cache.verts[frame].tolist(),
+        "faces": cache.faces.tolist(),
+        "joints": cache.joints[frame].tolist(),
+        "transl": cache.transl[frame].tolist(),
+        "body_pose": cache.body_pose[frame].tolist(),
+        "joints2d": joints2d_pts,
+    }
+
+
+def _joints2d_for(state, cache, frame: int, video_size) -> list:
+    if state.scene.camera is None:
+        return []
+    proj = frame_projector(state.scene.camera, frame, video_size=video_size)
+    j2d = project_points(cache.joints[frame], proj)
+    out = []
+    for uv in j2d:
+        if np.isnan(uv).any():
+            out.append(None)
+        else:
+            out.append([float(uv[0]), float(uv[1])])
+    return out
+
+
+@app.post("/api/edit")
+async def api_edit(req: EditRequest, user: str = Depends(current_user)) -> dict:
+    """Persist a single-frame body_pose axis-angle edit; return refreshed frame."""
+    st = get_state()
+    if req.track_id not in st.subjects:
+        raise HTTPException(404, f"no subject {req.track_id}")
+    if req.frame < 0 or req.frame >= st.subjects[req.track_id].frames.shape[0]:
+        raise HTTPException(404, f"frame {req.frame} out of range")
+
+    cache, _ = apply_and_persist_edit(
+        st,
+        track_id=req.track_id,
+        frame=req.frame,
+        joint_index=req.joint_index,
+        axis_angle=req.axis_angle,
+        user=user,
+    )
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    j2d = _joints2d_for(st, cache, req.frame, vsize)
+    return {"ok": True, **_serialize_subject_frame(cache, req.frame, j2d)}
+
+
+@app.post("/api/edit/undo")
+async def api_edit_undo(req: UndoRequest, user: str = Depends(current_user)) -> dict:
+    del user
+    st = get_state()
+    if req.track_id not in st.subjects:
+        raise HTTPException(404, f"no subject {req.track_id}")
+    cache = undo_last_edit(
+        st, track_id=req.track_id, frame=req.frame,
+        joint_index=req.joint_index,
+    )
+    if cache is None:
+        return {"ok": False, "reason": "no matching edit"}
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    j2d = _joints2d_for(st, cache, req.frame, vsize)
+    return {"ok": True, **_serialize_subject_frame(cache, req.frame, j2d)}
+
+
+@app.get("/api/edits")
+async def api_edits(user: str = Depends(current_user)) -> dict:
+    """Return {track_id: [edited_frames]} for timeline colouring."""
+    del user
+    m = edited_frames()
+    return {"edits": {str(tid): sorted(f) for tid, f in m.items()}}

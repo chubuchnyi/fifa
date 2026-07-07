@@ -20,10 +20,13 @@ import smplx
 import torch
 
 from pitch3d.core.correction.engine import resolve_subject_motion
+from pitch3d.core.scene.layers import Correction
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
 
 from .config import PoseAnnotConfig, load as load_config
+from .edits import append_edit as _persist_edit
+from .edits import build_body_pose_edit, load_edits, pop_last_matching
 
 # SMPLest-X → z-up world remap (see scripts/render_smplx_mesh.py comment).
 R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
@@ -111,6 +114,12 @@ def _build_subject_cache(subject, corrections, models_dir: str) -> SubjectCache:
 def build_scene_state(cfg: PoseAnnotConfig | None = None) -> SceneState:
     cfg = cfg or load_config()
     scene = _pitch3d_load_scene(str(cfg.scene_json))
+    # Fold persisted user edits into scene.corrections so they resolve on
+    # first FK pass — no special-case code in the FK path.
+    persisted = load_edits(cfg.corrections_out)
+    if persisted:
+        from dataclasses import replace
+        scene = replace(scene, corrections=[*scene.corrections, *persisted])
     st = SceneState(scene=scene)
     n = 0
     for s in scene.subjects:
@@ -120,6 +129,91 @@ def build_scene_state(cfg: PoseAnnotConfig | None = None) -> SceneState:
         n = max(n, cache.frames.shape[0])
     st.n_frames = n
     return st
+
+
+def rebuild_subject_cache(
+    st: SceneState, track_id: int, cfg: PoseAnnotConfig | None = None,
+) -> SubjectCache:
+    """Rebuild ONE subject's FK cache after its corrections have changed."""
+    cfg = cfg or load_config()
+    with st.lock:
+        target = None
+        for s in st.scene.subjects:
+            if s.track_id == track_id:
+                target = s
+                break
+        if target is None:
+            raise KeyError(f"no subject {track_id}")
+        corrs = st.scene.corrections_for(track_id)
+        cache = _build_subject_cache(target, corrs, str(cfg.smplx_models))
+        st.subjects[track_id] = cache
+        return cache
+
+
+def apply_and_persist_edit(
+    st: SceneState,
+    *,
+    track_id: int,
+    frame: int,
+    joint_index: int,
+    axis_angle,
+    user: str,
+    cfg: PoseAnnotConfig | None = None,
+) -> tuple[SubjectCache, Correction]:
+    """Persist a body_pose edit, fold it into the scene, rebuild the FK cache."""
+    cfg = cfg or load_config()
+    corr = build_body_pose_edit(
+        track_id=track_id, frame=frame,
+        joint_index=joint_index, axis_angle=axis_angle, user=user,
+    )
+    _persist_edit(cfg.corrections_out, corr)
+    with st.lock:
+        from dataclasses import replace as _dc_replace
+        st.scene = _dc_replace(
+            st.scene, corrections=[*st.scene.corrections, corr],
+        )
+    cache = rebuild_subject_cache(st, track_id, cfg)
+    return cache, corr
+
+
+def undo_last_edit(
+    st: SceneState,
+    *,
+    track_id: int,
+    frame: int,
+    joint_index: int | None = None,
+    cfg: PoseAnnotConfig | None = None,
+) -> SubjectCache | None:
+    """Pop the most recent matching edit; rebuild FK.
+
+    Returns the refreshed cache, or ``None`` if no matching edit existed.
+    """
+    cfg = cfg or load_config()
+    popped = pop_last_matching(
+        cfg.corrections_out,
+        track_id=track_id, frame=frame, joint_index=joint_index,
+    )
+    if popped is None:
+        return None
+    with st.lock:
+        from dataclasses import replace as _dc_replace
+        remaining = [c for c in st.scene.corrections if c.id != popped.id]
+        st.scene = _dc_replace(st.scene, corrections=remaining)
+    return rebuild_subject_cache(st, track_id, cfg)
+
+
+def edited_frames(cfg: PoseAnnotConfig | None = None) -> dict[int, set[int]]:
+    """Return ``{track_id: {frame, ...}}`` for all persisted user edits."""
+    cfg = cfg or load_config()
+    out: dict[int, set[int]] = {}
+    for c in load_edits(cfg.corrections_out):
+        tid = c.target.subject_track_id
+        if tid is None:
+            continue
+        s = out.setdefault(int(tid), set())
+        for f in range(c.frame_range.start, c.frame_range.end + 1):
+            s.add(int(f))
+    return out
 
 
 # ─── module-level lazy singleton (rebuilt on demand) ────────────────────────

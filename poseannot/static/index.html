@@ -9,7 +9,8 @@
   {
     "imports": {
       "three":            "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
-      "three/addons/":    "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      "three/addons/":    "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+      "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
     }
   }
   </script>
@@ -28,6 +29,14 @@
     <button @click="nextFrame()" title="next frame (J)">▶</button>
     <span class="sep">|</span>
     <span x-text="selectedTrackId !== null ? ('subj t' + selectedTrackId) : 'no subject'"></span>
+    <template x-if="selectedJoint !== null">
+      <span style="color: var(--edited); font-weight: 500;">
+        · joint <span x-text="jointNames[selectedJoint]"></span> (<span x-text="selectedJoint"></span>)
+      </span>
+    </template>
+    <button @click="undoEdit()" x-show="selectedJoint !== null"
+            title="undo edit (Ctrl+Z)">undo</button>
+    <button @click="deselectJoint()" x-show="selectedJoint !== null">deselect</button>
     <span class="user">
       <span x-text="user"></span> · <a href="/logout">logout</a>
     </span>
@@ -89,7 +98,11 @@
   <div class="timeline">
     <template x-for="f in nFrames" :key="f">
       <div class="cell"
-           :class="{ auto: true, current: f-1 === frame }"
+           :class="{
+             auto: !isFrameEdited(f-1),
+             edited: isFrameEdited(f-1),
+             current: f-1 === frame,
+           }"
            @click="jumpToFrame(f-1)"></div>
     </template>
   </div>
@@ -99,6 +112,7 @@
 <script type="module">
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -110,6 +124,15 @@ const BONES = [
   [9, 14], [14, 17], [17, 19], [19, 21],   // right arm
 ];
 
+// scene_state.BODY_JOINT_NAMES[i] with i=0 pelvis. body_pose[j] controls
+// joint (j+1) — i.e. body_pose[3] = left_knee.  Server accepts joint_index
+// 0..20 in body_pose space.
+function jointToBodyPoseIndex(jointIdx) {
+  // joint 0 = pelvis (global_orient, not body_pose) — skip; joints 1..21 → 0..20
+  return jointIdx - 1;
+}
+function bodyPoseIndexToJoint(bpIdx) { return bpIdx + 1; }
+
 function trackColorFor(tid) {
   // deterministic hue from tid
   const hue = (tid * 137) % 360;
@@ -117,41 +140,79 @@ function trackColorFor(tid) {
 }
 
 let threeState = null;
-function initThree() {
+function initThree(alpineState) {
   const container = document.getElementById("three-canvas");
   const w = container.clientWidth, h = container.clientHeight;
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#1c1e22");
   const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 100);
   camera.position.set(2.5, 1.5, 2.5);
-  camera.up.set(0, 0, 1);   // z-up world
+  camera.up.set(0, 0, 1);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
   renderer.setPixelRatio(window.devicePixelRatio);
   container.appendChild(renderer.domElement);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 0, 1.0);
-  controls.update();
+  const orbit = new OrbitControls(camera, renderer.domElement);
+  orbit.target.set(0, 0, 1.0);
+  orbit.update();
 
   // lights
-  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
   const key = new THREE.DirectionalLight(0xffffff, 0.9);
   key.position.set(3, 3, 5);
-  scene.add(ambient, key);
+  scene.add(key);
 
-  // ground grid
   const grid = new THREE.GridHelper(4, 8, 0x555555, 0x333333);
-  grid.rotation.x = Math.PI / 2;   // grid uses xz; rotate to xy for z-up
+  grid.rotation.x = Math.PI / 2;
   scene.add(grid);
 
-  // pose group (rebuilt on every frame update)
   const poseGroup = new THREE.Group();
   scene.add(poseGroup);
 
+  // Transform gizmo — invisible until a joint is picked
+  const gizmoAnchor = new THREE.Object3D();
+  scene.add(gizmoAnchor);
+  const transform = new TransformControls(camera, renderer.domElement);
+  transform.setMode("rotate");
+  transform.setSpace("world");
+  transform.setSize(0.6);
+  transform.attach(gizmoAnchor);
+  transform.visible = false;
+  transform.enabled = false;
+  scene.add(transform.getHelper ? transform.getHelper() : transform);
+  // free orbit while dragging gizmo
+  transform.addEventListener("dragging-changed", (ev) => {
+    orbit.enabled = !ev.value;
+    if (!ev.value && alpineState._pendingAxisAngle) {
+      alpineState.commitGizmoEdit();
+    }
+  });
+  transform.addEventListener("objectChange", () => {
+    alpineState.onGizmoRotate(gizmoAnchor.quaternion);
+  });
+
+  // raycaster for joint picking
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  const jointSpheres = []; // filled when pose is rebuilt
+
+  renderer.domElement.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0) return;
+    if (transform.dragging) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+    mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const hits = raycaster.intersectObjects(jointSpheres, false);
+    if (hits.length) {
+      alpineState.selectJoint(hits[0].object.userData.jointIdx);
+    }
+  });
+
   function tick() {
     requestAnimationFrame(tick);
-    controls.update();
+    orbit.update();
     renderer.render(scene, camera);
   }
   tick();
@@ -163,19 +224,21 @@ function initThree() {
     renderer.setSize(w, h);
   });
 
-  threeState = { scene, camera, controls, renderer, poseGroup };
+  threeState = {
+    scene, camera, orbit, renderer, poseGroup,
+    transform, gizmoAnchor, jointSpheres,
+  };
   return threeState;
 }
 
-function updateThreePose(joints, meshVerts, meshFaces) {
+function updateThreePose(joints, meshVerts, meshFaces, selectedJoint) {
   if (!threeState) return;
   const g = threeState.poseGroup;
   while (g.children.length) g.remove(g.children[0]);
+  threeState.jointSpheres.length = 0;
 
-  // center on the pelvis (joint 0) so orbit is nice
   const pelvis = joints[0];
 
-  // mesh
   if (meshVerts && meshFaces) {
     const geo = new THREE.BufferGeometry();
     const flat = new Float32Array(meshVerts.length * 3);
@@ -195,21 +258,28 @@ function updateThreePose(joints, meshVerts, meshFaces) {
     geo.computeVertexNormals();
     const mat = new THREE.MeshStandardMaterial({
       color: 0x6bb5ff, roughness: 0.6, metalness: 0.0,
-      transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      transparent: true, opacity: 0.4, side: THREE.DoubleSide,
+      depthWrite: false,
     });
     g.add(new THREE.Mesh(geo, mat));
   }
 
-  // joint spheres
-  const jointMat = new THREE.MeshBasicMaterial({ color: 0xffb14f });
-  const jointGeo = new THREE.SphereGeometry(0.025, 12, 12);
-  for (const j of joints) {
-    const m = new THREE.Mesh(jointGeo, jointMat);
-    m.position.set(j[0] - pelvis[0], j[1] - pelvis[1], j[2] - pelvis[2]);
+  const normalMat = new THREE.MeshBasicMaterial({ color: 0xffb14f });
+  const selMat    = new THREE.MeshBasicMaterial({ color: 0xff5b5b });
+  const jointGeo  = new THREE.SphereGeometry(0.028, 14, 14);
+  for (let i = 0; i < joints.length; i++) {
+    const mat = (i === selectedJoint) ? selMat : normalMat;
+    const m = new THREE.Mesh(jointGeo, mat);
+    m.position.set(
+      joints[i][0] - pelvis[0],
+      joints[i][1] - pelvis[1],
+      joints[i][2] - pelvis[2],
+    );
+    m.userData.jointIdx = i;
     g.add(m);
+    threeState.jointSpheres.push(m);
   }
 
-  // bones
   const boneMat = new THREE.LineBasicMaterial({ color: 0xa8d4ff });
   for (const [a, b] of BONES) {
     const pa = joints[a], pb = joints[b];
@@ -221,18 +291,36 @@ function updateThreePose(joints, meshVerts, meshFaces) {
     g.add(new THREE.Line(geo, boneMat));
   }
 
-  // recentre camera target
-  threeState.controls.target.set(0, 0, 0.4);
+  // Position gizmo at selected joint, or hide it
+  if (selectedJoint !== null && selectedJoint !== undefined
+      && selectedJoint > 0 && joints[selectedJoint]) {
+    const j = joints[selectedJoint];
+    threeState.gizmoAnchor.position.set(
+      j[0] - pelvis[0], j[1] - pelvis[1], j[2] - pelvis[2],
+    );
+    threeState.gizmoAnchor.quaternion.identity();
+    threeState.transform.visible = true;
+    threeState.transform.enabled = true;
+  } else {
+    threeState.transform.visible = false;
+    threeState.transform.enabled = false;
+  }
+
+  threeState.orbit.target.set(0, 0, 0.4);
 }
 
-// export to Alpine's global scope
 window.poseAnnot = function() {
   return {
-    // state
     user: "user",
     nFrames: 0,
     tracks: [],
+    jointNames: [],
     selectedTrackId: null,
+    selectedJoint: null,      // joint index 0..21 (0 = pelvis, non-editable)
+    _pendingAxisAngle: null,  // set on gizmo drag, cleared on commit
+    _liveJoints: null,        // last-received joints for current (subj, frame)
+    _liveMesh: null,
+    editedFrames: {},         // { "15": [30, 32, ...], ... }
     frame: 0,
     frameInput: 1,
     frameSrc: "",
@@ -244,15 +332,15 @@ window.poseAnnot = function() {
     trackColor(tid) { return trackColorFor(tid); },
 
     async init() {
-      initThree();
-
-      // Load scene metadata
+      initThree(this);
       const r = await fetch("/api/scene");
       if (r.status === 401) { window.location = "/"; return; }
       const j = await r.json();
       this.nFrames = j.n_frames;
       this.tracks = j.tracks;
+      this.jointNames = j.joint_names;
       if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
+      await this.refreshEditedFrames();
       await this.loadFrame(0);
       this.attachKeyboard();
     },
@@ -260,6 +348,8 @@ window.poseAnnot = function() {
     attachKeyboard() {
       window.addEventListener("keydown", (e) => {
         if (e.target.tagName === "INPUT") return;
+        if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); this.undoEdit(); return; }
+        if (e.key === "Escape") { this.deselectJoint(); return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
       });
@@ -269,6 +359,7 @@ window.poseAnnot = function() {
       this.frame = n;
       this.frameInput = n + 1;
       this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
+      this.selectedJoint = null;
       await this.refreshOverlay();
       await this.refreshThree();
     },
@@ -298,13 +389,110 @@ window.poseAnnot = function() {
       if (!jr.ok || !mr.ok) return;
       const jj = await jr.json();
       const mm = await mr.json();
-      updateThreePose(jj.joints, mm.verts, mm.faces);
+      this._liveJoints = jj.joints;
+      this._liveMesh = { verts: mm.verts, faces: mm.faces };
+      updateThreePose(jj.joints, mm.verts, mm.faces, this.selectedJoint);
     },
 
     async selectTrack(tid) {
       this.selectedTrackId = tid;
+      this.selectedJoint = null;
       await this.refreshOverlay();
       await this.refreshThree();
+    },
+
+    selectJoint(jointIdx) {
+      // joint 0 is the pelvis (global_orient, not body_pose) — read-only for v1.
+      if (jointIdx === 0) return;
+      this.selectedJoint = jointIdx;
+      // re-render Three.js with the selection highlighted + gizmo attached
+      if (this._liveJoints && this._liveMesh) {
+        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, jointIdx);
+      }
+    },
+
+    deselectJoint() {
+      this.selectedJoint = null;
+      this._pendingAxisAngle = null;
+      if (this._liveJoints && this._liveMesh) {
+        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, null);
+      }
+    },
+
+    // Called by TransformControls on each rotation step. Live-record the
+    // gizmo's current quaternion as the intended new axis-angle for the
+    // selected joint's body_pose delta.
+    onGizmoRotate(quat) {
+      // convert to axis-angle
+      const q = quat.clone().normalize();
+      const angle = 2 * Math.acos(Math.min(1, Math.max(-1, q.w)));
+      const s = Math.sqrt(1 - q.w * q.w);
+      let ax, ay, az;
+      if (s < 1e-6) { ax = 1; ay = 0; az = 0; }
+      else { ax = q.x / s; ay = q.y / s; az = q.z / s; }
+      this._pendingAxisAngle = [ax * angle, ay * angle, az * angle];
+    },
+
+    async commitGizmoEdit() {
+      const aa = this._pendingAxisAngle;
+      this._pendingAxisAngle = null;
+      if (!aa || this.selectedJoint === null || this.selectedJoint === 0) return;
+      const bpIdx = jointToBodyPoseIndex(this.selectedJoint);
+      const body = {
+        track_id: this.selectedTrackId,
+        frame: this.frame,
+        joint_index: bpIdx,
+        axis_angle: aa,
+      };
+      const r = await fetch("/api/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { console.warn("edit failed", r.status); return; }
+      const d = await r.json();
+      this._liveJoints = d.joints;
+      this._liveMesh = { verts: d.verts, faces: d.faces };
+      this.overlay.pts = d.joints2d;
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint);
+      await this.refreshEditedFrames();
+    },
+
+    async undoEdit() {
+      if (this.selectedTrackId === null) return;
+      const bpIdx = this.selectedJoint === null ? null
+                                                : jointToBodyPoseIndex(this.selectedJoint);
+      const body = {
+        track_id: this.selectedTrackId,
+        frame: this.frame,
+        joint_index: bpIdx,
+      };
+      const r = await fetch("/api/edit/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.ok) { console.info("nothing to undo"); return; }
+      this._liveJoints = d.joints;
+      this._liveMesh = { verts: d.verts, faces: d.faces };
+      this.overlay.pts = d.joints2d;
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint);
+      await this.refreshEditedFrames();
+    },
+
+    async refreshEditedFrames() {
+      const r = await fetch("/api/edits");
+      if (!r.ok) return;
+      const d = await r.json();
+      this.editedFrames = d.edits || {};
+    },
+
+    isFrameEdited(fIdx) {
+      if (this.selectedTrackId === null) return false;
+      const arr = this.editedFrames[String(this.selectedTrackId)] || [];
+      return arr.includes(fIdx);
     },
 
     async prevFrame() { if (this.frame > 0) await this.loadFrame(this.frame - 1); },
