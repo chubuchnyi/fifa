@@ -71,7 +71,12 @@ async def root() -> FileResponse:
 @app.get("/app", response_class=HTMLResponse)
 async def main_app(user: str = Depends(current_user)) -> FileResponse:
     del user
-    return FileResponse(STATIC_DIR / "index.html")
+    # no-store: the annotation UI iterates fast — never let a browser serve a
+    # stale index.html (a cached build silently masks shipped fixes).
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
 
 
 @app.post("/login")

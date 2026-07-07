@@ -147,3 +147,15 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .timeline .cell.edited { background: var(--edited); }
 .timeline .cell.verified { background: var(--verified); }
 .timeline .cell.current { outline: 2px solid var(--accent-bright); outline-offset: 1px; }
+
+/* ── diagnostics overlay (temporary; 'd' toggles) ── */
+.diag {
+  position: fixed; top: 52px; right: 12px; z-index: 60;
+  background: rgba(12, 14, 18, 0.92); border: 1px solid var(--accent);
+  border-radius: 6px; padding: 8px 10px; max-width: 340px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px;
+  line-height: 1.5; color: var(--fg-dim); cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.diag .diag-hd { color: var(--accent-bright); font-weight: 600; margin-bottom: 3px; }
+.diag b { color: var(--fg); font-weight: 600; }

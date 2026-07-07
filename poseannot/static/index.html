@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>poseannot</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=diag1" />
   <script type="importmap">
   {
     "imports": {
@@ -16,7 +16,10 @@
   </script>
 </head>
 <body>
-<div class="app-shell" x-data="poseAnnot()" x-init="init()">
+<!-- No x-init: Alpine v3 auto-invokes a data method named init(). Adding
+     x-init="init()" would run it a SECOND time — two inits sharing `this`
+     race and can leave the app empty (0 tracks → no overlay, blank 3D). -->
+<div class="app-shell" x-data="poseAnnot()">
 
   <!-- Toolbar -->
   <div class="toolbar">
@@ -109,7 +112,8 @@
              1920-space points render 1:1 inside the ~700px box and shoot off the
              frame (the persistent "offset"). preserveAspectRatio="none" + the
              same explicit px size as the <img> then locks the overlay to it. -->
-        <svg x-effect="$el.setAttribute('viewBox', '0 0 ' + srcW + ' ' + srcH)"
+        <svg viewBox="0 0 1920 1080" x-ref="overlaySvg"
+             x-effect="$el.setAttribute('viewBox', '0 0 ' + srcW + ' ' + srcH)"
              x-show="overlaySvgStr"
              x-html="overlaySvgStr"
              preserveAspectRatio="none"
@@ -139,7 +143,22 @@
               :title="showAll ? 'showing all players (A)' : 'showing active only (A)'"
               x-text="showAll ? 'show: all' : 'show: active'"></button>
     </div>
-    <div id="three-canvas"></div>
+    <div id="three-canvas" x-ref="threeCanvas"></div>
+  </div>
+
+  <!-- Diagnostics overlay — turns a single screenshot into ground-truth about
+       internal state (build id, panel/frame sizes, overlay viewBox, 3D status).
+       Toggle with 'd'. Kept until the UI bugs are confirmed fixed in a real browser. -->
+  <div class="diag" x-show="diag.show" @click="diag.show=false" x-cloak
+       title="click or press 'd' to hide">
+    <div class="diag-hd">poseannot diag · build <span x-text="diag.build"></span></div>
+    <div>panel <b x-text="dPanel()"></b> · frame-img <b x-text="dImg()"></b></div>
+    <div>src <b x-text="srcW + '×' + srcH"></b> · view <b x-text="dView()"></b></div>
+    <div>overlay <b x-text="dOverlay()"></b></div>
+    <div>3D canvas <b x-text="diag.three"></b> · refresh <b x-text="diag.refresh"></b></div>
+    <div>pelvis <b x-text="diag.pelvis"></b> · meshV <b x-text="diag.meshN"></b></div>
+    <div>track <b x-text="selectedTrackId"></b>/<b x-text="tracks.length"></b>
+         · joint <b x-text="selectedJoint"></b></div>
   </div>
 
   <!-- Timeline -->
@@ -162,6 +181,10 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import Alpine from "alpinejs";
+
+// Bump on every UI change so a screenshot proves which code the browser ran
+// (a stale value in the diag panel = the browser served a cached index.html).
+const BUILD_ID = "2026-07-07 · diag1";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -279,6 +302,7 @@ function initThree(alpineState) {
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h);
+    if (alpineState && alpineState.diag) alpineState.diag.three = `${w}×${h}`;
   }
   window.addEventListener("resize", resizeThree);
   // The grid area can measure 0×0 on first paint (canvas inits before the CSS
@@ -430,8 +454,13 @@ Alpine.data("poseAnnot", () => ({
     editedColor: "#ffb14f",
     view: { scale: 1, tx: 0, ty: 0 },
     _viewInit: false,
+    _inited: false,
     _panning: false,
     _panLast: null,
+    diag: {
+      show: true, build: BUILD_ID,
+      three: "init…", refresh: "—", pelvis: "—", meshN: 0,
+    },
 
     trackColor(tid) { return trackColorFor(tid); },
     zoomStyle() {
@@ -440,8 +469,28 @@ Alpine.data("poseAnnot", () => ({
            + `transform-origin:0 0;`;
     },
 
+    // ── diag readouts (reactive: each touches a reactive prop so x-text re-runs) ──
+    dPanel() {
+      void this.imgSize;                       // re-evaluate when the fit changes
+      const b = this.$refs.canvasFrame;
+      return b ? `${Math.round(b.clientWidth)}×${Math.round(b.clientHeight)}` : "?";
+    },
+    dImg() { return `${Math.round(this.imgSize.w)}×${Math.round(this.imgSize.h)}`; },
+    dView() {
+      const v = this.view;
+      return `s${v.scale.toFixed(2)} t(${Math.round(v.tx)},${Math.round(v.ty)})`;
+    },
+    dOverlay() {
+      const n = (this.overlaySvgStr.match(/<(line|circle)/g) || []).length;
+      const vb = this.$refs.overlaySvg ? this.$refs.overlaySvg.getAttribute("viewBox") : "?";
+      return `${n} el · viewBox=${vb || "NULL"}`;
+    },
+
     async init() {
+      if (this._inited) return;   // idempotency guard against any double-invoke
+      this._inited = true;
       initThree(this);
+      this.diag.three = threeState ? "inited" : "FAILED";
       window.addEventListener("resize", () => { this.fitLayer(); this.resetView(); });
       // Re-fit the frame whenever the center panel gets/changes real size.
       // On first paint the grid area can measure 0×0 (frame rendered tiny in a
@@ -521,6 +570,7 @@ Alpine.data("poseAnnot", () => ({
         if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); this.undoEdit(); return; }
         if (e.key === "Escape") { this.deselectJoint(); return; }
         if (e.key === "0") { this.resetView(); return; }
+        if (e.key === "d" || e.key === "D") { this.diag.show = !this.diag.show; return; }
         if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
@@ -595,26 +645,41 @@ Alpine.data("poseAnnot", () => ({
     },
 
     async refreshThree() {
-      if (this.selectedTrackId === null) return;
-      const [jr, mr] = await Promise.all([
-        fetch(`/api/subject/${this.selectedTrackId}/joints/${this.frame}`),
-        fetch(`/api/subject/${this.selectedTrackId}/mesh/${this.frame}`),
-      ]);
-      if (!jr.ok || !mr.ok) return;
-      const jj = await jr.json();
-      const mm = await mr.json();
-      this._liveJoints = jj.joints;
-      this._liveMesh = { verts: mm.verts, faces: mm.faces };
-      let others = [];
-      if (this.showAll) {
-        const pr = await fetch(`/api/frame/${this.frame}/poses3d`);
-        if (pr.ok) {
-          const pj = await pr.json();
-          others = (pj.subjects || []).filter((s) => s.track_id !== this.selectedTrackId);
+      if (this.selectedTrackId === null) { this.diag.refresh = "no track"; return; }
+      try {
+        const [jr, mr] = await Promise.all([
+          fetch(`/api/subject/${this.selectedTrackId}/joints/${this.frame}`),
+          fetch(`/api/subject/${this.selectedTrackId}/mesh/${this.frame}`),
+        ]);
+        if (!jr.ok || !mr.ok) {
+          this.diag.refresh = `j${jr.status}/m${mr.status} FAIL`;
+          return;
         }
+        const jj = await jr.json();
+        const mm = await mr.json();
+        this._liveJoints = jj.joints;
+        this._liveMesh = { verts: mm.verts, faces: mm.faces };
+        const p = jj.joints && jj.joints[0];
+        const finite = p && p.every((v) => Number.isFinite(v));
+        this.diag.pelvis = p
+          ? p.map((v) => (+v).toFixed(2)).join(",") + (finite ? "" : " NaN!")
+          : "none";
+        this.diag.meshN = mm.verts ? mm.verts.length : 0;
+        let others = [];
+        if (this.showAll) {
+          const pr = await fetch(`/api/frame/${this.frame}/poses3d`);
+          if (pr.ok) {
+            const pj = await pr.json();
+            others = (pj.subjects || []).filter((s) => s.track_id !== this.selectedTrackId);
+          }
+        }
+        this._liveOthers = others;
+        updateThreePose(jj.joints, mm.verts, mm.faces, this.selectedJoint, others);
+        this.diag.refresh = `j${jr.status}/m${mr.status} ok · ${jj.joints.length}j`;
+      } catch (e) {
+        this.diag.refresh = "ERR " + (e && e.message ? e.message : e);
+        console.error("[poseannot] refreshThree failed", e);
       }
-      this._liveOthers = others;
-      updateThreePose(jj.joints, mm.verts, mm.faces, this.selectedJoint, others);
     },
 
     async selectTrack(tid) {

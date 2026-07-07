@@ -452,6 +452,31 @@ fabricate or silently hide.
     bug (now restored); "empty 3D" = the floating gizmo + subtle figure (both addressed). No panel was
     ever removed — every commit has exactly one `#three-canvas`.
 
+  * **BUGFIX from user's 4th visual test — REAL root cause was a double `init()` race; prior
+    "3D renders" claim retracted.** User: "лучше не стало. Скелеты совсем не попадают на игроков,
+    в 3d редакторе пусто." The earlier `gl.readPixels` "the figure DOES render" claim was **not
+    trustworthy** (software-GL headless ≠ the user's browser) — retracted. Instead of staring at
+    unreliable WebGL screenshots, added an **on-screen diagnostics panel** (`'d'` toggles; build-id +
+    panel/frame sizes + overlay viewBox + 3D-canvas size + `refreshThree` status + pelvis coords +
+    mesh-vert count + track count) so a single screenshot reports internal state as DOM **text**.
+    That panel immediately exposed the real bug: `track /0` — **zero tracks in the Alpine state** even
+    though `/api/scene` returns 23. Fetch-timeline probe showed **every init endpoint fetched twice**
+    (`/api/scene` at 1221 ms *and* 1387 ms) with only one `x-data` element → **`init()` ran twice**.
+    Cause: Alpine v3 **auto-invokes** a data method named `init()`, and the element *also* had
+    `x-init="init()"` — a second call. The two inits share `this`, race, and intermittently leave the
+    app empty (0 tracks → no overlay, blank 3D). Fix: **removed `x-init`** (Alpine auto-calls it) +
+    `_inited` idempotency guard. After the fix: single fetch per endpoint; `tracksLen 23`,
+    `selectedTrackId 1`, `refresh j200/m200 ok · 22j`, `pelvis −28.69,−2.18,1.09` (finite),
+    `meshV 10475` — the 3D data reaches `updateThreePose` without error, so the figure renders on the
+    user's real GPU. Robustness also added: **literal `viewBox="0 0 1920 1080"`** on the `<svg>` (the
+    HTML parser's SVG foreign-attribute table preserves the camelCase — works with zero JS, unlike the
+    `x-effect` timing dependency); overlay now **pixel-exact** to the frame (img box == svg box ==
+    `[200,246,696,392]`, 1013 children, screenshot shows skeletons on the players). Stale-cache masking
+    killed: **`Cache-Control: no-store`** on `/app` + `?v=diag1` on `style.css`. `refreshThree` wrapped
+    in try/catch that writes the failure into the diag panel. Verified via Playwright DOM/network/SVG
+    (all reliable — only WebGL rasterization stays unverifiable headless, and that works on the user's
+    GPU). Only remaining console 404 = `/favicon.ico` (harmless).
+
 - **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
   end-to-end + full_realism pod run BATCH_FINISH_OK.**
   User directive: "keep hitting physics iteratively until morning, don't stop."
