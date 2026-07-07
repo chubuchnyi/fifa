@@ -392,6 +392,17 @@ fabricate or silently hide.
     Headless gates: `node --check` on the extracted Alpine module + backend import check + curl
     against a live uvicorn — select switches `scene.clip` video/scene, revert restores the
     Colombia default, bad id → 404, real 15.2 MB scene + 5.6 MB video bundle uploaded OK.
+  * **BUGFIX from user's visual test (same day):** the 2D overlay + active marker **never
+    rendered** — `<template x-for>` inside `<svg>` clones children in the HTML namespace, so
+    `<line>`/`<circle>` are inert `HTMLUnknownElement`s (headless curl saw the data, hence the
+    false "works"; only a real browser exposes it). Fixed by building an SVG **string** in
+    `rebuildOverlay()` and injecting via `x-html` on the `<svg>` (innerHTML on an SVG element
+    parses in the SVG namespace). Added: dashed bbox + "● active" label around the edited player;
+    3D panel widened 380px → `minmax(420px,44vw)` (~half screen) + camera dropped to eye-level
+    (was top-down); undo + **export** (`GET /api/edits/download`) surfaced always-visible in the
+    3D header. Overlay markup validated well-formed with real data (1013 SVG elements/frame).
+    STILL PENDING (F2): frame-range select + auto scene.json generation from a raw video — that's
+    the perception pipeline behind the GUI (GPU/pod), scoped with the user, not yet built.
 
 - **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
   end-to-end + full_realism pod run BATCH_FINISH_OK.**

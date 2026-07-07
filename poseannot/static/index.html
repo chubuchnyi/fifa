@@ -99,30 +99,13 @@
       <div class="zoom-layer" :style="zoomStyle()">
         <img :src="frameSrc" @load="onFrameLoaded($event)" @dragstart.prevent
              x-ref="frameImg" x-show="frameSrc" alt="frame" />
+        <!-- overlay injected as an SVG string via x-html: setting innerHTML on
+             an <svg> parses children in the SVG namespace, unlike <template
+             x-for> which clones them as inert HTML elements (never renders). -->
         <svg :viewBox="'0 0 ' + srcW + ' ' + srcH"
-             x-show="overlayJoints.length > 0"
-             preserveAspectRatio="xMidYMid meet">
-          <template x-for="(b, i) in overlayBones" :key="'b' + i">
-            <line :x1="b.x1" :y1="b.y1" :x2="b.x2" :y2="b.y2"
-                  :stroke="b.active ? accentBright : b.color"
-                  :stroke-width="b.active ? 5 : 3"
-                  :opacity="b.active ? 0.95 : 0.45" />
-          </template>
-          <template x-for="(p, i) in overlayJoints" :key="'j' + i">
-            <circle :cx="p.x" :cy="p.y" :r="p.active ? 5 : 3.5"
-                    :fill="p.active ? editedColor : p.color"
-                    :opacity="p.active ? 1 : 0.55"
-                    stroke="#000" stroke-width="0.7" />
-          </template>
-          <template x-for="(l, i) in overlayLabels" :key="'l' + i">
-            <text :x="l.x" :y="l.y" font-size="26"
-                  :fill="l.active ? accentBright : l.color"
-                  :font-weight="l.active ? 700 : 400"
-                  :opacity="l.active ? 1 : 0.65"
-                  paint-order="stroke" stroke="#000" stroke-width="3"
-                  x-text="l.text"></text>
-          </template>
-        </svg>
+             x-show="overlaySvgStr"
+             x-html="overlaySvgStr"
+             preserveAspectRatio="xMidYMid meet"></svg>
       </div>
     </div>
     <div class="zoom-hud">
@@ -141,6 +124,9 @@
         · t<span x-text="selectedTrackId"></span> · frame <span x-text="frame+1"></span>
       </span>
       <span class="spacer"></span>
+      <button @click="undoEdit()" :disabled="selectedTrackId === null"
+              title="undo last edit on this subject/frame (Ctrl+Z)">undo</button>
+      <button @click="exportEdits()" title="download all edits as edits.json">export</button>
       <button @click="toggleShowAll()" :class="{ active: showAll }"
               :title="showAll ? 'showing all players (A)' : 'showing active only (A)'"
               x-text="showAll ? 'show: all' : 'show: active'"></button>
@@ -201,7 +187,9 @@ function initThree(alpineState) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#1c1e22");
   const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 100);
-  camera.position.set(2.5, 1.5, 2.5);
+  // near eye-level (low z) so the figure reads as a standing person, not a
+  // top-down blob; joints are pelvis-centred so body spans z≈[-0.9,+0.7].
+  camera.position.set(2.6, 1.9, 0.5);
   camera.up.set(0, 0, 1);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -209,7 +197,7 @@ function initThree(alpineState) {
   container.appendChild(renderer.domElement);
 
   const orbit = new OrbitControls(camera, renderer.domElement);
-  orbit.target.set(0, 0, 1.0);
+  orbit.target.set(0, 0, -0.05);
   orbit.update();
 
   // lights
@@ -388,7 +376,7 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint, others = [
     threeState.transform.enabled = false;
   }
 
-  threeState.orbit.target.set(0, 0, 0.4);
+  threeState.orbit.target.set(0, 0, -0.05);
 }
 
 Alpine.data("poseAnnot", () => ({
@@ -414,7 +402,7 @@ Alpine.data("poseAnnot", () => ({
     imgSize: { w: 0, h: 0 },
     srcW: 1920, srcH: 1080,
     allSkeletons: [],         // [{track_id, pts:[[x,y]|null,...]}, ...]
-    overlayBones: [], overlayJoints: [], overlayLabels: [],
+    overlaySvgStr: "",        // rendered SVG markup (x-html into the <svg>)
     showAll: false,           // 3D: show all players vs active only
     bones: BONES,
     accentBright: "#a8d4ff",
@@ -537,28 +525,46 @@ Alpine.data("poseAnnot", () => ({
     },
 
     rebuildOverlay() {
-      const bones = [], joints = [], labels = [];
-      for (const sk of this.allSkeletons) {
+      // Build one SVG markup string. Active subject painted last (on top) and
+      // wrapped in a dashed bbox marker so the edited player is unmistakable.
+      const sks = [...this.allSkeletons].sort((p, q) =>
+        (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
+      const out = [];
+      for (const sk of sks) {
         const active = sk.track_id === this.selectedTrackId;
-        const col = trackColorFor(sk.track_id);
+        const col = active ? this.accentBright : trackColorFor(sk.track_id);
+        const jc = active ? this.editedColor : trackColorFor(sk.track_id);
         for (const [a, b] of this.bones) {
           const pa = sk.pts[a], pb = sk.pts[b];
           if (!pa || !pb) continue;
-          bones.push({ x1: pa[0], y1: pa[1], x2: pb[0], y2: pb[1], color: col, active });
+          out.push(`<line x1="${pa[0]}" y1="${pa[1]}" x2="${pb[0]}" y2="${pb[1]}"`
+            + ` stroke="${col}" stroke-width="${active ? 5 : 3}" opacity="${active ? 0.95 : 0.45}"/>`);
         }
         for (const pt of sk.pts) {
           if (!pt) continue;
-          joints.push({ x: pt[0], y: pt[1], color: col, active });
+          out.push(`<circle cx="${pt[0]}" cy="${pt[1]}" r="${active ? 5 : 3.5}"`
+            + ` fill="${jc}" opacity="${active ? 1 : 0.55}" stroke="#000" stroke-width="0.7"/>`);
         }
-        if (sk.pts[0]) {
-          labels.push({ x: sk.pts[0][0] + 8, y: sk.pts[0][1] - 10,
-                        text: "t" + sk.track_id, color: col, active });
+        const xs = [], ys = [];
+        for (const pt of sk.pts) { if (pt) { xs.push(pt[0]); ys.push(pt[1]); } }
+        if (!xs.length) continue;
+        if (active) {
+          const pad = 16;
+          const x0 = Math.min(...xs) - pad, y0 = Math.min(...ys) - pad;
+          const bw = Math.max(...xs) - Math.min(...xs) + 2 * pad;
+          const bh = Math.max(...ys) - Math.min(...ys) + 2 * pad;
+          out.push(`<rect x="${x0}" y="${y0}" width="${bw}" height="${bh}" fill="none"`
+            + ` stroke="${this.accentBright}" stroke-width="2.5" stroke-dasharray="12 7" opacity="0.9"/>`);
+          out.push(`<text x="${x0}" y="${y0 - 8}" font-size="30" fill="${this.accentBright}"`
+            + ` font-weight="700" paint-order="stroke" stroke="#000" stroke-width="3">`
+            + `t${sk.track_id} ● active</text>`);
+        } else {
+          out.push(`<text x="${sk.pts[0] ? sk.pts[0][0] + 8 : xs[0]}" y="${sk.pts[0] ? sk.pts[0][1] - 10 : ys[0]}"`
+            + ` font-size="24" fill="${col}" opacity="0.65" paint-order="stroke"`
+            + ` stroke="#000" stroke-width="3">t${sk.track_id}</text>`);
         }
       }
-      const activeLast = (arr) => arr.sort((p, q) => (p.active ? 1 : 0) - (q.active ? 1 : 0));
-      this.overlayBones = activeLast(bones);
-      this.overlayJoints = activeLast(joints);
-      this.overlayLabels = labels;
+      this.overlaySvgStr = out.join("");
     },
 
     async refreshThree() {
@@ -677,6 +683,24 @@ Alpine.data("poseAnnot", () => ({
       if (!r.ok) return;
       const d = await r.json();
       this.editedFrames = d.edits || {};
+    },
+
+    async exportEdits() {
+      // edits auto-persist server-side on every commit; this downloads the file.
+      const r = await fetch("/api/edits/download");
+      if (!r.ok) {
+        if (r.status === 404) alert("No edits saved yet for this clip.");
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = (this.activeClipId || "clip") + "_edits.json";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
     },
 
     isFrameEdited(fIdx) {

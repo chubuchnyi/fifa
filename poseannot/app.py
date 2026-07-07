@@ -344,6 +344,16 @@ async def api_edits(user: str = Depends(current_user)) -> dict:
     return {"edits": {str(tid): sorted(f) for tid, f in m.items()}}
 
 
+@app.get("/api/edits/download")
+async def api_edits_download(user: str = Depends(current_user)) -> FileResponse:
+    """Download the persisted corrections file (edits.json) for the active clip."""
+    del user
+    path = load_config().corrections_out
+    if not path.exists():
+        raise HTTPException(404, "no edits saved yet")
+    return FileResponse(str(path), media_type="application/json", filename="edits.json")
+
+
 # ─── clips API (runtime clip switch + upload) ───────────────────────────────
 class ClipSelectRequest(BaseModel):
     clip_id: str
