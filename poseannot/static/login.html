@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>poseannot — login</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="login">
+  <form id="loginForm" class="login-card" onsubmit="return doLogin(event)">
+    <h1>poseannot</h1>
+    <input name="username" type="text" placeholder="username" autofocus required />
+    <input name="password" type="password" placeholder="password" required />
+    <button type="submit">Sign in</button>
+    <div id="err" class="err"></div>
+  </form>
+  <script>
+  async function doLogin(ev) {
+    ev.preventDefault();
+    const form = ev.target;
+    const fd = new FormData(form);
+    const err = document.getElementById("err");
+    err.textContent = "";
+    try {
+      const r = await fetch("/login", { method: "POST", body: fd });
+      if (!r.ok) {
+        const t = await r.json().catch(() => ({}));
+        err.textContent = t.detail || `login failed (${r.status})`;
+        return false;
+      }
+      const j = await r.json();
+      window.location = j.redirect || "/app";
+    } catch (e) {
+      err.textContent = "network error: " + e.message;
+    }
+    return false;
+  }
+  </script>
+</body>
+</html>

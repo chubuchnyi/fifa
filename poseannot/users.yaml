@@ -1,0 +1,10 @@
+# User registry — hashed passwords via passlib bcrypt.
+# Generate a new hash with:
+#   .venv/bin/python -m poseannot.auth hash <plaintext>
+# Then paste the ``bcrypt$…`` string here.
+#
+# Add your operator account by editing this file directly.
+users:
+  - username: admin
+    # default password: "physics" (rotate before deploy!)
+    password_hash: "$2b$12$izjA1h1J6wRCY94W883BOu8gOXV9mG4sqs9DVt6pnCw6xPyXnT7tC"

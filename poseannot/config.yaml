@@ -1,0 +1,16 @@
+# poseannot config — one clip per deployment.
+# Env vars POSEANNOT_<UPPER_KEY> override any field (RunPod .env-friendly).
+
+scene_json: out/physics_debug/scene_replayed_v2.json
+source_video: samples/video/Colombia-1-0-Congo-DR1080p.mp4
+smplx_models: SMPL-X/models
+fps: 29.97
+
+users_yaml: poseannot/users.yaml
+
+# JWT
+jwt_secret: change-me-before-deploy
+jwt_expire_hours: 24
+
+# Where user edits are persisted (separate from immutable scene.json)
+corrections_out: out/physics_debug/edits.json

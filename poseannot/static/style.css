@@ -1,0 +1,103 @@
+/* poseannot v0 — CVAT-inspired dark UI */
+:root {
+  --bg:            #1c1e22;
+  --bg-panel:      #24272c;
+  --bg-toolbar:    #2a2d33;
+  --fg:            #e2e5eb;
+  --fg-dim:        #8a8f9a;
+  --accent:        #6bb5ff;
+  --accent-bright: #a8d4ff;
+  --border:        #3a3d43;
+  --edited:        #ffb14f;
+  --verified:      #6bd97a;
+  --auto:          #6bb5ff;
+  --raw:           #55585e;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); font-family: system-ui, sans-serif; }
+
+/* ── login ── */
+body.login { display: flex; align-items: center; justify-content: center; }
+.login-card {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  padding: 2.5rem; border-radius: 8px; width: 320px; display: flex;
+  flex-direction: column; gap: 1rem;
+}
+.login-card h1 { margin: 0 0 0.5rem; font-weight: 500; letter-spacing: 0.5px; }
+.login-card input, .login-card button {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.6rem 0.8rem; font-size: 0.95rem;
+}
+.login-card button {
+  background: var(--accent); color: #0a1218; border: none; cursor: pointer;
+  font-weight: 500;
+}
+.login-card button:hover { background: var(--accent-bright); }
+.err { color: #ff6b6b; min-height: 1.2em; font-size: 0.9em; }
+
+/* ── main app grid ── */
+.app-shell {
+  display: grid;
+  grid-template-rows: 44px 1fr 60px;
+  grid-template-columns: 220px 1fr 380px;
+  grid-template-areas:
+    "toolbar toolbar toolbar"
+    "sidebar main    right"
+    "timeline timeline timeline";
+  height: 100vh;
+}
+
+.toolbar {
+  grid-area: toolbar; background: var(--bg-toolbar); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 1rem; padding: 0 1rem;
+  font-size: 0.9rem;
+}
+.toolbar .brand { font-weight: 500; letter-spacing: 0.4px; color: var(--fg); }
+.toolbar .sep { color: var(--fg-dim); }
+.toolbar button {
+  background: none; border: 1px solid var(--border); color: var(--fg);
+  padding: 0.3rem 0.6rem; border-radius: 3px; cursor: pointer; font-family: inherit;
+}
+.toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.toolbar .frame-input {
+  background: var(--bg); border: 1px solid var(--border); color: var(--fg);
+  width: 60px; padding: 0.25rem 0.4rem; border-radius: 3px;
+  font-family: inherit; text-align: center;
+}
+.toolbar .user { margin-left: auto; color: var(--fg-dim); font-size: 0.85em; }
+
+.sidebar { grid-area: sidebar; background: var(--bg-panel); border-right: 1px solid var(--border); overflow-y: auto; }
+.sidebar .section-hdr { padding: 0.6rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); }
+.sidebar .track { padding: 0.4rem 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9em; }
+.sidebar .track:hover { background: rgba(107, 181, 255, 0.08); }
+.sidebar .track.selected { background: rgba(107, 181, 255, 0.18); color: var(--accent-bright); }
+.sidebar .track .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+.main { grid-area: main; position: relative; overflow: hidden; background: #0d0f12; }
+.main .canvas-frame {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+}
+.main img { max-width: 100%; max-height: 100%; user-select: none; }
+.main svg { position: absolute; inset: 0; pointer-events: none; }
+.main svg circle { fill: var(--accent-bright); stroke: #000; stroke-width: 1; opacity: 0.9; }
+.main svg circle.sel { fill: var(--edited); r: 6; }
+.main svg line { stroke: var(--accent); stroke-width: 2; opacity: 0.85; }
+.main svg line.sel { stroke: var(--edited); }
+
+.right { grid-area: right; background: var(--bg-panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+.right .hdr { padding: 0.5rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); border-bottom: 1px solid var(--border); }
+.right #three-canvas { flex: 1; position: relative; }
+
+.timeline {
+  grid-area: timeline; background: var(--bg-toolbar); border-top: 1px solid var(--border);
+  display: flex; align-items: center; padding: 0 0.5rem; gap: 4px;
+  overflow-x: auto;
+}
+.timeline .cell {
+  min-width: 8px; height: 40px; border-radius: 2px; background: var(--raw);
+  cursor: pointer; flex-shrink: 0;
+}
+.timeline .cell.auto { background: var(--auto); opacity: 0.6; }
+.timeline .cell.edited { background: var(--edited); }
+.timeline .cell.verified { background: var(--verified); }
+.timeline .cell.current { outline: 2px solid var(--accent-bright); outline-offset: 1px; }

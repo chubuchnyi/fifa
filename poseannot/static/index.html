@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>poseannot</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three":            "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/":    "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+<div class="app-shell" x-data="poseAnnot()" x-init="init()">
+
+  <!-- Toolbar -->
+  <div class="toolbar">
+    <span class="brand">poseannot</span>
+    <span class="sep">|</span>
+    <button @click="prevFrame()" title="prev frame (K)">◀</button>
+    <span x-text="'frame ' + (frame+1) + ' / ' + nFrames"></span>
+    <input class="frame-input" type="number" x-model.number="frameInput"
+           min="1" :max="nFrames" @change="jumpToFrame(frameInput - 1)" />
+    <button @click="nextFrame()" title="next frame (J)">▶</button>
+    <span class="sep">|</span>
+    <span x-text="selectedTrackId !== null ? ('subj t' + selectedTrackId) : 'no subject'"></span>
+    <span class="user">
+      <span x-text="user"></span> · <a href="/logout">logout</a>
+    </span>
+  </div>
+
+  <!-- Sidebar: tracks -->
+  <div class="sidebar">
+    <div class="section-hdr">tracks · <span x-text="tracks.length"></span></div>
+    <template x-for="t in tracks" :key="t.track_id">
+      <div class="track"
+           :class="{ selected: t.track_id === selectedTrackId }"
+           @click="selectTrack(t.track_id)">
+        <div class="swatch" :style="'background:' + trackColor(t.track_id)"></div>
+        <span x-text="'t' + t.track_id"></span>
+        <span style="margin-left:auto; color: var(--fg-dim); font-size: 0.8em;"
+              x-text="t.n_frames + 'f'"></span>
+      </div>
+    </template>
+  </div>
+
+  <!-- Main: video + 2D overlay -->
+  <div class="main">
+    <div class="canvas-frame">
+      <img :src="frameSrc" @load="onFrameLoaded($event)"
+           x-ref="frameImg" x-show="frameSrc" alt="frame" />
+      <svg :width="imgSize.w" :height="imgSize.h"
+           :viewBox="'0 0 ' + srcW + ' ' + srcH"
+           x-show="overlay.pts.length > 0"
+           preserveAspectRatio="xMidYMid meet">
+        <!-- bones -->
+        <template x-for="bone in bones" :key="bone[0] + '-' + bone[1]">
+          <line
+            :x1="overlay.pts[bone[0]] ? overlay.pts[bone[0]][0] : 0"
+            :y1="overlay.pts[bone[0]] ? overlay.pts[bone[0]][1] : 0"
+            :x2="overlay.pts[bone[1]] ? overlay.pts[bone[1]][0] : 0"
+            :y2="overlay.pts[bone[1]] ? overlay.pts[bone[1]][1] : 0"
+            x-show="overlay.pts[bone[0]] && overlay.pts[bone[1]]" />
+        </template>
+        <!-- joints -->
+        <template x-for="(pt, i) in overlay.pts" :key="i">
+          <circle x-show="pt" :cx="pt ? pt[0] : 0" :cy="pt ? pt[1] : 0" r="3" />
+        </template>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Right: 3D pose view (Three.js) -->
+  <div class="right">
+    <div class="hdr">
+      3D pose
+      <span x-show="selectedTrackId !== null" style="color: var(--fg-dim)">
+        · t<span x-text="selectedTrackId"></span> · frame <span x-text="frame+1"></span>
+      </span>
+    </div>
+    <div id="three-canvas"></div>
+  </div>
+
+  <!-- Timeline -->
+  <div class="timeline">
+    <template x-for="f in nFrames" :key="f">
+      <div class="cell"
+           :class="{ auto: true, current: f-1 === frame }"
+           @click="jumpToFrame(f-1)"></div>
+    </template>
+  </div>
+
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// bone connectivity — SMPL-X body (pelvis + 21 joints)
+const BONES = [
+  [0, 1], [0, 2], [0, 3],           // pelvis → hips, spine1
+  [1, 4], [4, 7], [7, 10],          // left leg
+  [2, 5], [5, 8], [8, 11],          // right leg
+  [3, 6], [6, 9], [9, 12], [12, 15], // spine → neck → head
+  [9, 13], [13, 16], [16, 18], [18, 20],   // left arm
+  [9, 14], [14, 17], [17, 19], [19, 21],   // right arm
+];
+
+function trackColorFor(tid) {
+  // deterministic hue from tid
+  const hue = (tid * 137) % 360;
+  return `hsl(${hue}, 70%, 60%)`;
+}
+
+let threeState = null;
+function initThree() {
+  const container = document.getElementById("three-canvas");
+  const w = container.clientWidth, h = container.clientHeight;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color("#1c1e22");
+  const camera = new THREE.PerspectiveCamera(45, w / h, 0.05, 100);
+  camera.position.set(2.5, 1.5, 2.5);
+  camera.up.set(0, 0, 1);   // z-up world
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  container.appendChild(renderer.domElement);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 0, 1.0);
+  controls.update();
+
+  // lights
+  const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+  const key = new THREE.DirectionalLight(0xffffff, 0.9);
+  key.position.set(3, 3, 5);
+  scene.add(ambient, key);
+
+  // ground grid
+  const grid = new THREE.GridHelper(4, 8, 0x555555, 0x333333);
+  grid.rotation.x = Math.PI / 2;   // grid uses xz; rotate to xy for z-up
+  scene.add(grid);
+
+  // pose group (rebuilt on every frame update)
+  const poseGroup = new THREE.Group();
+  scene.add(poseGroup);
+
+  function tick() {
+    requestAnimationFrame(tick);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  tick();
+
+  window.addEventListener("resize", () => {
+    const w = container.clientWidth, h = container.clientHeight;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  });
+
+  threeState = { scene, camera, controls, renderer, poseGroup };
+  return threeState;
+}
+
+function updateThreePose(joints, meshVerts, meshFaces) {
+  if (!threeState) return;
+  const g = threeState.poseGroup;
+  while (g.children.length) g.remove(g.children[0]);
+
+  // center on the pelvis (joint 0) so orbit is nice
+  const pelvis = joints[0];
+
+  // mesh
+  if (meshVerts && meshFaces) {
+    const geo = new THREE.BufferGeometry();
+    const flat = new Float32Array(meshVerts.length * 3);
+    for (let i = 0; i < meshVerts.length; i++) {
+      flat[i*3]   = meshVerts[i][0] - pelvis[0];
+      flat[i*3+1] = meshVerts[i][1] - pelvis[1];
+      flat[i*3+2] = meshVerts[i][2] - pelvis[2];
+    }
+    geo.setAttribute("position", new THREE.BufferAttribute(flat, 3));
+    const idx = new Uint32Array(meshFaces.length * 3);
+    for (let i = 0; i < meshFaces.length; i++) {
+      idx[i*3]   = meshFaces[i][0];
+      idx[i*3+1] = meshFaces[i][1];
+      idx[i*3+2] = meshFaces[i][2];
+    }
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeVertexNormals();
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x6bb5ff, roughness: 0.6, metalness: 0.0,
+      transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+    });
+    g.add(new THREE.Mesh(geo, mat));
+  }
+
+  // joint spheres
+  const jointMat = new THREE.MeshBasicMaterial({ color: 0xffb14f });
+  const jointGeo = new THREE.SphereGeometry(0.025, 12, 12);
+  for (const j of joints) {
+    const m = new THREE.Mesh(jointGeo, jointMat);
+    m.position.set(j[0] - pelvis[0], j[1] - pelvis[1], j[2] - pelvis[2]);
+    g.add(m);
+  }
+
+  // bones
+  const boneMat = new THREE.LineBasicMaterial({ color: 0xa8d4ff });
+  for (const [a, b] of BONES) {
+    const pa = joints[a], pb = joints[b];
+    if (!pa || !pb) continue;
+    const geo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(pa[0] - pelvis[0], pa[1] - pelvis[1], pa[2] - pelvis[2]),
+      new THREE.Vector3(pb[0] - pelvis[0], pb[1] - pelvis[1], pb[2] - pelvis[2]),
+    ]);
+    g.add(new THREE.Line(geo, boneMat));
+  }
+
+  // recentre camera target
+  threeState.controls.target.set(0, 0, 0.4);
+}
+
+// export to Alpine's global scope
+window.poseAnnot = function() {
+  return {
+    // state
+    user: "user",
+    nFrames: 0,
+    tracks: [],
+    selectedTrackId: null,
+    frame: 0,
+    frameInput: 1,
+    frameSrc: "",
+    imgSize: { w: 0, h: 0 },
+    srcW: 1920, srcH: 1080,
+    overlay: { pts: [] },
+    bones: BONES,
+
+    trackColor(tid) { return trackColorFor(tid); },
+
+    async init() {
+      initThree();
+
+      // Load scene metadata
+      const r = await fetch("/api/scene");
+      if (r.status === 401) { window.location = "/"; return; }
+      const j = await r.json();
+      this.nFrames = j.n_frames;
+      this.tracks = j.tracks;
+      if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
+      await this.loadFrame(0);
+      this.attachKeyboard();
+    },
+
+    attachKeyboard() {
+      window.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT") return;
+        if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
+        else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
+      });
+    },
+
+    async loadFrame(n) {
+      this.frame = n;
+      this.frameInput = n + 1;
+      this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
+      await this.refreshOverlay();
+      await this.refreshThree();
+    },
+
+    onFrameLoaded(e) {
+      const img = e.target;
+      this.imgSize.w = img.width;
+      this.imgSize.h = img.height;
+      this.srcW = img.naturalWidth;
+      this.srcH = img.naturalHeight;
+    },
+
+    async refreshOverlay() {
+      if (this.selectedTrackId === null) { this.overlay.pts = []; return; }
+      const r = await fetch(`/api/subject/${this.selectedTrackId}/joints2d/${this.frame}`);
+      if (!r.ok) { this.overlay.pts = []; return; }
+      const j = await r.json();
+      this.overlay.pts = j.pts;
+    },
+
+    async refreshThree() {
+      if (this.selectedTrackId === null) return;
+      const [jr, mr] = await Promise.all([
+        fetch(`/api/subject/${this.selectedTrackId}/joints/${this.frame}`),
+        fetch(`/api/subject/${this.selectedTrackId}/mesh/${this.frame}`),
+      ]);
+      if (!jr.ok || !mr.ok) return;
+      const jj = await jr.json();
+      const mm = await mr.json();
+      updateThreePose(jj.joints, mm.verts, mm.faces);
+    },
+
+    async selectTrack(tid) {
+      this.selectedTrackId = tid;
+      await this.refreshOverlay();
+      await this.refreshThree();
+    },
+
+    async prevFrame() { if (this.frame > 0) await this.loadFrame(this.frame - 1); },
+    async nextFrame() { if (this.frame + 1 < this.nFrames) await this.loadFrame(this.frame + 1); },
+    async jumpToFrame(n) {
+      n = Math.max(0, Math.min(this.nFrames - 1, n));
+      await this.loadFrame(n);
+    },
+  };
+};
+</script>
+</body>
+</html>
