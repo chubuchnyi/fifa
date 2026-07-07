@@ -50,3 +50,6 @@ samples/
 # Throwaway box-management / validation helpers (underscore-prefixed) — they reach into
 # RunPod / local secrets and are not part of the public repo.
 /scripts/_*
+
+# poseannot user-uploaded clip bundles (video + scene.json; large, runtime-only)
+/poseannot/clips/

@@ -30,6 +30,20 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PATH = Path(__file__).resolve().parent / "config.yaml"
 
+# Runtime clip override (see clips.py). Only the clip-specific fields
+# (source_video / scene_json / corrections_out) may be swapped at runtime;
+# deploy-wide fields (smplx_models, users, jwt) always come from yaml/env.
+_ACTIVE_OVERRIDE: dict[str, str] | None = None
+
+
+def set_override(override: dict[str, str] | None) -> None:
+    global _ACTIVE_OVERRIDE
+    _ACTIVE_OVERRIDE = dict(override) if override else None
+
+
+def get_override() -> dict[str, str] | None:
+    return dict(_ACTIVE_OVERRIDE) if _ACTIVE_OVERRIDE else None
+
 
 @dataclass(frozen=True)
 class PoseAnnotConfig:
@@ -56,10 +70,14 @@ def load(path: Path | None = None) -> PoseAnnotConfig:
         env_key = f"POSEANNOT_{key.upper()}"
         return cast(os.environ.get(env_key, raw.get(key)))
 
+    ov = _ACTIVE_OVERRIDE or {}
     return PoseAnnotConfig(
-        scene_json=_resolve(_get("scene_json") or "out/anim_full_realism/scene.json"),
+        scene_json=_resolve(
+            ov.get("scene_json") or _get("scene_json") or "out/anim_full_realism/scene.json"
+        ),
         source_video=_resolve(
-            _get("source_video") or "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
+            ov.get("source_video") or _get("source_video")
+            or "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
         ),
         smplx_models=_resolve(_get("smplx_models") or "SMPL-X/models"),
         fps=float(_get("fps") or 29.97),
@@ -67,6 +85,7 @@ def load(path: Path | None = None) -> PoseAnnotConfig:
         jwt_secret=str(_get("jwt_secret") or "dev-secret-change-me"),
         jwt_expire_hours=int(_get("jwt_expire_hours") or 24),
         corrections_out=_resolve(
-            _get("corrections_out") or "out/physics_debug/edits.json"
+            ov.get("corrections_out") or _get("corrections_out")
+            or "out/physics_debug/edits.json"
         ),
     )

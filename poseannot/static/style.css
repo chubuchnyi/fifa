@@ -65,6 +65,34 @@ body.login { display: flex; align-items: center; justify-content: center; }
   font-family: inherit; text-align: center;
 }
 .toolbar .user { margin-left: auto; color: var(--fg-dim); font-size: 0.85em; }
+.toolbar .clip-select {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0.25rem 0.4rem; font-family: inherit; font-size: 0.85em;
+  max-width: 240px;
+}
+
+[x-cloak] { display: none !important; }
+.upload-panel {
+  position: absolute; top: 48px; left: 130px; z-index: 30;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.8rem; width: 320px; display: flex; flex-direction: column; gap: 0.5rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); font-size: 0.85em;
+}
+.upload-panel .uh { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); }
+.upload-panel label { display: flex; flex-direction: column; gap: 0.2rem; color: var(--fg-dim); font-size: 0.9em; }
+.upload-panel input[type=text] {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0.3rem 0.4rem; font-family: inherit;
+}
+.upload-panel input[type=file] { color: var(--fg-dim); font-size: 0.85em; }
+.upload-panel .upl-row { display: flex; align-items: center; gap: 0.5rem; }
+.upload-panel .upl-row button {
+  margin-left: auto; background: var(--accent); color: #0a1218; border: none;
+  border-radius: 3px; padding: 0.35rem 0.8rem; cursor: pointer; font-weight: 500;
+}
+.upload-panel .upl-row button:disabled { opacity: 0.5; cursor: default; }
+.upload-panel .upl-msg { color: var(--edited); font-size: 0.85em; }
+.upload-panel .upl-hint { color: var(--fg-dim); font-size: 0.8em; line-height: 1.35; }
 
 .sidebar { grid-area: sidebar; background: var(--bg-panel); border-right: 1px solid var(--border); overflow-y: auto; }
 .sidebar .section-hdr { padding: 0.6rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); }

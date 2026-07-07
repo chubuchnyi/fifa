@@ -23,7 +23,16 @@ from pathlib import Path
 
 import numpy as np
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -34,6 +43,7 @@ from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, Field
 
+from . import clips as clips_mod
 from .auth import authenticate, current_user, issue_token
 from .camera import frame_projector, project_points
 from .config import load as load_config
@@ -332,3 +342,58 @@ async def api_edits(user: str = Depends(current_user)) -> dict:
     del user
     m = edited_frames()
     return {"edits": {str(tid): sorted(f) for tid, f in m.items()}}
+
+
+# ─── clips API (runtime clip switch + upload) ───────────────────────────────
+class ClipSelectRequest(BaseModel):
+    clip_id: str
+
+
+@app.get("/api/clips")
+async def api_clips(user: str = Depends(current_user)) -> dict:
+    del user
+    return {
+        "active": clips_mod.active_id(),
+        "clips": [clips_mod.clip_to_dict(c) for c in clips_mod.list_clips()],
+    }
+
+
+@app.post("/api/clips/select")
+async def api_clips_select(
+    req: ClipSelectRequest, user: str = Depends(current_user),
+) -> dict:
+    del user
+    try:
+        clip = clips_mod.select(req.clip_id)
+    except KeyError:
+        raise HTTPException(404, f"no clip '{req.clip_id}'")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    get_state(force_reload=True)   # rebuild FK cache for the new clip
+    return {"ok": True, "active": clip.id}
+
+
+@app.post("/api/clips/upload")
+async def api_clips_upload(
+    user: str = Depends(current_user),
+    clip_id: str = Form(...),
+    video: UploadFile = File(...),
+    scene: UploadFile = File(...),
+    edits: UploadFile | None = File(None),
+) -> dict:
+    """Persist an uploaded (video + scene.json[+edits]) bundle as a new clip."""
+    del user
+    video_bytes = await video.read()
+    scene_bytes = await scene.read()
+    edits_bytes = await edits.read() if edits is not None else None
+    try:
+        clip = clips_mod.create_clip_from_upload(
+            clip_id,
+            video_bytes=video_bytes,
+            video_filename=video.filename or "",
+            scene_bytes=scene_bytes,
+            edits_bytes=edits_bytes,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"ok": True, "clip": clips_mod.clip_to_dict(clip)}

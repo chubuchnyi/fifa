@@ -22,7 +22,13 @@
   <div class="toolbar">
     <span class="brand">poseannot</span>
     <span class="sep">|</span>
-    <span style="color: var(--fg-dim); font-size: 0.85em;" x-text="clipLabel"></span>
+    <select class="clip-select" x-model="activeClipId" @change="switchClip($event.target.value)">
+      <template x-for="c in clipList" :key="c.id">
+        <option :value="c.id" x-text="c.label + (c.builtin ? '  (default)' : '')"></option>
+      </template>
+    </select>
+    <button @click="showUpload = !showUpload" title="upload a clip bundle (video + scene.json)">＋</button>
+    <span style="color: var(--fg-dim); font-size: 0.8em;" x-text="clipLabel"></span>
     <span class="sep">|</span>
     <button @click="prevFrame()" title="prev frame (K)">◀</button>
     <span x-text="'frame ' + (frame+1) + ' / ' + nFrames"></span>
@@ -42,6 +48,29 @@
     <span class="user">
       <span x-text="user"></span> · <a href="/logout">logout</a>
     </span>
+  </div>
+
+  <!-- Upload clip bundle -->
+  <div class="upload-panel" x-show="showUpload" x-cloak @click.outside="showUpload = false">
+    <div class="uh">upload clip bundle</div>
+    <label>name
+      <input type="text" x-model="upl.name" placeholder="my-clip" />
+    </label>
+    <label>video
+      <input type="file" accept="video/*" @change="upl.video = $event.target.files[0]" />
+    </label>
+    <label>scene.json
+      <input type="file" accept="application/json,.json" @change="upl.scene = $event.target.files[0]" />
+    </label>
+    <label>edits.json (optional)
+      <input type="file" accept="application/json,.json" @change="upl.edits = $event.target.files[0]" />
+    </label>
+    <div class="upl-row">
+      <span class="upl-msg" x-text="upl.msg"></span>
+      <button @click="doUpload()" :disabled="upl.busy">upload</button>
+    </div>
+    <div class="upl-hint">A bundle = video + its <b>scene.json</b> (pipeline output:
+      poses, tracks, camera). A bare video has nothing to annotate.</div>
   </div>
 
   <!-- Sidebar: tracks -->
@@ -365,6 +394,10 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint, others = [
 Alpine.data("poseAnnot", () => ({
     user: "user",
     clipLabel: "loading…",
+    clipList: [],
+    activeClipId: "default",
+    showUpload: false,
+    upl: { name: "", video: null, scene: null, edits: null, busy: false, msg: "" },
     nFrames: 0,
     tracks: [],
     jointNames: [],
@@ -411,9 +444,60 @@ Alpine.data("poseAnnot", () => ({
         this.clipLabel = `${j.clip.video_name}  ·  ${j.n_subjects} subjects  ·  ${j.n_frames} frames @ ${j.clip.fps.toFixed(2)}fps`;
       }
       if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
+      await this.refreshClips();
       await this.refreshEditedFrames();
       await this.loadFrame(0);
       this.attachKeyboard();
+    },
+
+    async refreshClips() {
+      const r = await fetch("/api/clips");
+      if (!r.ok) return;
+      const d = await r.json();
+      this.clipList = d.clips || [];
+      this.activeClipId = d.active || "default";
+    },
+
+    async switchClip(id) {
+      if (!id || id === this.activeClipId) return;
+      const r = await fetch("/api/clips/select", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip_id: id }),
+      });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        this.upl.msg = "switch failed: " + (e.detail || r.status);
+        await this.refreshClips();   // re-sync <select> to the still-active clip
+        return;
+      }
+      window.location.reload();   // simplest: re-init everything for the new clip
+    },
+
+    async doUpload() {
+      if (!this.upl.video || !this.upl.scene) {
+        this.upl.msg = "need video + scene.json";
+        return;
+      }
+      this.upl.busy = true;
+      this.upl.msg = "uploading…";
+      const fd = new FormData();
+      fd.append("clip_id", this.upl.name || "clip");
+      fd.append("video", this.upl.video);
+      fd.append("scene", this.upl.scene);
+      if (this.upl.edits) fd.append("edits", this.upl.edits);
+      const r = await fetch("/api/clips/upload", { method: "POST", body: fd });
+      this.upl.busy = false;
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        this.upl.msg = "failed: " + (e.detail || r.status);
+        return;
+      }
+      const d = await r.json();
+      this.upl.msg = "uploaded ✓ — switching…";
+      await this.refreshClips();
+      this.showUpload = false;
+      await this.switchClip(d.clip.id);
     },
 
     attachKeyboard() {

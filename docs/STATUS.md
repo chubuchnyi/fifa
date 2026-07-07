@@ -365,6 +365,34 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-07 (afternoon)** — **POSEANNOT v1 + editor GUI batch.** Built on v0 (read-only
+  `354cfee`). Landed in order:
+  * **v1 editing** (`1e2034c`): click a subject → click a joint → Three.js TransformControls
+    gizmo → drag = per-joint rotation delta → `POST /api/edit` recomputes FK + reprojects, writes
+    to `edits.json` (config `corrections_out`). Undo per-joint. Persists across reload.
+  * **Alpine load fix** (`2886c53`): Alpine 3.14.1 was racing Three.js on the global; moved to an
+    ESM importmap so both load deterministically as modules (no build step, still CDN-pinned).
+  * **GUI feature batch** (`78f0fca`, user-requested): (1) **all-players 2D overlay** — every
+    tracked subject's SMPL-X skeleton drawn on the frame, active one highlighted (thicker,
+    accent-bright); backed by batched `GET /api/frame/{n}/skeletons`. (2) **frame zoom + pan** —
+    wheel-to-cursor zoom + drag-pan on a transform-origin(0,0) zoom-layer; `0` resets view.
+    (3) **3D show-all toggle** (`a`) — 3D view renders all subjects as colored stick figures
+    (centered on active pelvis) vs active-only; backed by `GET /api/frame/{n}/poses3d`. Show-all
+    aids orientation.
+  * **Runtime clip switcher + upload** (this commit): a *clip* = (video + scene.json) pair. New
+    `poseannot/clips.py` registry: built-in `default` from `config.yaml` + user bundles under
+    `poseannot/clips/<id>/` (gitignored, runtime-only). `GET /api/clips`, `POST /api/clips/select`
+    (installs a `config.set_override` for source_video/scene_json/corrections_out, then
+    `get_state(force_reload=True)` rebuilds FK), `POST /api/clips/upload` (multipart video+scene
+    [+edits], validates scene parses as JSON). Toolbar `<select>` + `＋` upload panel. Honest
+    constraint surfaced in-UI: a bare video without its scene.json has nothing to annotate —
+    "upload your own clip" = uploading a reconstructed bundle. **Deploy motivation:** remote
+    RunPod deploy needs local-disk clip upload, not just the config-bound default.
+  * **Verification:** Chrome extension unavailable this session → no visual E2E (handed to user).
+    Headless gates: `node --check` on the extracted Alpine module + backend import check + curl
+    against a live uvicorn — select switches `scene.clip` video/scene, revert restores the
+    Colombia default, bad id → 404, real 15.2 MB scene + 5.6 MB video bundle uploaded OK.
+
 - **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
   end-to-end + full_realism pod run BATCH_FINISH_OK.**
   User directive: "keep hitting physics iteratively until morning, don't stop."
