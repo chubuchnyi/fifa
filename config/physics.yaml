@@ -134,6 +134,11 @@ base:
     smooth_window:          5
     min_correction_rad:    5.0e-3
 
+  orient_verticality:       # force body-up to world-up when HMR flips subjects
+    enabled:               false
+    max_tilt_rad:           0.61   # ≈35° — allows leans, blocks lying flat
+    inferred_confidence:    0.25   # R-6 low-conf stamp on rewritten frames
+
   ball:                     # measurement thresholds for scripts/motion_stats.py etc.
     max_speed:             36.0      # m/s   hardest recorded shot
     max_accel:            200.0      # m/s²  a kick — very high but bounded
@@ -257,6 +262,8 @@ profiles:
       jerk_clamp:
         enabled:            true
       joint_smooth:
+        enabled:            true
+      orient_verticality:
         enabled:            true
 
   full_realism_collide:

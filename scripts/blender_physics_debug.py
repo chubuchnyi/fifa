@@ -162,16 +162,26 @@ def _update_verts_for_frame(scene: bpy.types.Scene) -> None:
 bpy.app.handlers.frame_change_pre.clear()
 bpy.app.handlers.frame_change_pre.append(_update_verts_for_frame)
 
-# ─── camera (broadcast-ish, framing the pitch) ───────────────────────────────
+# ─── camera (auto-frame on the subject cluster) ──────────────────────────────
+# Compute cluster centroid + spread from all frames, all subjects, and place
+# the camera at a broadcast 3/4 angle framing the actual action bbox.
+cluster_xy = np.concatenate([s["verts"][:, ::100, :2].reshape(-1, 2)
+                             for s in subjects], axis=0)
+cx, cy = float(np.median(cluster_xy[:, 0])), float(np.median(cluster_xy[:, 1]))
+sx = float(np.percentile(cluster_xy[:, 0], 90) - np.percentile(cluster_xy[:, 0], 10))
+sy = float(np.percentile(cluster_xy[:, 1], 90) - np.percentile(cluster_xy[:, 1], 10))
+span = max(sx, sy, 6.0)  # min 6m so we don't zoom too close on a stationary cluster
+print(f"cluster: centroid=({cx:.1f},{cy:.1f}) span={span:.1f}m")
+
 cam_data = bpy.data.cameras.new("cam")
 cam = bpy.data.objects.new("cam", cam_data)
 bpy.context.collection.objects.link(cam)
-cam.location = (0.0, -py * 1.2, 20.0)
-look_at = mathutils.Vector((0.0, 0.0, 1.0))
+cam.location = (cx + 0.3 * span, cy - span * 1.8 - 4.0, 6.0)
+look_at = mathutils.Vector((cx, cy, 1.0))
 cam.rotation_euler = (
     look_at - mathutils.Vector(cam.location)
 ).to_track_quat("-Z", "Y").to_euler()
-cam_data.lens = 35.0
+cam_data.lens = 50.0
 scene.camera = cam
 
 # ─── render settings (EEVEE, fast) ───────────────────────────────────────────

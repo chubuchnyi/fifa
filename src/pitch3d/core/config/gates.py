@@ -196,6 +196,18 @@ class JointSmoothConfig:
 
 
 @dataclass(frozen=True)
+class OrientVerticalityConfig:
+    """Force body-up to world-up when HMR global_orient tilts beyond threshold."""
+
+    enabled: bool = False
+    #: Max tilt from world vertical before we clamp (radians). ~35° default —
+    #: allows leaning forward mid-run but blocks lying flat.
+    max_tilt_rad: float = 0.61
+    #: R-6 low-conf stamp applied on rewritten frames.
+    inferred_confidence: float = 0.25
+
+
+@dataclass(frozen=True)
 class GravityProjectConfig:
     """Force airborne Z onto a ballistic parabola."""
 

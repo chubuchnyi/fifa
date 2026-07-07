@@ -49,6 +49,10 @@ from ..core.correction.gravity_project import (
 )
 from ..core.correction.jerk_clamp import JerkClampReport, jerk_clamp_gate
 from ..core.correction.joint_smooth import JointSmoothReport, joint_smooth_gate
+from ..core.correction.orient_verticality import (
+    OrientVerticalityReport,
+    orient_verticality_gate,
+)
 from ..core.correction.inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
 from ..core.correction.momentum_smooth import (
     MomentumSmoothConfig,
@@ -233,6 +237,12 @@ class Application:
                     scene, physics_cfg.momentum_smooth,
                     foot_position_provider=foot_position_provider,
                     fps=clip.fps,
+                )
+            # Orient verticality: force body-up to world-up on HMR-flipped
+            # frames. Runs BEFORE facing_align so facing sees upright bodies.
+            if physics_cfg.orient_verticality.enabled:
+                scene, _ = orient_verticality_gate(
+                    scene, physics_cfg.orient_verticality,
                 )
             # Pose-motion sync (procedural walk cycle on desynced frames).
             if physics_cfg.pose_motion_sync.enabled:

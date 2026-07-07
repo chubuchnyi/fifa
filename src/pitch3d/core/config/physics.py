@@ -44,6 +44,7 @@ from .gates import (
     JointSmoothConfig,
     MomentumSmoothConfig,
     OrientationConfig,
+    OrientVerticalityConfig,
     PoseMotionSyncConfig,
     ProbeConfig,
 )
@@ -92,6 +93,7 @@ class PhysicsConfig:
     gravity_project: GravityProjectConfig
     jerk_clamp: JerkClampConfig
     joint_smooth: JointSmoothConfig
+    orient_verticality: OrientVerticalityConfig
     ball: BallConfig
     probe: ProbeConfig
     profile_name: str
@@ -244,6 +246,10 @@ def load_physics_config(
     joint_smooth = _build_dataclass(
         JointSmoothConfig, base.get("joint_smooth", {}), "joint_smooth",
     )
+    orient_verticality = _build_dataclass(
+        OrientVerticalityConfig, base.get("orient_verticality", {}),
+        "orient_verticality",
+    )
     ball = _build_dataclass(BallConfig, base.get("ball", {}), "ball")
     probe = _build_dataclass(ProbeConfig, base.get("probe", {}), "probe")
 
@@ -264,6 +270,7 @@ def load_physics_config(
         gravity_project=gravity_project,
         jerk_clamp=jerk_clamp,
         joint_smooth=joint_smooth,
+        orient_verticality=orient_verticality,
         ball=ball,
         probe=probe,
         profile_name=profile,

@@ -75,6 +75,8 @@ def _minimal(**profiles) -> dict:
                            "min_correction_m": 1e-3},
             "joint_smooth": {"enabled": False, "smooth_window": 5,
                              "min_correction_rad": 5e-3},
+            "orient_verticality": {"enabled": False, "max_tilt_rad": 0.61,
+                                   "inferred_confidence": 0.25},
             "joint":      {"enabled": False, "max_omega_dps": 600.0},
             "orientation": {"enabled": False, "max_turn_rate_dps": 720.0},
             "ball":       {"max_speed": 36.0, "max_accel": 200.0},
@@ -196,6 +198,7 @@ def test_lineage_covers_every_leaf(tmp_path):
         ("gravity_project", cfg.gravity_project),
         ("jerk_clamp", cfg.jerk_clamp),
         ("joint_smooth", cfg.joint_smooth),
+        ("orient_verticality", cfg.orient_verticality),
         ("ball", cfg.ball), ("probe", cfg.probe),
     ):
         for f in dc.__dataclass_fields__:
