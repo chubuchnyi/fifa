@@ -194,6 +194,34 @@ async def api_joints2d(
     }
 
 
+@app.get("/api/frame/{n}/skeletons")
+async def api_frame_skeletons(n: int, user: str = Depends(current_user)) -> dict:
+    """All subjects' 2D body joints at position ``n`` — one round-trip overlay."""
+    del user
+    st = get_state()
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    subjects = []
+    for tid, sub in sorted(st.subjects.items()):
+        if n < 0 or n >= sub.frames.shape[0]:
+            continue
+        subjects.append({"track_id": tid, "pts": _joints2d_for(st, sub, n, vsize)})
+    return {"subjects": subjects, "names": BODY_JOINT_NAMES}
+
+
+@app.get("/api/frame/{n}/poses3d")
+async def api_frame_poses3d(n: int, user: str = Depends(current_user)) -> dict:
+    """All subjects' 3D body joints at position ``n`` — for the 3D show-all view."""
+    del user
+    st = get_state()
+    subjects = []
+    for tid, sub in sorted(st.subjects.items()):
+        if n < 0 or n >= sub.frames.shape[0]:
+            continue
+        subjects.append({"track_id": tid, "joints": sub.joints[n].tolist()})
+    return {"subjects": subjects}
+
+
 @app.get("/api/camera/{frame}")
 async def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
     del user

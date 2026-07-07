@@ -59,29 +59,48 @@
     </template>
   </div>
 
-  <!-- Main: video + 2D overlay -->
-  <div class="main">
-    <div class="canvas-frame">
-      <img :src="frameSrc" @load="onFrameLoaded($event)"
-           x-ref="frameImg" x-show="frameSrc" alt="frame" />
-      <svg :width="imgSize.w" :height="imgSize.h"
-           :viewBox="'0 0 ' + srcW + ' ' + srcH"
-           x-show="overlay.pts.length > 0"
-           preserveAspectRatio="xMidYMid meet">
-        <!-- bones -->
-        <template x-for="bone in bones" :key="bone[0] + '-' + bone[1]">
-          <line
-            :x1="overlay.pts[bone[0]] ? overlay.pts[bone[0]][0] : 0"
-            :y1="overlay.pts[bone[0]] ? overlay.pts[bone[0]][1] : 0"
-            :x2="overlay.pts[bone[1]] ? overlay.pts[bone[1]][0] : 0"
-            :y2="overlay.pts[bone[1]] ? overlay.pts[bone[1]][1] : 0"
-            x-show="overlay.pts[bone[0]] && overlay.pts[bone[1]]" />
-        </template>
-        <!-- joints -->
-        <template x-for="(pt, i) in overlay.pts" :key="i">
-          <circle x-show="pt" :cx="pt ? pt[0] : 0" :cy="pt ? pt[1] : 0" r="3" />
-        </template>
-      </svg>
+  <!-- Main: video + 2D overlay (all players; active highlighted) -->
+  <div class="main" :class="{ panning: _panning }"
+       @wheel.prevent="onWheel($event)"
+       @pointerdown="onPanStart($event)"
+       @pointermove="onPanMove($event)"
+       @pointerup="onPanEnd($event)"
+       @pointerleave="onPanEnd($event)">
+    <div class="canvas-frame" x-ref="canvasFrame">
+      <div class="zoom-layer" :style="zoomStyle()">
+        <img :src="frameSrc" @load="onFrameLoaded($event)" @dragstart.prevent
+             x-ref="frameImg" x-show="frameSrc" alt="frame" />
+        <svg :viewBox="'0 0 ' + srcW + ' ' + srcH"
+             x-show="overlayJoints.length > 0"
+             preserveAspectRatio="xMidYMid meet">
+          <template x-for="(b, i) in overlayBones" :key="'b' + i">
+            <line :x1="b.x1" :y1="b.y1" :x2="b.x2" :y2="b.y2"
+                  :stroke="b.active ? accentBright : b.color"
+                  :stroke-width="b.active ? 5 : 3"
+                  :opacity="b.active ? 0.95 : 0.45" />
+          </template>
+          <template x-for="(p, i) in overlayJoints" :key="'j' + i">
+            <circle :cx="p.x" :cy="p.y" :r="p.active ? 5 : 3.5"
+                    :fill="p.active ? editedColor : p.color"
+                    :opacity="p.active ? 1 : 0.55"
+                    stroke="#000" stroke-width="0.7" />
+          </template>
+          <template x-for="(l, i) in overlayLabels" :key="'l' + i">
+            <text :x="l.x" :y="l.y" font-size="26"
+                  :fill="l.active ? accentBright : l.color"
+                  :font-weight="l.active ? 700 : 400"
+                  :opacity="l.active ? 1 : 0.65"
+                  paint-order="stroke" stroke="#000" stroke-width="3"
+                  x-text="l.text"></text>
+          </template>
+        </svg>
+      </div>
+    </div>
+    <div class="zoom-hud">
+      <button @click="zoomBy(1/1.25)" title="zoom out">−</button>
+      <span x-text="Math.round(view.scale * 100) + '%'"></span>
+      <button @click="zoomBy(1.25)" title="zoom in">+</button>
+      <button @click="resetView()" title="fit (0)" style="min-width:34px;">fit</button>
     </div>
   </div>
 
@@ -92,6 +111,10 @@
       <span x-show="selectedTrackId !== null" style="color: var(--fg-dim)">
         · t<span x-text="selectedTrackId"></span> · frame <span x-text="frame+1"></span>
       </span>
+      <span class="spacer"></span>
+      <button @click="toggleShowAll()" :class="{ active: showAll }"
+              :title="showAll ? 'showing all players (A)' : 'showing active only (A)'"
+              x-text="showAll ? 'show: all' : 'show: active'"></button>
     </div>
     <div id="three-canvas"></div>
   </div>
@@ -234,7 +257,7 @@ function initThree(alpineState) {
   return threeState;
 }
 
-function updateThreePose(joints, meshVerts, meshFaces, selectedJoint) {
+function updateThreePose(joints, meshVerts, meshFaces, selectedJoint, others = []) {
   if (!threeState) return;
   const g = threeState.poseGroup;
   while (g.children.length) g.remove(g.children[0]);
@@ -294,6 +317,33 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint) {
     g.add(new THREE.Line(geo, boneMat));
   }
 
+  // Other subjects (show-all): colored stick figures, not pickable, placed
+  // relative to the active subject's pelvis so world offsets are preserved.
+  for (const o of others) {
+    const col = new THREE.Color(trackColorFor(o.track_id));
+    const oJointMat = new THREE.MeshBasicMaterial({ color: col });
+    const oBoneMat = new THREE.LineBasicMaterial({ color: col });
+    const oGeo = new THREE.SphereGeometry(0.022, 10, 10);
+    for (let i = 0; i < o.joints.length; i++) {
+      const m = new THREE.Mesh(oGeo, oJointMat);
+      m.position.set(
+        o.joints[i][0] - pelvis[0],
+        o.joints[i][1] - pelvis[1],
+        o.joints[i][2] - pelvis[2],
+      );
+      g.add(m);
+    }
+    for (const [a, b] of BONES) {
+      const pa = o.joints[a], pb = o.joints[b];
+      if (!pa || !pb) continue;
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(pa[0] - pelvis[0], pa[1] - pelvis[1], pa[2] - pelvis[2]),
+        new THREE.Vector3(pb[0] - pelvis[0], pb[1] - pelvis[1], pb[2] - pelvis[2]),
+      ]);
+      g.add(new THREE.Line(geo, oBoneMat));
+    }
+  }
+
   // Position gizmo at selected joint, or hide it
   if (selectedJoint !== null && selectedJoint !== undefined
       && selectedJoint > 0 && joints[selectedJoint]) {
@@ -323,19 +373,34 @@ Alpine.data("poseAnnot", () => ({
     _pendingAxisAngle: null,  // set on gizmo drag, cleared on commit
     _liveJoints: null,        // last-received joints for current (subj, frame)
     _liveMesh: null,
+    _liveOthers: [],          // other subjects' 3D joints (show-all)
     editedFrames: {},         // { "15": [30, 32, ...], ... }
     frame: 0,
     frameInput: 1,
     frameSrc: "",
     imgSize: { w: 0, h: 0 },
     srcW: 1920, srcH: 1080,
-    overlay: { pts: [] },
+    allSkeletons: [],         // [{track_id, pts:[[x,y]|null,...]}, ...]
+    overlayBones: [], overlayJoints: [], overlayLabels: [],
+    showAll: false,           // 3D: show all players vs active only
     bones: BONES,
+    accentBright: "#a8d4ff",
+    editedColor: "#ffb14f",
+    view: { scale: 1, tx: 0, ty: 0 },
+    _viewInit: false,
+    _panning: false,
+    _panLast: null,
 
     trackColor(tid) { return trackColorFor(tid); },
+    zoomStyle() {
+      return `width:${this.imgSize.w}px;height:${this.imgSize.h}px;`
+           + `transform:translate(${this.view.tx}px,${this.view.ty}px) scale(${this.view.scale});`
+           + `transform-origin:0 0;`;
+    },
 
     async init() {
       initThree(this);
+      window.addEventListener("resize", () => { this.fitLayer(); this.resetView(); });
       const r = await fetch("/api/scene");
       if (r.status === 401) { window.location = "/"; return; }
       const j = await r.json();
@@ -356,6 +421,8 @@ Alpine.data("poseAnnot", () => ({
         if (e.target.tagName === "INPUT") return;
         if ((e.ctrlKey || e.metaKey) && e.key === "z") { e.preventDefault(); this.undoEdit(); return; }
         if (e.key === "Escape") { this.deselectJoint(); return; }
+        if (e.key === "0") { this.resetView(); return; }
+        if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
       });
@@ -366,24 +433,48 @@ Alpine.data("poseAnnot", () => ({
       this.frameInput = n + 1;
       this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
       this.selectedJoint = null;
-      await this.refreshOverlay();
+      await this.refreshSkeletons();
       await this.refreshThree();
     },
 
     onFrameLoaded(e) {
       const img = e.target;
-      this.imgSize.w = img.width;
-      this.imgSize.h = img.height;
       this.srcW = img.naturalWidth;
       this.srcH = img.naturalHeight;
+      this.fitLayer();
     },
 
-    async refreshOverlay() {
-      if (this.selectedTrackId === null) { this.overlay.pts = []; return; }
-      const r = await fetch(`/api/subject/${this.selectedTrackId}/joints2d/${this.frame}`);
-      if (!r.ok) { this.overlay.pts = []; return; }
-      const j = await r.json();
-      this.overlay.pts = j.pts;
+    async refreshSkeletons() {
+      const r = await fetch(`/api/frame/${this.frame}/skeletons`);
+      if (!r.ok) { this.allSkeletons = []; this.rebuildOverlay(); return; }
+      const d = await r.json();
+      this.allSkeletons = d.subjects || [];
+      this.rebuildOverlay();
+    },
+
+    rebuildOverlay() {
+      const bones = [], joints = [], labels = [];
+      for (const sk of this.allSkeletons) {
+        const active = sk.track_id === this.selectedTrackId;
+        const col = trackColorFor(sk.track_id);
+        for (const [a, b] of this.bones) {
+          const pa = sk.pts[a], pb = sk.pts[b];
+          if (!pa || !pb) continue;
+          bones.push({ x1: pa[0], y1: pa[1], x2: pb[0], y2: pb[1], color: col, active });
+        }
+        for (const pt of sk.pts) {
+          if (!pt) continue;
+          joints.push({ x: pt[0], y: pt[1], color: col, active });
+        }
+        if (sk.pts[0]) {
+          labels.push({ x: sk.pts[0][0] + 8, y: sk.pts[0][1] - 10,
+                        text: "t" + sk.track_id, color: col, active });
+        }
+      }
+      const activeLast = (arr) => arr.sort((p, q) => (p.active ? 1 : 0) - (q.active ? 1 : 0));
+      this.overlayBones = activeLast(bones);
+      this.overlayJoints = activeLast(joints);
+      this.overlayLabels = labels;
     },
 
     async refreshThree() {
@@ -397,13 +488,22 @@ Alpine.data("poseAnnot", () => ({
       const mm = await mr.json();
       this._liveJoints = jj.joints;
       this._liveMesh = { verts: mm.verts, faces: mm.faces };
-      updateThreePose(jj.joints, mm.verts, mm.faces, this.selectedJoint);
+      let others = [];
+      if (this.showAll) {
+        const pr = await fetch(`/api/frame/${this.frame}/poses3d`);
+        if (pr.ok) {
+          const pj = await pr.json();
+          others = (pj.subjects || []).filter((s) => s.track_id !== this.selectedTrackId);
+        }
+      }
+      this._liveOthers = others;
+      updateThreePose(jj.joints, mm.verts, mm.faces, this.selectedJoint, others);
     },
 
     async selectTrack(tid) {
       this.selectedTrackId = tid;
       this.selectedJoint = null;
-      await this.refreshOverlay();
+      this.rebuildOverlay();
       await this.refreshThree();
     },
 
@@ -413,7 +513,7 @@ Alpine.data("poseAnnot", () => ({
       this.selectedJoint = jointIdx;
       // re-render Three.js with the selection highlighted + gizmo attached
       if (this._liveJoints && this._liveMesh) {
-        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, jointIdx);
+        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, jointIdx, this._liveOthers);
       }
     },
 
@@ -421,7 +521,7 @@ Alpine.data("poseAnnot", () => ({
       this.selectedJoint = null;
       this._pendingAxisAngle = null;
       if (this._liveJoints && this._liveMesh) {
-        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, null);
+        updateThreePose(this._liveJoints, this._liveMesh.verts, this._liveMesh.faces, null, this._liveOthers);
       }
     },
 
@@ -459,8 +559,8 @@ Alpine.data("poseAnnot", () => ({
       const d = await r.json();
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
-      this.overlay.pts = d.joints2d;
-      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint);
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshSkeletons();
       await this.refreshEditedFrames();
     },
 
@@ -483,8 +583,8 @@ Alpine.data("poseAnnot", () => ({
       if (!d.ok) { console.info("nothing to undo"); return; }
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
-      this.overlay.pts = d.joints2d;
-      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint);
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshSkeletons();
       await this.refreshEditedFrames();
     },
 
@@ -507,6 +607,78 @@ Alpine.data("poseAnnot", () => ({
       n = Math.max(0, Math.min(this.nFrames - 1, n));
       await this.loadFrame(n);
     },
+
+    toggleShowAll() {
+      this.showAll = !this.showAll;
+      this.refreshThree();
+    },
+
+    // ── 2D frame fit / zoom / pan ──────────────────────────────────────────
+    fitLayer() {
+      const box = this.$refs.canvasFrame;
+      if (!box) return;
+      const cw = box.clientWidth, ch = box.clientHeight;
+      const ar = (this.srcW || 16) / (this.srcH || 9);
+      let w = cw, h = cw / ar;
+      if (h > ch) { h = ch; w = ch * ar; }
+      this.imgSize = { w, h };
+      if (!this._viewInit) { this.resetView(); this._viewInit = true; }
+    },
+
+    resetView() {
+      const box = this.$refs.canvasFrame;
+      const cw = box ? box.clientWidth : this.imgSize.w;
+      const ch = box ? box.clientHeight : this.imgSize.h;
+      this.view = {
+        scale: 1,
+        tx: (cw - this.imgSize.w) / 2,
+        ty: (ch - this.imgSize.h) / 2,
+      };
+    },
+
+    _clampScale(s) { return Math.max(0.5, Math.min(8, s)); },
+
+    _zoomAt(cx, cy, f) {
+      const ns = this._clampScale(this.view.scale * f);
+      const k = ns / this.view.scale;
+      this.view = {
+        scale: ns,
+        tx: cx - (cx - this.view.tx) * k,
+        ty: cy - (cy - this.view.ty) * k,
+      };
+    },
+
+    zoomBy(f) {
+      const box = this.$refs.canvasFrame;
+      if (!box) return;
+      this._zoomAt(box.clientWidth / 2, box.clientHeight / 2, f);
+    },
+
+    onWheel(e) {
+      const box = this.$refs.canvasFrame;
+      if (!box) return;
+      const rect = box.getBoundingClientRect();
+      const f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      this._zoomAt(e.clientX - rect.left, e.clientY - rect.top, f);
+    },
+
+    onPanStart(e) {
+      if (e.button !== 0) return;
+      if (e.target.closest && e.target.closest(".zoom-hud")) return;
+      this._panning = true;
+      this._panLast = { x: e.clientX, y: e.clientY };
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+    },
+
+    onPanMove(e) {
+      if (!this._panning) return;
+      const dx = e.clientX - this._panLast.x;
+      const dy = e.clientY - this._panLast.y;
+      this._panLast = { x: e.clientX, y: e.clientY };
+      this.view = { scale: this.view.scale, tx: this.view.tx + dx, ty: this.view.ty + dy };
+    },
+
+    onPanEnd() { this._panning = false; },
 }));
 Alpine.start();
 </script>
