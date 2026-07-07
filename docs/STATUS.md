@@ -403,6 +403,29 @@ fabricate or silently hide.
     3D header. Overlay markup validated well-formed with real data (1013 SVG elements/frame).
     STILL PENDING (F2): frame-range select + auto scene.json generation from a raw video — that's
     the perception pipeline behind the GUI (GPU/pod), scoped with the user, not yet built.
+  * **BUGFIX batch from user's 2nd visual test (overlay floating off-frame, tiny frame, empty 3D,
+    bad scroll):** root cause was a **layout race** — panels measured 0×0 before the CSS grid
+    settled. Consequences + fixes: (a) **overlay drift** — the `<img>` filled its box while the
+    `<svg>` used `preserveAspectRatio="xMidYMid meet"` (fit+centre), so when the box wasn't exactly
+    16:9 they diverged (overlay large/offset over a tiny frame). Now **both use identical explicit
+    `imgSize` px + `preserveAspectRatio="none"`** → overlay is pixel-locked to the frame by
+    construction. (b) **frame rendered tiny in a corner** — `fitLayer()` ran on a 0-size box; added
+    a zero guard + a **`ResizeObserver`** on `canvasFrame` that re-fits once real dimensions exist.
+    (c) **3D figure not visible** — WebGL canvas could init at 0×0; added a guard + `ResizeObserver`
+    on the 3D container (camera aspect + renderer size). (d) **independent scroll** — `min-height:0`
+    /`min-width:0` on the three grid cells + `overflow:hidden` on `.app-shell`, so toolbar/sidebar/
+    timeline stay fixed and panels contain their own overflow. **HONEST caveat (not a GUI bug):** the
+    projected skeletons cluster centre-pitch and don't perfectly trace every real player. Proved
+    poseannot's projection == the pipeline's canonical `project_world_points` (× the 1280→1920
+    resolution scale), camera frames are contiguous (no index bug), and the client now renders it
+    faithfully — the residual mismatch is **reconstruction quality** in `scene_replayed_v2.json`
+    (its free-cam render `render_after_v2/` shows the avatars genuinely clustered in world space).
+    That approximation is exactly what poseannot's manual joint editing exists to correct. Verified
+    headless (node --check; served CSS/HTML assert the fixes; subject joints/mesh endpoints return a
+    ~1.4 m figure); **final visual confirmation is user-side (Chrome ext not connected).** Open Q
+    (#47): code has only ONE 3D renderer — the "two views" impression came from the empty-looking
+    centre (mis-sized frame) + un-framed figure, both now fixed; if a panel should be literally
+    removed, need to know which.
 
 - **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
   end-to-end + full_realism pod run BATCH_FINISH_OK.**
