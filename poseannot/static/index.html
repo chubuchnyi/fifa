@@ -103,10 +103,13 @@
         <!-- overlay injected as an SVG string via x-html: setting innerHTML on
              an <svg> parses children in the SVG namespace, unlike <template
              x-for> which clones them as inert HTML elements (never renders).
-             preserveAspectRatio="none" + the same explicit px size as the <img>
-             locks the overlay to the image box, so projected pixels can never
-             drift/rescale relative to the frame (the earlier misalignment). -->
-        <svg :viewBox="'0 0 ' + srcW + ' ' + srcH"
+             viewBox MUST be set imperatively: a `:viewBox` binding is lowercased
+             by the HTML parser to `:viewbox`, so Alpine writes the attribute
+             "viewbox" — which SVG ignores (case-sensitive). Without a viewBox the
+             1920-space points render 1:1 inside the ~700px box and shoot off the
+             frame (the persistent "offset"). preserveAspectRatio="none" + the
+             same explicit px size as the <img> then locks the overlay to it. -->
+        <svg x-effect="$el.setAttribute('viewBox', '0 0 ' + srcW + ' ' + srcH)"
              x-show="overlaySvgStr"
              x-html="overlaySvgStr"
              preserveAspectRatio="none"
@@ -228,7 +231,12 @@ function initThree(alpineState) {
   transform.attach(gizmoAnchor);
   transform.visible = false;
   transform.enabled = false;
-  scene.add(transform.getHelper ? transform.getHelper() : transform);
+  // three r0.170: the visual gizmo is a *separate* helper object; toggling
+  // transform.visible no longer hides it, so we hold the helper and hide it
+  // directly (otherwise a gizmo floats over the scene with nothing selected).
+  const gizmoHelper = transform.getHelper ? transform.getHelper() : transform;
+  gizmoHelper.visible = false;
+  scene.add(gizmoHelper);
   // free orbit while dragging gizmo
   transform.addEventListener("dragging-changed", (ev) => {
     orbit.enabled = !ev.value;
@@ -280,7 +288,7 @@ function initThree(alpineState) {
 
   threeState = {
     scene, camera, orbit, renderer, poseGroup,
-    transform, gizmoAnchor, jointSpheres,
+    transform, gizmoAnchor, gizmoHelper, jointSpheres,
   };
   return threeState;
 }
@@ -382,9 +390,11 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint, others = [
     threeState.gizmoAnchor.quaternion.identity();
     threeState.transform.visible = true;
     threeState.transform.enabled = true;
+    threeState.gizmoHelper.visible = true;
   } else {
     threeState.transform.visible = false;
     threeState.transform.enabled = false;
+    threeState.gizmoHelper.visible = false;
   }
 
   threeState.orbit.target.set(0, 0, -0.05);

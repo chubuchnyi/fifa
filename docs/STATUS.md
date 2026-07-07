@@ -426,6 +426,31 @@ fabricate or silently hide.
     (#47): code has only ONE 3D renderer — the "two views" impression came from the empty-looking
     centre (mis-sized frame) + un-framed figure, both now fixed; if a panel should be literally
     removed, need to know which.
+  * **BUGFIX from user's 3rd visual test — REAL root cause of the overlay "offset" found
+    (`viewBox` binding was silently dropped).** The user reported the overlay was *still* offset "by
+    the same distance as before" and the 3D "empty" (footballers gone). Built a **headless
+    self-verification harness** (Playwright + system `google-chrome` via `channel="chrome"`, JWT
+    cookie injected from `issue_token`) to render the live server and measure the real DOM/GL state —
+    this is what finally exposed both bugs. Findings: **(1) The `:viewBox` binding never applied.**
+    The `<svg>` used `:viewBox="'0 0 '+srcW+' '+srcH"`; the HTML parser lowercases the attribute name
+    to `:viewbox`, so Alpine wrote the attribute `viewbox` — which SVG ignores (case-sensitive). With
+    **no viewBox**, the 1920×1080-space points rendered 1:1 inside the ~700 px SVG box and shot off the
+    frame down-right (the whole overlay pushed off — the persistent "offset"). The earlier px +
+    `preserveAspectRatio="none"` "fixes" locked img/svg to the same *box* but never restored the
+    missing viewBox, so the content still overflowed — which is why the user saw *the same* offset.
+    Fix: set it imperatively/case-correct via `x-effect="$el.setAttribute('viewBox', …)"`. Verified:
+    `viewBox="0 0 1920 1080"` now present, 1013 SVG children, and a high-res crop shows the `t1 ●
+    active` label + skeletons rendering **on the pitch**. **(2) The 3D figure DOES render** — a
+    `gl.readPixels` at the figure's screen centre returns the blue SMPL-X mesh colour (poseGroup has
+    44 children: 23 meshes + 21 bones, joint projects to on-screen NDC). The "empty" screenshot was a
+    **headless software-GL compositing artifact** (readPixels sees the real buffer; `page.screenshot`
+    drops WebGL content — note the `GPU stall due to ReadPixels` warnings). In a real browser the
+    figure is visible. **(3) Gizmo-always-visible fixed** — in three r0.170 the TransformControls
+    *helper* is a separate object, so `transform.visible=false` no longer hid it; a bare gizmo floated
+    over the scene (reinforcing the "empty" impression). Now hold the helper and toggle its `.visible`
+    with the selection. So "removed the footballers view" = the 2D overlay was broken by the viewBox
+    bug (now restored); "empty 3D" = the floating gizmo + subtle figure (both addressed). No panel was
+    ever removed — every commit has exactly one `#three-canvas`.
 
 - **2026-07-07 (overnight, 12+ hours autonomous)** — **FULL PHYSICS STACK
   end-to-end + full_realism pod run BATCH_FINISH_OK.**
