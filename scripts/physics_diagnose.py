@@ -38,6 +38,10 @@ from pitch3d.core.correction.ball_gravity_probe import (
     BallGravityConfig,
     ball_gravity_probe,
 )
+from pitch3d.core.correction.beta_variance_probe import (
+    BetaVarianceConfig,
+    beta_variance_probe,
+)
 from pitch3d.core.correction.body_scale_probe import BodyScaleConfig, body_scale_probe
 from pitch3d.core.correction.contact_probe import contact_probe
 from pitch3d.core.correction.gravity_probe import GravityConfig, gravity_probe
@@ -92,6 +96,7 @@ def run_all(scene_path: str, fps: float) -> dict:
     stride = stride_probe(scene, StrideProbeConfig(enabled=True), fps=fps)
     ang_mom = angular_momentum_probe(scene, AngularMomentumConfig(enabled=True), fps=fps)
     ball_grav = ball_gravity_probe(scene, BallGravityConfig(enabled=True), fps=fps)
+    betas = beta_variance_probe(scene, BetaVarianceConfig(enabled=True))
 
     mom = momentum_probe(
         scene, MomentumProbeConfig(enabled=True, jerk_threshold_mps3=100.0),
@@ -159,6 +164,12 @@ def run_all(scene_path: str, fps: float) -> dict:
             "mean_a_z": ball_grav.mean_vertical_accel_mps2,
             "max_dev": ball_grav.max_deviation_mps2,
         },
+        "betas": {
+            "n_subjects": betas.n_subjects,
+            "subjects_extreme": betas.subjects_extreme,
+            "similar_pairs": len(betas.similar_pairs),
+            "max_norm": max((s.betas_norm for s in betas.subjects), default=0.0),
+        },
     }
 
 
@@ -204,6 +215,9 @@ def print_summary(r: dict) -> None:
     bg = r["ball_gravity"]
     print(f"[ball_gravity] frames={bg['n_frames']} "
           f"mean_a={bg['mean_a_z']:.2f}m/s² max_dev={bg['max_dev']:.1f}m/s²")
+    bt = r["betas"]
+    print(f"[betas]        extreme={bt['subjects_extreme']}/{bt['n_subjects']} "
+          f"similar_pairs={bt['similar_pairs']} max_norm={bt['max_norm']:.2f}")
 
 
 def main(argv: list[str] | None = None) -> int:
