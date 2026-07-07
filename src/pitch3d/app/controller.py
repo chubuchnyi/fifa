@@ -260,16 +260,18 @@ class Application:
                 scene, _ = inertia_smooth_gate(
                     scene, physics_cfg.inertia_smooth, fps=clip.fps,
                 )
-            # Gravity project: airborne Z onto ballistic parabola.
+            # Jerk clamp FIRST: iterative low-pass to bound peak jerk in XY/Z.
+            if physics_cfg.jerk_clamp.enabled:
+                scene, _ = jerk_clamp_gate(
+                    scene, physics_cfg.jerk_clamp, fps=clip.fps,
+                )
+            # Gravity project LAST: airborne Z onto ballistic parabola — must be
+            # the final authority on vertical motion inside airborne runs, so it
+            # runs after jerk_clamp (which otherwise smooths the parabola away).
             if physics_cfg.gravity_project.enabled and foot_position_provider is not None:
                 scene, _ = gravity_project_gate(
                     scene, physics_cfg.gravity_project, foot_position_provider,
                     fps=clip.fps,
-                )
-            # Jerk clamp: iterative low-pass to bound peak jerk.
-            if physics_cfg.jerk_clamp.enabled:
-                scene, _ = jerk_clamp_gate(
-                    scene, physics_cfg.jerk_clamp, fps=clip.fps,
                 )
             # Joint smooth: per-joint low-pass on body_pose (twitch removal).
             if physics_cfg.joint_smooth.enabled:
