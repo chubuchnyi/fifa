@@ -86,6 +86,39 @@ Multi-clip navigation, per-project user roles, and stitching between
 clips.  Explicitly out of scope until v0-v3 are load-bearing in day-to-
 day work.
 
+## Bake-off / comparison features (cross-cutting)  ← backlog
+
+Added 2026-07-08 from the pose A/B bake-off (SMPLest-X vs SAM 3D Body). These are eval aids,
+not part of the v0→v4 editing ladder, but they live in poseannot because that's where the human
+judges pose quality on the real frames.
+
+- **2D overlay source toggle — "original PE" ⇄ "3D reconstruction".**  One switch on the 2D
+  frame that flips the overlay between:
+  * **original PE** — the raw per-frame 2D perception straight off the pixels (e.g. YOLO-pose /
+    the detector+keypoints stage), i.e. what the pose net *saw* before any 3D lift/grounding.
+    Prototype exists standalone: `/tmp/real_pe_overlay.py` (YOLO-pose on the real frames).
+  * **3D reconstruction** — the current behaviour: our SMPL-X body projected back through the
+    calibrated camera.
+  Purpose: separate *perception* error from *reconstruction/calibration* error by eye. Needs a
+  per-frame "raw 2D keypoints" source in `scene.json` (or a sidecar) the server can serve.
+- **Backend A/B compare (SMPLest-X vs SAM 3D Body) in one view.**  Each backend already produces
+  its own clip bundle (`poseannot/clips/A_smplestx`, later `…/B_sam3dbody`); the clip switcher
+  loads either. Next step: a side-by-side / A-B flip on the same frame so the two skeletons can be
+  judged on identical pixels without reloading. Standalone stand-in today:
+  `scripts/overlay_from_scene.py` renders each scene's skeleton on the real frames via the exact
+  poseannot projection.
+
+## Pipeline-side backlog (feeds the scene.json poseannot consumes)
+
+- **SAM 3D Body pose backend (variant B).**  `src/pitch3d/adapters/models/sam3dbody_backend.py`
+  behind the `HMRBackend` port; MHR→SMPL-X via Meta's converter. **Blocked** on the HF-gated
+  `facebook/sam-3d-body-dinov3` checkpoint (user must accept licence + `hf download`). Swappable
+  via `POSE_BACKEND` in `scripts/pod_real_e2e.sh`.
+- **camera→world orientation lift (shared blocker).**  Both pose backends return `global_orient`
+  in the **camera** frame; the camera→world rotation is never applied, so ~35 % of subjects read
+  inverted in world. The pure half already owns world *translation* (foot→homography); this is the
+  matching rotation. Highest-value correctness fix for the pose track.
+
 ## Technical debt to watch
 
 - **FK cache is in-process memory only.**  A pod restart re-warms in ~55 s

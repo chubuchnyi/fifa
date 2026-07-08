@@ -89,14 +89,23 @@ fi
 # exported scene (deliverable runs); default 1 keeps the full golden-path seam coverage.
 if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo edits: OFF (DEMO_EDITS=0)"; fi
 
+# POSE backend is swappable for the A/B bake-off (both satisfy the HMRBackend port,
+# both return SMPL-X, so they drop into the SAME gvhmr estimator + downstream FK):
+#   A (default)  pitch3d.adapters.models.smplestx_backend:make   — SMPLest-X
+#   B            pitch3d.adapters.models.sam3dbody_backend:make   — SAM 3D Body (MHR→SMPL-X)
+# The SAM3DBody backend reads its own env (PITCH3D_SAM3D_REPO / _MHR_REPO / _CKPT /
+# _MHR_ASSET / _SMPLX_MODELS / _DEVICE) — see the backend factory. Its checkpoint is
+# HF-GATED (facebook/sam-3d-body-dinov3): accept the licence + `hf download` it first.
+POSE_BACKEND="${POSE_BACKEND:-pitch3d.adapters.models.smplestx_backend:make}"
+
 cd "$REPO"
-echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} =="
+echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} pose=${POSE_BACKEND} =="
 t0=$(date +%s)
 PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
   --detector rfdetr --tracker bytetrack --device cuda \
   "${CALIB_ARGS[@]}" "${COH_ARGS[@]}" \
-  --pose gvhmr --pose-backend pitch3d.adapters.models.smplestx_backend:make \
+  --pose gvhmr --pose-backend "$POSE_BACKEND" \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
   --render overlay --export gltf --format "$FORMAT" --out-dir "$OUT"
 echo "== done in $(( $(date +%s) - t0 ))s -> ${OUT} =="

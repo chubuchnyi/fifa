@@ -365,6 +365,47 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-08** — **POSE BAKE-OFF A/B — variant A DONE & verified REAL; variant B built but
+  HF-gate-BLOCKED.** User directive: «сделай оба варианта A и B, подними под и сравни результаты»
+  + «нужны реальные фреймы с оверлеями для SMPLest-X и SAM 3D Body … и scene.json для обоих чтобы
+  прогнать через наш gui».
+  * **Variant A (SMPLest-X)** — re-ran the wired real pose backend on the pod (`pod_real_e2e.sh`,
+    `FRAMES=48`, real RF-DETR→ByteTrack→PnLCalib→SMPLest-X→WASB, CUDA) → `scene.json` 4.2 MB,
+    **21 subjects**, in 295 s. **Verified REAL, not rest-pose:** per-subject `body_pose` std
+    0.23–0.39 (rest-pose ≈ 0), `global_orient` std 1.3–1.8 (real per-frame turning), `betas` std
+    0.12–0.68 (real shape fits) — 21/21 pass `bp_std>1e-3`. Pulled to `out/bakeoff/scene_A.json`
+    (gitignored) and installed as GUI clip `poseannot/clips/A_smplestx/` (scene.json + video
+    symlink) — the clip switcher lists it, so it runs through poseannot as-is.
+  * **Overlay tool** — new `scripts/overlay_from_scene.py` reuses the **exact GUI path**
+    (`pitch3d load_scene` → poseannot SMPL-X FK → `poseannot.camera` projection with the validated
+    180°-roll / camera-X-mirror auto-detect) to draw skeleton-on-real-frame PNGs for ANY scene.json.
+    Same tool renders A and B on identical pixels for the eye comparison. A overlays: frames 0/16/32
+    (camera track = 33 frames), **18–19 subjects** each →
+    `out/bakeoff/overlay_A_f{0,16,32}.png`. NOTE per memory `feedback_overlay_user_is_ground_truth`:
+    absolute pixel-on-player alignment is the USER's call in the GUI, not my headless check.
+  * **Variant B (SAM 3D Body)** — adapter written: `src/pitch3d/adapters/models/sam3dbody_backend.py`
+    behind the SAME `HMRBackend` port (imports clean, `isinstance(HMRBackend)` true, torch-free
+    module import; heavy load lazy). Per-frame `process_one_image(rgb, bboxes=OUR ByteTrack boxes,
+    use_mask=False, inference_type="body")`, one **batched MHR→SMPL-X** fit, identical foot-plane FK
+    to A (so A/B differ only in articulation, not root placement). `pod_real_e2e.sh` now takes
+    `POSE_BACKEND` (default SMPLest-X) so B runs by swapping ONE env var.
+  * **KEY FINDING (why B is not a drop-in):** SAM 3D Body predicts on the **Momentum Human Rig
+    (MHR)**, *not* SMPL-X, so every prediction must be bridged through Meta's own converter
+    (`facebookresearch/MHR` `tools/mhr_smpl_conversion` → `Conversion.convert_sam3d_output_to_smpl`,
+    a per-person PyTorch mesh fit). Both B repos are cloned on the pod network disk.
+  * **BLOCKER (needs USER):** the 3DB checkpoint `facebook/sam-3d-body-dinov3` is **HF-gated**.
+    Running B needs the user to accept the model licence on HuggingFace + provide an authenticated
+    token (or run `hf download facebook/sam-3d-body-dinov3 --local-dir <repo>/checkpoints/…`
+    themselves). I cannot accept a licence on their behalf. Surfaced to the user; B run + A-vs-B
+    comparison deferred until the token/weights land.
+  * **SHARED blocker (A *and* B):** both nets return `global_orient` in the **camera** frame; the
+    camera→world rotation lift is still owed downstream (~35 % of subjects would read inverted in
+    world). The pure half owns world *translation* (foot→homography); articulation stays
+    camera-relative for now. Logged as a backlog item.
+  * **Cost:** GPU pod STOPPED right after A finished (B blocked on user) per `feedback_pod_cost`;
+    balance $21.34, network disk keeps the B repos + scene_A. Runbook + poseannot-roadmap updated
+    (2D/3D overlay toggle, SAM-3D-Body backend, camera→world lift added to backlog).
+
 - **2026-07-07 (evening)** — **POSEANNOT overlay 180°-roll bug — root-caused + fixed.** User's
   4th visual test: "оверлэй отзеркален, повёрнут, сжат" (mirrored/rotated/compressed), anchored with
   real IDs (GK=t31, t9=yellow #3, ref=t66). Root cause: `poseannot/camera.py` had the 180°-roll

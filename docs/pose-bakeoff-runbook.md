@@ -14,6 +14,28 @@ confirms (or overturns) it before we sink the wiring effort of B3 into the wrong
 
 ---
 
+## Wiring status — 2026-07-08 (both backends behind ONE port; A runs, B gated)
+
+The *metre-accurate WorldPose eval* below is still the way to PICK a backbone. Separately, the
+**engineering wiring** for the A/B bake-off is now done on our own clip:
+
+- **Both candidates satisfy the same `HMRBackend` port** and are **swappable via one env var**:
+  `pod_real_e2e.sh` reads `POSE_BACKEND` (default `…smplestx_backend:make`; set
+  `…sam3dbody_backend:make` for B). Identical detect/track/calibrate upstream + identical foot-plane
+  FK, so A vs B differs only in articulation.
+- **Variant A (SMPLest-X) runs end-to-end today** → real 21-subject `scene.json` on the Colombia
+  clip (verified real: `body_pose` std 0.23–0.39, not rest-pose). See STATUS §6 2026-07-08.
+- **Variant B (SAM 3D Body) is BUILT but BLOCKED:** `sam3dbody_backend.py` bridges MHR→SMPL-X via
+  Meta's converter, but the checkpoint `facebook/sam-3d-body-dinov3` is **HF-gated** — the "already
+  on box" line in §0's asset check is aspirational; the weights need the user to accept the licence
+  + `hf download` with a token before B can run.
+- **Eye-compare tool:** `scripts/overlay_from_scene.py --scene <A|B>.json --video <clip> --frames …`
+  draws each scene's SMPL-X skeleton on the real frames through the *exact* poseannot projection, so
+  A and B land on identical pixels. Load either `scene.json` in poseannot (clip switcher) for the
+  interactive judge.
+
+---
+
 ## 0. Prerequisites — READ FIRST (two gates, one of them not yet met)
 
 | gate | status | note |
