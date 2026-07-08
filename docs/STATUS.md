@@ -365,6 +365,23 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-08 (manual overlay-camera + pitch reference)** — **Added a manual overlay-camera control
+  panel + a projected pitch-markings overlay to poseannot.** Motivation: the flip fix made A upright,
+  but the residual PnLCalib inaccuracy (per-player offset + ~3× too small, #61) left the overlay too
+  tiny/shifted to judge — and made the A/B clip switch and 2D/3D toggle *look* like no-ops (both
+  clips share the same video; A's skeletons are ~22 px, B projects off-screen). The switch/toggle are
+  in fact working (verified in-process: A=21 subjects world-transl, B=8 subjects raw-pixel transl).
+  So the fix is the manual backstop the user always wants: `camera.CameraAdjust` (zoom / pan XY / yaw
+  / pitch / roll / dolly) applied server-side in `frame_projector`, exposed as query params on
+  `/api/frame/{n}/skeletons`, `/api/subject/{tid}/mesh2d/{frame}`, and a new `/api/pitch/{frame}`
+  (projects the *measured* pitch markings — a pose-independent alignment reference). GUI: a camera
+  panel (toolbar `camera` / key `C`) with sliders + numeric inputs + reset, a `pitch` toggle (key `P`,
+  green dots under the poses), debounced live re-projection. Workflow: drag until the green pitch dots
+  sit on the painted lines and the players follow. All defaults = identity (no behaviour change when
+  neutral). E2E-verified via TestClient (pitch/skeletons/mesh2d 200 with params; coords transform).
+  Does NOT fix #61 (still the real calibration bar) and does NOT rescue B (raw-pixel transl still needs
+  the pipeline placement fix, #59) — it's a hand-alignment tool over the approximate camera.
+
 - **2026-07-08 (debug suite + A/B root-cause)** — **Built an objective pose-overlay debug suite
   (`scripts/debug/`), root-caused BOTH variants, fixed A's inversion, demonstrated B's fix.** The eye
   can't judge a 22 px skeleton, so the overlay work was flying blind; these tools replace eyeballing

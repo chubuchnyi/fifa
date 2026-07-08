@@ -52,6 +52,10 @@
     <button @click="toggleOverlayMode()" :class="{ active: overlayMode === '3d' }"
             :title="overlayMode === '3d' ? 'overlay: projected 3D mesh — press M for 2D skeleton' : 'overlay: 2D skeleton — press M for 3D mesh'"
             x-text="overlayMode === '3d' ? 'overlay: 3D' : 'overlay: 2D'"></button>
+    <button @click="togglePitch()" :class="{ active: showPitch }"
+            title="overlay the measured pitch markings (P)">pitch</button>
+    <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
+            title="manual overlay-camera controls (angles + distance)">camera</button>
     <span class="user">
       <span x-text="user"></span> · <a href="/logout">logout</a>
     </span>
@@ -130,6 +134,29 @@
       <button @click="zoomBy(1.25)" title="zoom in">+</button>
       <button @click="resetView()" title="fit (0)" style="min-width:34px;">fit</button>
     </div>
+
+    <!-- Manual overlay-camera controls. The solved PnLCalib camera is only
+         approximate (per-player offset + ~3x scale); these nudge the projection
+         so the user can hand-align the overlay to the video. Applied server-side
+         (see camera.CameraAdjust) to skeletons, mesh and the pitch reference. -->
+    <div class="cam-panel" x-show="showCamAdjust" x-cloak>
+      <div class="cam-hd">
+        <span>overlay camera</span>
+        <span class="spacer"></span>
+        <button @click="resetCam()" title="reset all to neutral">reset</button>
+        <button @click="showCamAdjust = false" title="close">✕</button>
+      </div>
+      <template x-for="c in camControls" :key="c.k">
+        <div class="cam-row">
+          <label x-text="c.label"></label>
+          <input type="range" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="cam[c.k]" @input="onCamChange()" />
+          <input class="cam-num" type="number" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="cam[c.k]" @input="onCamChange()" />
+        </div>
+      </template>
+      <div class="cam-hint">align the green pitch dots to the painted lines — the players follow.</div>
+    </div>
   </div>
 
   <!-- Right: 3D pose view (Three.js) -->
@@ -188,7 +215,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-08 · overlay2d3d";
+const BUILD_ID = "2026-07-08 · campanel+pitch";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -456,6 +483,22 @@ Alpine.data("poseAnnot", () => ({
     activeMesh2d: null,       // [[u,v,depth]|null,...] projected mesh of active subj
     meshColor: "#6bb5ff",     // matches the Three.js mesh colour (0x6bb5ff)
     showAll: false,           // 3D: show all players vs active only
+    // Overlay pitch reference + manual camera nudge (calibration is approximate).
+    showPitch: true,          // draw the measured pitch markings under the poses
+    pitch2d: [],              // [[u,v],...] projected pitch points (current cam)
+    pitchColor: "#39d353",    // green, like the painted lines
+    showCamAdjust: false,     // camera-controls panel visible?
+    cam: { zoom: 1, panx: 0, pany: 0, yaw: 0, pitch: 0, roll: 0, dolly: 0 },
+    camControls: [
+      { k: "zoom",  label: "zoom",   min: 0.25, max: 5,    step: 0.05 },
+      { k: "panx",  label: "pan X",  min: -2000, max: 2000, step: 5 },
+      { k: "pany",  label: "pan Y",  min: -1200, max: 1200, step: 5 },
+      { k: "yaw",   label: "yaw°",   min: -45,  max: 45,   step: 0.2 },
+      { k: "pitch", label: "pitch°", min: -45,  max: 45,   step: 0.2 },
+      { k: "roll",  label: "roll°",  min: -45,  max: 45,   step: 0.2 },
+      { k: "dolly", label: "dist m", min: -60,  max: 60,   step: 0.5 },
+    ],
+    _camT: null,              // debounce handle for onCamChange
     bones: BONES,
     accentBright: "#a8d4ff",
     editedColor: "#ffb14f",
@@ -581,6 +624,8 @@ Alpine.data("poseAnnot", () => ({
         if (e.key === "d" || e.key === "D") { this.diag.show = !this.diag.show; return; }
         if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
         if (e.key === "m" || e.key === "M") { this.toggleOverlayMode(); return; }
+        if (e.key === "p" || e.key === "P") { this.togglePitch(); return; }
+        if (e.key === "c" || e.key === "C") { this.showCamAdjust = !this.showCamAdjust; return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
       });
@@ -592,6 +637,7 @@ Alpine.data("poseAnnot", () => ({
       this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
       this.selectedJoint = null;
       await this.refreshMesh2d();
+      await this.refreshPitch();
       await this.refreshSkeletons();
       await this.refreshThree();
     },
@@ -604,7 +650,7 @@ Alpine.data("poseAnnot", () => ({
     },
 
     async refreshSkeletons() {
-      const r = await fetch(`/api/frame/${this.frame}/skeletons`);
+      const r = await fetch(`/api/frame/${this.frame}/skeletons?${this.camQS()}`);
       if (!r.ok) { this.allSkeletons = []; this.rebuildOverlay(); return; }
       const d = await r.json();
       this.allSkeletons = d.subjects || [];
@@ -619,10 +665,50 @@ Alpine.data("poseAnnot", () => ({
         this.activeMesh2d = null;
         return;
       }
-      const r = await fetch(`/api/subject/${this.selectedTrackId}/mesh2d/${this.frame}`);
+      const r = await fetch(`/api/subject/${this.selectedTrackId}/mesh2d/${this.frame}?${this.camQS()}`);
       if (!r.ok) { this.activeMesh2d = null; return; }
       const d = await r.json();
       this.activeMesh2d = d.pts || null;
+    },
+
+    // Projected measured pitch markings (alignment reference), under the current
+    // overlay-camera nudge. Set-only; caller rebuilds.
+    async refreshPitch() {
+      if (!this.showPitch) { this.pitch2d = []; return; }
+      const r = await fetch(`/api/pitch/${this.frame}?${this.camQS()}`);
+      if (!r.ok) { this.pitch2d = []; return; }
+      const d = await r.json();
+      this.pitch2d = d.pts || [];
+    },
+
+    // Query string for the manual overlay-camera nudge, appended to every
+    // projection fetch so skeletons, mesh and pitch move together.
+    camQS() {
+      const c = this.cam;
+      return `zoom=${c.zoom}&panx=${c.panx}&pany=${c.pany}`
+        + `&yaw=${c.yaw}&pitch=${c.pitch}&roll=${c.roll}&dolly=${c.dolly}`;
+    },
+
+    // Debounced re-projection: sliders fire continuously while dragging, so
+    // coalesce into one refresh (~60 ms) of pitch + mesh + skeletons.
+    onCamChange() {
+      clearTimeout(this._camT);
+      this._camT = setTimeout(async () => {
+        await this.refreshPitch();
+        await this.refreshMesh2d();
+        await this.refreshSkeletons();   // rebuilds the overlay last
+      }, 60);
+    },
+
+    resetCam() {
+      this.cam = { zoom: 1, panx: 0, pany: 0, yaw: 0, pitch: 0, roll: 0, dolly: 0 };
+      this.onCamChange();
+    },
+
+    async togglePitch() {
+      this.showPitch = !this.showPitch;
+      await this.refreshPitch();
+      this.rebuildOverlay();
     },
 
     async toggleOverlayMode() {
@@ -637,6 +723,13 @@ Alpine.data("poseAnnot", () => ({
       const sks = [...this.allSkeletons].sort((p, q) =>
         (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
       const out = [];
+      // Bottom layer: measured pitch markings (green), the alignment reference.
+      if (this.showPitch && this.pitch2d.length) {
+        for (const p of this.pitch2d) {
+          out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="1.4"`
+            + ` fill="${this.pitchColor}" opacity="0.75"/>`);
+        }
+      }
       // 3D overlay: the active subject's SMPL-X mesh projected onto the frame,
       // depth-shaded (near vertices larger + brighter), drawn UNDER the skeletons
       // so the stick figure stays readable on top of the body surface.

@@ -46,8 +46,9 @@ from pydantic import BaseModel, Field
 
 from . import clips as clips_mod
 from .auth import authenticate, current_user, issue_token
-from .camera import frame_projector, project_points
+from .camera import CameraAdjust, frame_projector, project_points
 from .config import load as load_config
+from pitch3d.core.scene.pitch import pitch_line_world_points
 from .scene_state import (
     BODY_JOINT_NAMES,
     apply_and_persist_edit,
@@ -178,6 +179,17 @@ async def api_joints(
     }
 
 
+def camera_adjust_params(
+    zoom: float = 1.0, panx: float = 0.0, pany: float = 0.0,
+    yaw: float = 0.0, pitch: float = 0.0, roll: float = 0.0, dolly: float = 0.0,
+) -> CameraAdjust:
+    """Parse the overlay camera-nudge query params (all default to identity)."""
+    return CameraAdjust(
+        zoom=zoom, panx=panx, pany=pany,
+        yaw=yaw, pitch=pitch, roll=roll, dolly=dolly,
+    )
+
+
 @app.get("/api/subject/{tid}/joints2d/{frame}")
 async def api_joints2d(
     tid: int, frame: int, user: str = Depends(current_user),
@@ -212,7 +224,9 @@ async def api_joints2d(
 
 @app.get("/api/subject/{tid}/mesh2d/{frame}")
 async def api_mesh2d(
-    tid: int, frame: int, stride: int = 0, user: str = Depends(current_user),
+    tid: int, frame: int, stride: int = 0,
+    adj: CameraAdjust = Depends(camera_adjust_params),
+    user: str = Depends(current_user),
 ) -> dict:
     """SMPL-X mesh vertices projected to pixels (subsampled) for the 3D overlay.
 
@@ -233,7 +247,7 @@ async def api_mesh2d(
         raise HTTPException(500, "scene has no camera track")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    proj = frame_projector(st.scene.camera, frame, video_size=vsize, adjust=adj)
     verts = sub.verts[frame]
     if stride <= 0:
         stride = max(1, verts.shape[0] // 1200)
@@ -261,7 +275,10 @@ async def api_mesh2d(
 
 
 @app.get("/api/frame/{n}/skeletons")
-async def api_frame_skeletons(n: int, user: str = Depends(current_user)) -> dict:
+async def api_frame_skeletons(
+    n: int, adj: CameraAdjust = Depends(camera_adjust_params),
+    user: str = Depends(current_user),
+) -> dict:
     """All subjects' 2D body joints at position ``n`` — one round-trip overlay."""
     del user
     st = get_state()
@@ -271,8 +288,33 @@ async def api_frame_skeletons(n: int, user: str = Depends(current_user)) -> dict
     for tid, sub in sorted(st.subjects.items()):
         if n < 0 or n >= sub.frames.shape[0]:
             continue
-        subjects.append({"track_id": tid, "pts": _joints2d_for(st, sub, n, vsize)})
+        subjects.append({"track_id": tid, "pts": _joints2d_for(st, sub, n, vsize, adj)})
     return {"subjects": subjects, "names": BODY_JOINT_NAMES}
+
+
+@app.get("/api/pitch/{frame}")
+async def api_pitch(
+    frame: int, adj: CameraAdjust = Depends(camera_adjust_params),
+    user: str = Depends(current_user),
+) -> dict:
+    """Measured pitch markings projected to pixels — the overlay's alignment
+    reference. Pose-independent (uses the field geometry + camera only), so it
+    shows where the calibration *thinks* the pitch is; drag the camera controls
+    until it lands on the painted lines and the players follow."""
+    del user
+    st = get_state()
+    if st.scene.camera is None or getattr(st.scene, "field", None) is None:
+        raise HTTPException(500, "scene has no camera/field")
+    if frame < 0 or frame >= st.n_frames:
+        raise HTTPException(404, f"frame {frame} out of range")
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    proj = frame_projector(st.scene.camera, frame, video_size=vsize, adjust=adj)
+    field = st.scene.field
+    world = pitch_line_world_points(field.dimensions, plane_z=field.plane_z, spacing=0.5)
+    uv = project_points(world, proj)
+    pts = [[float(u), float(v)] for u, v in uv if np.isfinite(u) and np.isfinite(v)]
+    return {"pts": pts, "frame_flipped": bool(proj.frame_flipped)}
 
 
 @app.get("/api/frame/{n}/poses3d")
@@ -337,10 +379,10 @@ def _serialize_subject_frame(cache, frame: int, joints2d_pts: list) -> dict:
     }
 
 
-def _joints2d_for(state, cache, frame: int, video_size) -> list:
+def _joints2d_for(state, cache, frame: int, video_size, adjust=None) -> list:
     if state.scene.camera is None:
         return []
-    proj = frame_projector(state.scene.camera, frame, video_size=video_size)
+    proj = frame_projector(state.scene.camera, frame, video_size=video_size, adjust=adjust)
     j2d = project_points(cache.joints[frame], proj)
     out = []
     for uv in j2d:

@@ -123,6 +123,33 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .zoom-hud button:hover { border-color: var(--accent); color: var(--accent); }
 .zoom-hud span { min-width: 44px; text-align: center; }
 
+/* Manual overlay-camera controls (top-left of the frame panel). */
+.cam-panel {
+  position: absolute; left: 10px; top: 10px; z-index: 6;
+  background: rgba(20, 22, 26, 0.92); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 10px; width: 250px;
+  font-size: 0.8rem; color: var(--fg-dim);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+.cam-panel .cam-hd {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg);
+}
+.cam-panel .cam-hd .spacer { flex: 1; }
+.cam-panel .cam-hd button {
+  background: none; border: 1px solid var(--border); color: var(--fg);
+  height: 20px; padding: 0 7px; border-radius: 3px; cursor: pointer; font-family: inherit; font-size: 0.75rem;
+}
+.cam-panel .cam-hd button:hover { border-color: var(--accent); color: var(--accent); }
+.cam-row { display: grid; grid-template-columns: 42px 1fr 52px; align-items: center; gap: 6px; margin: 3px 0; }
+.cam-row label { color: var(--fg-dim); }
+.cam-row input[type=range] { width: 100%; accent-color: var(--accent); }
+.cam-row .cam-num {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+  width: 100%; padding: 1px 3px; border-radius: 3px; font-family: inherit; font-size: 0.78rem;
+}
+.cam-panel .cam-hint { margin-top: 6px; color: var(--fg-dim); font-size: 0.72rem; line-height: 1.3; }
+
 .right { grid-area: right; background: var(--bg-panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .right .hdr { padding: 0.5rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem; }
 .right .hdr .spacer { margin-left: auto; }

@@ -30,9 +30,42 @@ class ProjectedFrame:
     frame_flipped: bool = False
 
 
+@dataclass(frozen=True)
+class CameraAdjust:
+    """Manual overlay-camera nudge (the GUI's camera-controls panel).
+
+    The solved PnLCalib camera is only approximately right (per-player offset +
+    ~3× scale, task #61); these deltas let the user hand-align the projected
+    overlay to the video without touching the stored calibration. All applied on
+    top of the auto-solved (and 180-flip-corrected) projection:
+
+      zoom  — focal multiplier about the principal point (>1 = overlay bigger)
+      panx/pany — shift the principal point in pixels (translate the overlay)
+      yaw/pitch/roll — degrees, rotate the camera about its down / right / view axes
+      dolly — metres along the view axis (+ = push the scene farther / smaller)
+    """
+
+    zoom: float = 1.0
+    panx: float = 0.0
+    pany: float = 0.0
+    yaw: float = 0.0
+    pitch: float = 0.0
+    roll: float = 0.0
+    dolly: float = 0.0
+
+    @property
+    def is_identity(self) -> bool:
+        return (
+            self.zoom == 1.0 and self.panx == 0.0 and self.pany == 0.0
+            and self.yaw == 0.0 and self.pitch == 0.0 and self.roll == 0.0
+            and self.dolly == 0.0
+        )
+
+
 def frame_projector(
     camera_track, frame_index: int,
     video_size: tuple[int, int] | None = None,
+    adjust: "CameraAdjust | None" = None,
 ) -> ProjectedFrame:
     """Return the per-frame projection package for a given clip frame.
 
@@ -74,6 +107,22 @@ def frame_projector(
         D = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=float)
         R = D @ R
         t = D @ t
+    if adjust is not None and not adjust.is_identity:
+        # Manual overlay-camera nudge, applied in the (flip-corrected) camera
+        # frame: intrinsics for size/position, an extrinsic rotation about the
+        # camera centre for the angles, and a view-axis translation for dolly.
+        fx *= adjust.zoom
+        fy *= adjust.zoom
+        cx += adjust.panx
+        cy += adjust.pany
+        if adjust.yaw or adjust.pitch or adjust.roll:
+            Rc = Rotation.from_euler(
+                "xyz", [adjust.pitch, adjust.yaw, adjust.roll], degrees=True,
+            ).as_matrix()
+            R = Rc @ R
+            t = Rc @ t
+        if adjust.dolly:
+            t = t + np.array([0.0, 0.0, adjust.dolly])
     return ProjectedFrame(
         fx=fx, fy=fy, cx=cx, cy=cy,
         R=R, t=t, frame_index=idx, frame_flipped=flipped,
