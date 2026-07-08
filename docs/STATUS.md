@@ -365,6 +365,37 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-08 (debug suite + A/B root-cause)** — **Built an objective pose-overlay debug suite
+  (`scripts/debug/`), root-caused BOTH variants, fixed A's inversion, demonstrated B's fix.** The eye
+  can't judge a 22 px skeleton, so the overlay work was flying blind; these tools replace eyeballing
+  with gravity/geometry ground truth. Tools (all take `--scene/--video`, PYTHONPATH=`.:src`):
+  - `pose_probe.py` — per-track transform-chain dump + metrics: `transl_ok` (pitch-plausible root),
+    `in_front`, `in_frame`, `upright` (foot pixel-v > head — gravity truth), `scale_px`.
+  - `camera_plane_check.py` — projects the STANDARD pitch markings (known geometry, pose-independent)
+    to separate CAMERA bugs from POSE bugs; writes `camplane_<scene>_f<f>.png` + anchor pixels.
+  - `flip_sweep.py` — sweeps the 4 camera-frame flips {I, X, Y, XY}, scores upright%/inframe%/pitch;
+    `--render=-1,-1,1` draws head/pelvis/feet markers to see orientation.
+  - `ab_transl_diff.py` — golden test: per-track world root must match A↔B (shared upstream).
+  - `rebuild_B_placement.py` — re-places B via a reference calibration (the B fix demo).
+  **FINDINGS.** *Variant A (SMPLest-X):* root `transl` is CORRECT (pitch-plausible, x∈[-40,-17],
+  z≈0.9), players in-frame — but **every body was vertically INVERTED** (`upright 0/18`), invisible at
+  ~22 px so the 2026-07-07 eye-check missed it. Root: `poseannot/camera.py` applied an X-ONLY mirror
+  `diag(-1,1,1)` for the camera-180 case; the real correction is a full optical-axis roll
+  `diag(-1,-1,1)` = (u,v)->(W-u,H-v). **FIXED** → `upright 18/18` in the production projector, verified
+  visually (heads up) + the projected pitch far-line moves off the crowd onto the boards.
+  *Variant B (SAM 3D Body):* scene_B's root `transl` x,y are **raw FOOT PIXELS** (∈[0,W]×[0,H], only z
+  in metres) — the placement stage never ran image→world — AND scene_B's own field homography is
+  IDENTITY and its camera projects the pitch behind (0/1444 in front). So B's whole world scaffold in
+  that artifact is broken, not the articulation. Since A and B are the SAME clip/frame, A's real
+  `FieldCalibration` is the true one for B: running B's foot-pixels through A's `image_to_world` lands
+  5–6/6 players on the pitch, upright (`rebuild_B_placement.py`, `out/bakeoff/overlay_Bfixed_f*.png`).
+  Durable B fix = apply image→world in the pipeline placement stage + re-run (pod).
+  **COMMON RESIDUAL / NEXT BAR (task #61):** with the flip fixed, A AND B project into the right pitch
+  region and upright, but each skeleton is offset per-player and ~3× too small, and the pitch template
+  is shifted — this is **PnLCalib camera accuracy**, shared by both, NOT a per-variant pose bug. That
+  is the real "acceptable alignment" bar and needs a better/bundle-adjusted camera (pod). Overlay 2D/3D
+  toggle (task #54, `poseannot/{app.py,static/*}`) also landed this session. `out/bakeoff` gitignored.
+
 - **2026-07-08 (later)** — **POSE BAKE-OFF A/B — variant B NOW RUNS END-TO-END; both scenes +
   overlays delivered for the GUI.** User supplied the gated weights (`facebook/sam-3d-body-dinov3`:
   `model.ckpt` 2.1 GB + `assets/mhr_model.pt` 696 MB, staged to the pod network disk), so the HF

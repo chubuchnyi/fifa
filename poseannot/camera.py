@@ -59,20 +59,19 @@ def frame_projector(
     # Auto-detect the camera-frame mismatch (memory project_camera_180_roll). The
     # solved CameraTrack is self-consistent only on the frame turned upside-down,
     # so a no-roll projection lands every body HEAD-DOWN on the as-decoded frame.
-    # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0). Empirically
-    # (user visual check, 2026-07-07) the overlay that lands on the real players is
-    # a camera-X mirror: since cx=W/2 exactly, D=diag(-1,1,1) maps (u,v)→(W-u,v),
-    # i.e. a pure left-right flip, with the displayed video left upright (we never
-    # rotate the frame the user sees). The mirror is applied in the ``if flipped``
-    # block below.
+    # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0).
     flipped = bool(-R[1, 2] < 0)
     if flipped:
-        # Empirical (user visual check, 2026-07-07): the overlay that lands on the
-        # real players is a camera-X mirror → (u, v) -> (W - u, v). This leaves the
-        # vertical axis untouched, so perspective foreshortening is preserved
-        # (points higher/farther stay clustered, lower/nearer spread wider). A
-        # camera-Y / point-180 mirror instead inverts that perspective.
-        D = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+        # The correction is a full 180° roll about the optical axis:
+        # D=diag(-1,-1,1) maps (u,v) -> (W-u, H-v) (cx=W/2, cy=H/2 exactly).
+        # A prior X-only mirror diag(-1,1,1) was validated by eye on 2026-07-07,
+        # but the objective harness (scripts/debug/pose_probe.py, 2026-07-08) then
+        # showed it leaves EVERY body vertically inverted (foot pixel-v < head,
+        # upright 0/18) — invisible at ~22 px, which is why the eye missed it.
+        # Negating cam-y too restores upright (18/18, scripts/debug/flip_sweep.py)
+        # and moves the projected pitch far-line off the crowd onto the boards
+        # (pitch-only visual check). We never rotate the frame the user sees.
+        D = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=float)
         R = D @ R
         t = D @ t
     return ProjectedFrame(
