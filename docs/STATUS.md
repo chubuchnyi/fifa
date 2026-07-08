@@ -365,6 +365,47 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-08 (later)** — **POSE BAKE-OFF A/B — variant B NOW RUNS END-TO-END; both scenes +
+  overlays delivered for the GUI.** User supplied the gated weights (`facebook/sam-3d-body-dinov3`:
+  `model.ckpt` 2.1 GB + `assets/mhr_model.pt` 696 MB, staged to the pod network disk), so the HF
+  block from the earlier entry is cleared. Restarted the pod and drove variant B to a real
+  end-to-end run. **Four blockers found + fixed in the MHR→SMPL-X path** (all in
+  `src/pitch3d/adapters/models/sam3dbody_backend.py` unless noted):
+  1. **NATIVE SEGFAULT (the hard one).** `pymomentum.geometry.Character.load_fbx` (inside
+     `MHR.from_files`) segfaulted on the pod's torch **2.8.0+cu128 / RTX PRO 4500 Blackwell (sm_120)**.
+     Isolation proved it is an **ABI mismatch, not code**: the identical `load_fbx(fbx, model, load_blendshapes=True)`
+     call *works* at module top-level but *crashes* the moment it runs inside `from_files` or a
+     thread (classic heap/ABI corruption; ruled out stack size, import order, args, path — all
+     identical). `pymomentum-gpu` wheels **≥0.1.97 segfault**; **`==0.1.90.post0` loads cleanly**
+     (newest that matches the torch-2.8 ABI). Also requires `LD_LIBRARY_PATH=<torch>/lib` (the
+     solver ext links `libtorch.so` at import). Pinned + documented in the adapter docstring and the
+     new **`scripts/run_sam3dbody.sh`** (re-asserts the pin, sets the LD path, forces `POSE_BACKEND`).
+  2. **SMPL-X model path.** Adapter used `smplx.SMPLX(model_path=…)` which wants the `smplx/`
+     subdir directly; switched to **`smplx.create(root, model_type="smplx", …)`** (appends the subdir,
+     exactly like the SMPLest-X backend) so the shared `human_model_files` root resolves
+     `smplx/SMPLX_NEUTRAL.npz`.
+  3. **Converter cwd-relative assets.** Meta's `Conversion` reads `./assets/*.npz` mappings/masks at
+     **both** construction *and* per-frame conversion. Added `_conv_cwd()` (pins cwd to
+     `tools/mhr_smpl_conversion`) around both sites.
+  4. **`utils` name-collision (non-deterministic).** The converter uses bare `from utils import …`;
+     another cached top-level `utils` won the import lottery (6-frame smoke passed, 48-frame run
+     failed with `cannot import name _concat_mhr_lbs_model_parameters from 'utils'`). Added
+     `_import_conversion()` — prepends the converter dir to `sys.path` and evicts stale generic-named
+     modules so the import re-resolves deterministically.
+  * **B RESULT:** `FRAMES=48` real E2E (same RF-DETR→ByteTrack→PnLCalib upstream as A, only
+    `--pose-backend` swapped) → `scene.json` 1.3 MB, **8 subjects**, all **48/48 frames posed**, 320 s.
+    Pulled to `out/bakeoff/scene_B.json`, installed GUI clip **`poseannot/clips/B_sam3dbody/`**
+    (scene.json + video symlink, mirrors A), overlays `out/bakeoff/overlay_B_f{0,16,32}.png` via the
+    same `overlay_from_scene.py`.
+  * **A-vs-B (my headless eyeball on f0; USER is ground truth in the GUI per
+    `feedback_overlay_user_is_ground_truth`):** **A (SMPLest-X)** draws ~18 subjects — taller, more
+    upright skeletons, wider coverage incl. the far touchline. **B (SAM 3D Body)** draws 6 (8 total)
+    — fewer subjects, more compact skeletons sitting lower on the players. Both project sanely with
+    `flip=True` (camera-180 auto-detect). Real judgement = load both clips in poseannot and compare
+    on identical pixels.
+  * **Cost:** stopping the GPU pod now that both deliverables are pulled (`feedback_pod_cost`).
+  * **STILL OWED (unchanged):** camera→world rotation lift for `global_orient` (shared A/B backlog).
+
 - **2026-07-08** — **POSE BAKE-OFF A/B — variant A DONE & verified REAL; variant B built but
   HF-gate-BLOCKED.** User directive: «сделай оба варианта A и B, подними под и сравни результаты»
   + «нужны реальные фреймы с оверлеями для SMPLest-X и SAM 3D Body … и scene.json для обоих чтобы

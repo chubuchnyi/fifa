@@ -22,6 +22,13 @@ Everything heavy (torch, the sam_3d_body package, the MHR package + converter, t
 checkpoint) imports/loads **lazily** on first ``estimate_bodies`` — importing this module is
 cheap and torch-free, matching the other real adapters.
 
+Native ABI pin (verified 2026-07-08 on RTX PRO 4500 Blackwell / torch 2.8.0+cu128):
+the MHR rig load (``pymomentum.geometry.Character.load_fbx`` inside ``MHR.from_files``)
+**segfaults** with ``pymomentum-gpu`` wheels >=0.1.97 — their bundled libtorch ABI does
+not match torch 2.8. Pin ``pymomentum-gpu==0.1.90.post0`` (the newest that loads cleanly).
+The solver extension also needs ``LD_LIBRARY_PATH`` to include ``<torch>/lib`` (it links
+``libtorch.so`` at import). Both are wired in ``scripts/run_sam3dbody.sh``.
+
 Wire it in at the composition root::
 
     --pose gvhmr --pose-backend pitch3d.adapters.models.sam3dbody_backend:make --device cuda
@@ -46,6 +53,7 @@ articulation, not in how the root is placed.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from collections import defaultdict
@@ -185,14 +193,15 @@ class SAM3DBodyBackend:
         raw ``process_one_image`` dicts directly (it reads ``mhr_model_params``/``pred_vertices``/
         ``pred_cam_t`` and handles the SAM3D↔MHR camera flip internally).
         """
-        res = self._converter.convert_sam3d_output_to_smpl(
-            sam3d_outputs=sam3d_outputs,
-            return_smpl_meshes=False,
-            return_smpl_parameters=True,
-            return_smpl_vertices=False,
-            return_fitting_errors=False,
-            batch_size=self.convert_batch,
-        )
+        with self._conv_cwd():
+            res = self._converter.convert_sam3d_output_to_smpl(
+                sam3d_outputs=sam3d_outputs,
+                return_smpl_meshes=False,
+                return_smpl_parameters=True,
+                return_smpl_vertices=False,
+                return_fitting_errors=False,
+                batch_size=self.convert_batch,
+            )
         raw = res.result_parameters
 
         def _np(x):
@@ -276,17 +285,63 @@ class SAM3DBodyBackend:
         )
         self._converter = self._build_converter(device)
 
+    def _import_conversion(self):  # pragma: no cover - heavy path
+        """Import Meta's ``Conversion``, forcing its bare ``from utils import ...`` (and the
+        ``pytorch_fitting``/``conversion`` chain) to resolve against the converter dir.
+
+        Those modules use un-namespaced top-level names, so whichever ``utils`` another
+        dependency imported first wins in ``sys.modules`` — a non-deterministic collision
+        that fails the fit with ``cannot import name ... from 'utils'``. Pin the converter
+        dir to the front of ``sys.path`` and evict any cached generic-named module that is
+        not the converter's own, so the import re-resolves correctly.
+        """
+        conv_dir = os.path.abspath(
+            os.path.join(self.mhr_repo_dir, "tools", "mhr_smpl_conversion")
+        )
+        if not sys.path or sys.path[0] != conv_dir:
+            sys.path.insert(0, conv_dir)
+        for name in ("conversion", "pytorch_fitting", "utils", "constants",
+                     "rotation_utils", "smpl_fitting", "mhr_fitting"):
+            mod = sys.modules.get(name)
+            if mod is None:
+                continue
+            f = getattr(mod, "__file__", None)
+            if not f or not os.path.abspath(f).startswith(conv_dir):
+                del sys.modules[name]
+        from conversion import Conversion
+        return Conversion
+
     def _build_converter(self, device):  # pragma: no cover - heavy path
         import smplx
-        from conversion import Conversion
+
         from mhr.mhr import MHR
 
+        Conversion = self._import_conversion()
         mhr_model = MHR.from_files(lod=1, device=device)
-        smplx_model = smplx.SMPLX(
-            model_path=self.smplx_model_dir, gender="neutral",
+        # ``smplx.create`` appends the ``smplx/`` model-type subdir under the given
+        # root (matching SMPLest-X's own loader), so ``smplx_model_dir`` points at
+        # ``human_model_files`` and the layer resolves ``smplx/SMPLX_NEUTRAL.npz``.
+        smplx_model = smplx.create(
+            self.smplx_model_dir, model_type="smplx", gender="neutral",
             use_pca=False, flat_hand_mean=True,
         ).to(device)
-        return Conversion(mhr_model=mhr_model, smpl_model=smplx_model, method="pytorch")
+        # ``Conversion`` loads mapping/mask assets via cwd-relative ``./assets/...``
+        # paths at BOTH construction and conversion time, so pin cwd for each.
+        with self._conv_cwd():
+            return Conversion(
+                mhr_model=mhr_model, smpl_model=smplx_model, method="pytorch"
+            )
+
+    @contextlib.contextmanager
+    def _conv_cwd(self):  # pragma: no cover - heavy path
+        """Pin cwd to the MHR conversion-tool dir so its ``./assets/*`` reads resolve."""
+        conv_dir = os.path.join(self.mhr_repo_dir, "tools", "mhr_smpl_conversion")
+        prev_cwd = os.getcwd()
+        try:
+            os.chdir(conv_dir)
+            yield
+        finally:
+            os.chdir(prev_cwd)
 
 
 def make() -> SAM3DBodyBackend:
