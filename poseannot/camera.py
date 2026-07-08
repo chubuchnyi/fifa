@@ -61,9 +61,10 @@ def frame_projector(
     # so a no-roll projection lands every body HEAD-DOWN on the as-decoded frame.
     # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0). Empirically
     # (user visual check, 2026-07-07) the overlay that lands on the real players is
-    # a camera-Y mirror: since cy=H/2 exactly, D=diag(1,-1,1) maps (u,v)→(u,H-v),
-    # i.e. head-up AND left-right correct, with the displayed video left upright
-    # (we never rotate the frame the user sees).
+    # a camera-X mirror: since cx=W/2 exactly, D=diag(-1,1,1) maps (u,v)→(W-u,v),
+    # i.e. a pure left-right flip, with the displayed video left upright (we never
+    # rotate the frame the user sees). The mirror is applied in the ``if flipped``
+    # block below.
     flipped = bool(-R[1, 2] < 0)
     if flipped:
         # Empirical (user visual check, 2026-07-07): the overlay that lands on the
