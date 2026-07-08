@@ -48,6 +48,10 @@
     <button @click="undoEdit()" x-show="selectedJoint !== null"
             title="undo edit (Ctrl+Z)">undo</button>
     <button @click="deselectJoint()" x-show="selectedJoint !== null">deselect</button>
+    <span class="sep">|</span>
+    <button @click="toggleOverlayMode()" :class="{ active: overlayMode === '3d' }"
+            :title="overlayMode === '3d' ? 'overlay: projected 3D mesh — press M for 2D skeleton' : 'overlay: 2D skeleton — press M for 3D mesh'"
+            x-text="overlayMode === '3d' ? 'overlay: 3D' : 'overlay: 2D'"></button>
     <span class="user">
       <span x-text="user"></span> · <a href="/logout">logout</a>
     </span>
@@ -184,7 +188,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-07 · diag1";
+const BUILD_ID = "2026-07-08 · overlay2d3d";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -448,6 +452,9 @@ Alpine.data("poseAnnot", () => ({
     srcW: 1920, srcH: 1080,
     allSkeletons: [],         // [{track_id, pts:[[x,y]|null,...]}, ...]
     overlaySvgStr: "",        // rendered SVG markup (x-html into the <svg>)
+    overlayMode: "2d",        // 2D flat skeleton vs 3D projected-mesh overlay
+    activeMesh2d: null,       // [[u,v,depth]|null,...] projected mesh of active subj
+    meshColor: "#6bb5ff",     // matches the Three.js mesh colour (0x6bb5ff)
     showAll: false,           // 3D: show all players vs active only
     bones: BONES,
     accentBright: "#a8d4ff",
@@ -481,9 +488,10 @@ Alpine.data("poseAnnot", () => ({
       return `s${v.scale.toFixed(2)} t(${Math.round(v.tx)},${Math.round(v.ty)})`;
     },
     dOverlay() {
-      const n = (this.overlaySvgStr.match(/<(line|circle)/g) || []).length;
+      const n = (this.overlaySvgStr.match(/<(line|circle|rect)/g) || []).length;
+      const mp = this.activeMesh2d ? this.activeMesh2d.filter(Boolean).length : 0;
       const vb = this.$refs.overlaySvg ? this.$refs.overlaySvg.getAttribute("viewBox") : "?";
-      return `${n} el · viewBox=${vb || "NULL"}`;
+      return `${this.overlayMode} · ${n} el · mesh${mp} · vb=${vb || "NULL"}`;
     },
 
     async init() {
@@ -572,6 +580,7 @@ Alpine.data("poseAnnot", () => ({
         if (e.key === "0") { this.resetView(); return; }
         if (e.key === "d" || e.key === "D") { this.diag.show = !this.diag.show; return; }
         if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
+        if (e.key === "m" || e.key === "M") { this.toggleOverlayMode(); return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
       });
@@ -582,6 +591,7 @@ Alpine.data("poseAnnot", () => ({
       this.frameInput = n + 1;
       this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
       this.selectedJoint = null;
+      await this.refreshMesh2d();
       await this.refreshSkeletons();
       await this.refreshThree();
     },
@@ -601,12 +611,45 @@ Alpine.data("poseAnnot", () => ({
       this.rebuildOverlay();
     },
 
+    // Projected SMPL-X mesh of the active subject (3D overlay mode only). Sets
+    // activeMesh2d but does NOT rebuild — callers rebuild once mesh + skeletons
+    // are both current, avoiding a flash of stale mesh at the previous frame.
+    async refreshMesh2d() {
+      if (this.overlayMode !== "3d" || this.selectedTrackId === null) {
+        this.activeMesh2d = null;
+        return;
+      }
+      const r = await fetch(`/api/subject/${this.selectedTrackId}/mesh2d/${this.frame}`);
+      if (!r.ok) { this.activeMesh2d = null; return; }
+      const d = await r.json();
+      this.activeMesh2d = d.pts || null;
+    },
+
+    async toggleOverlayMode() {
+      this.overlayMode = this.overlayMode === "3d" ? "2d" : "3d";
+      await this.refreshMesh2d();
+      this.rebuildOverlay();
+    },
+
     rebuildOverlay() {
       // Build one SVG markup string. Active subject painted last (on top) and
       // wrapped in a dashed bbox marker so the edited player is unmistakable.
       const sks = [...this.allSkeletons].sort((p, q) =>
         (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
       const out = [];
+      // 3D overlay: the active subject's SMPL-X mesh projected onto the frame,
+      // depth-shaded (near vertices larger + brighter), drawn UNDER the skeletons
+      // so the stick figure stays readable on top of the body surface.
+      if (this.overlayMode === "3d" && this.activeMesh2d) {
+        for (const p of this.activeMesh2d) {
+          if (!p) continue;
+          const d = p[2];                               // 0 (near) … 1 (far)
+          const r = (2.6 - 1.6 * d).toFixed(2);
+          const op = (0.55 - 0.40 * d).toFixed(3);
+          out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="${r}"`
+            + ` fill="${this.meshColor}" opacity="${op}"/>`);
+        }
+      }
       for (const sk of sks) {
         const active = sk.track_id === this.selectedTrackId;
         const col = active ? this.accentBright : trackColorFor(sk.track_id);
@@ -685,6 +728,7 @@ Alpine.data("poseAnnot", () => ({
     async selectTrack(tid) {
       this.selectedTrackId = tid;
       this.selectedJoint = null;
+      await this.refreshMesh2d();
       this.rebuildOverlay();
       await this.refreshThree();
     },
@@ -742,6 +786,7 @@ Alpine.data("poseAnnot", () => ({
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
       updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshMesh2d();
       await this.refreshSkeletons();
       await this.refreshEditedFrames();
     },
@@ -766,6 +811,7 @@ Alpine.data("poseAnnot", () => ({
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
       updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshMesh2d();
       await this.refreshSkeletons();
       await this.refreshEditedFrames();
     },

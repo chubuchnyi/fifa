@@ -10,6 +10,7 @@ Serves:
     /api/subject/{tid}/mesh/{frame}      → SMPL-X vertices + faces (JSON)
     /api/subject/{tid}/joints/{frame}    → 22 body joints (JSON)
     /api/subject/{tid}/joints2d/{frame}  → same 22 joints projected to pixels
+    /api/subject/{tid}/mesh2d/{frame}    → subsampled mesh verts projected to pixels (+depth)
     /api/camera/{frame}                  → per-frame intrinsics + extrinsics
     /static/*                            → assets
 
@@ -205,6 +206,56 @@ async def api_joints2d(
     return {
         "pts": pts,
         "names": BODY_JOINT_NAMES,
+        "frame_flipped": bool(proj.frame_flipped),
+    }
+
+
+@app.get("/api/subject/{tid}/mesh2d/{frame}")
+async def api_mesh2d(
+    tid: int, frame: int, stride: int = 0, user: str = Depends(current_user),
+) -> dict:
+    """SMPL-X mesh vertices projected to pixels (subsampled) for the 3D overlay.
+
+    Returns ``pts = [[u, v, d] | None, ...]`` where ``d`` is the vertex's
+    camera-space depth normalised to ``[0, 1]`` per subject (0 = nearest the
+    camera) so the client can depth-shade the projected surface. ``stride``
+    keeps every Nth vertex; 0 = auto (~1200 points). Vertices behind the camera
+    serialize as ``None``.
+    """
+    del user
+    st = get_state()
+    if tid not in st.subjects:
+        raise HTTPException(404, f"no subject {tid}")
+    sub = st.subjects[tid]
+    if frame < 0 or frame >= sub.frames.shape[0]:
+        raise HTTPException(404, f"frame {frame} out of range for subject {tid}")
+    if st.scene.camera is None:
+        raise HTTPException(500, "scene has no camera track")
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    verts = sub.verts[frame]
+    if stride <= 0:
+        stride = max(1, verts.shape[0] // 1200)
+    vsub = verts[::stride]
+    uv = project_points(vsub, proj)
+    depth = (vsub @ proj.R.T + proj.t)[:, 2]   # camera-space z (same R,t as project)
+    ok = np.isfinite(uv).all(axis=1) & np.isfinite(depth) & (depth > 1e-6)
+    if ok.any():
+        dmin, dmax = float(depth[ok].min()), float(depth[ok].max())
+    else:
+        dmin, dmax = 0.0, 1.0
+    span = (dmax - dmin) or 1.0
+    pts = []
+    for (u, v), dz, good in zip(uv, depth, ok):
+        if not good:
+            pts.append(None)
+        else:
+            pts.append([float(u), float(v), float((dz - dmin) / span)])
+    return {
+        "track_id": tid,
+        "pts": pts,
+        "stride": int(stride),
         "frame_flipped": bool(proj.frame_flipped),
     }
 

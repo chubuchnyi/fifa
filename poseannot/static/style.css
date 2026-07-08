@@ -60,6 +60,7 @@ body.login { display: flex; align-items: center; justify-content: center; }
   padding: 0.3rem 0.6rem; border-radius: 3px; cursor: pointer; font-family: inherit;
 }
 .toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.toolbar button.active { border-color: var(--accent); color: var(--accent); background: rgba(107, 181, 255, 0.14); }
 .toolbar .frame-input {
   background: var(--bg); border: 1px solid var(--border); color: var(--fg);
   width: 60px; padding: 0.25rem 0.4rem; border-radius: 3px;
