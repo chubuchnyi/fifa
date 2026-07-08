@@ -56,19 +56,24 @@ def frame_projector(
             sx = vw / cal_w
             sy = vh / cal_h
             fx *= sx; fy *= sy; cx *= sx; cy *= sy
-    # Auto-detect the 180° camera roll (memory project_camera_180_roll). The
+    # Auto-detect the camera-frame mismatch (memory project_camera_180_roll). The
     # solved CameraTrack is self-consistent only on the frame turned upside-down,
     # so a no-roll projection lands every body HEAD-DOWN on the as-decoded frame.
-    # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0) and compose a
-    # camera-Z roll: since cx=W/2, cy=H/2 exactly, that Rz is precisely the 180°
-    # image reflection (u,v)→(W-u,H-v), so the overlay lands head-up while the
-    # displayed video stays upright (we never rotate the frame the user sees).
+    # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0). Empirically
+    # (user visual check, 2026-07-07) the overlay that lands on the real players is
+    # a camera-Y mirror: since cy=H/2 exactly, D=diag(1,-1,1) maps (u,v)→(u,H-v),
+    # i.e. head-up AND left-right correct, with the displayed video left upright
+    # (we never rotate the frame the user sees).
     flipped = bool(-R[1, 2] < 0)
     if flipped:
-        # compose a 180° roll around camera Z-axis
-        Rz = np.array([[-1, 0, 0], [0, -1, 0], [0, 0, 1]], dtype=float)
-        R = Rz @ R
-        t = Rz @ t
+        # Empirical (user visual check, 2026-07-07): the overlay that lands on the
+        # real players is a camera-X mirror → (u, v) -> (W - u, v). This leaves the
+        # vertical axis untouched, so perspective foreshortening is preserved
+        # (points higher/farther stay clustered, lower/nearer spread wider). A
+        # camera-Y / point-180 mirror instead inverts that perspective.
+        D = np.array([[-1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+        R = D @ R
+        t = D @ t
     return ProjectedFrame(
         fx=fx, fy=fy, cx=cx, cy=cy,
         R=R, t=t, frame_index=idx, frame_flipped=flipped,
