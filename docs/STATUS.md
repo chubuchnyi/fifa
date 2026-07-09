@@ -365,35 +365,51 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
-- **2026-07-09 (#61 RESOLVED — camera rebuilt from the trusted homography; validated E2E)** — **The stored
-  PnLCalib 3D extrinsics were simply BROKEN, not merely mis-scaled.** `scripts/debug/calib_probe.py` (3-way
-  pitch overlay on frame 0) shows the stored camera projects the pitch up into the CROWD while the per-frame
-  homography `H` (image→world plane, `field.calibration.homographies`) — a SEPARATE solve that already grounds
-  the feet — lands the pitch exactly on the painted lines. So `H` is the trustworthy calibration and the fix
-  is to *rebuild the camera from it*. For a ground point (Z=0) `[u v 1]ᵀ ~ K[r1 r2 t][x y 1]ᵀ = H⁻¹[x y 1]ᵀ`,
-  so given trusted `H⁻¹` and a focal `f` we recover a consistent `(R,t)` by decomposing `K⁻¹H⁻¹` (normalise on
-  col0, `r3=r1×r2`, SVD-orthonormalise, `det>0`, `t[2]>0`). **`scripts/recalibrate_camera.py`** does this and
-  re-bakes `camera` into A, B, and the default scene (idempotent — always re-decomposes from the stored
-  homography; auto-default `f=3500`, `--focal` override per project rule). Ground projection is focal-INVARIANT
-  under re-decomposition (the camera slides back as `f` rises: `t[z]` median 21→42→63→83 m for f=1158→4600, all
-  three scenes converge on **t[z]≈63.8 m** confirming one real camera); focal sets only the 3D-body height
-  scale. Focal picked objectively (`scripts/debug/focal_size_probe.py`): 1.8 m sticks at the 18 grounded feet
-  give median 52/70/79 px at f=1158/2300/3500; measured standing players (#7≈86 px) match **f≈3500**, chosen as
-  the default (user = ground truth on scale, camera-panel fine-tunes the residual). **Flip conflict fixed:** the
-  re-decomposed `R` has `R[1,2]=+0.98` on every frame, so it trips `poseannot.camera`'s legacy `-R[1,2]<0`
-  180°-roll gate as a FALSE POSITIVE — added a `CameraTrack.raw_frame_aligned` marker (default False, backward-
-  compatible decode) that the projector checks to SKIP the roll for rebuilt cameras. **Corrects the entry
-  below:** the manual camera-panel `zoom` does NOT equal a focal change — it multiplies `fx` about the
-  principal point with `R,t` FIXED, so ground points slide off the painted lines; a true focal change requires
-  re-decomposition (camera moves back, ground stays put, bodies grow). Most of the "3× too small" was the
-  broken extrinsics (stored cam gave 22 px sticks vs 52 px even at f=1158), the remainder is focal. **Validated
-  E2E live** (Chrome on :8899): on clip B (8 tracks) and the default clip (23 tracks) every skeleton renders
-  player-sized ON its real player across the full pitch depth, and the projected pitch overlay's green dots
-  trace the center-circle arc on the grass (not the crowd). A few far players (t13/t18) still sit slightly high
-  from foot-pixel depth over-extrapolation (the #59 residual), fine-tunable per-joint. Touches:
-  `src/pitch3d/core/scene/camera.py` (+`raw_frame_aligned`), `poseannot/camera.py` (flip gate),
-  `scripts/recalibrate_camera.py` + `scripts/debug/{calib_probe,focal_size_probe}.py` (new). Durable-pipeline
-  follow-up: the pod calib path should emit `raw_frame_aligned` cameras (rebuilt-from-homography) going forward.
+- **2026-07-09 (GUI unbroken: dead clip-switcher root-caused + fixed; "dead controls" = stale page)** — User
+  reported (on a long-open tab) that switching source/A/B did nothing with an EMPTY Network log, the 2D/3D
+  overlay toggle did nothing, and the overlay was head-down. Three distinct causes, all resolved:
+  (1) **Clip switcher was genuinely broken** — `switchClip()` guarded on `id === activeClipId`, but the
+  `<select>` carries BOTH `x-model="activeClipId"` AND `@change="switchClip($event.target.value)"`; Alpine's
+  x-model syncs `activeClipId` to the newly-picked value BEFORE the `@change` handler runs, so the guard was
+  ALWAYS true and every switch silently returned with no fetch (exactly the "nothing happens, Network empty"
+  report). Fix: drop the same-clip guard (`if (!id) return;`) — a native `<select>` only fires `change` on a
+  real value change, so the guard was redundant anyway (`poseannot/static/index.html`). Verified E2E on :8899:
+  default(23 subj/60f) → B_sam3dbody(8/48) → default all reload the correct distinct scene; the POST shows as
+  "503" in the Chrome devtools capture but the server logs 200 and the data loads — the immediate
+  `window.location.reload()` aborts the page before the extension finalises the record (cosmetic only).
+  (2) **"Dead 2D/3D toggle + dead controls" = STALE PAGE** (the user's own guess "код не подгрузился" was
+  right): a hard reload restores everything — all `/api/*` return 200 and the toggle flips the diag
+  `mesh0 ↔ mesh1310`. Nothing to fix in code; just needed a reload against the running server.
+  (3) **Head-down overlay** — fixed by reverting the #61 f=3500 recalibration (next entry). Post-revert, the
+  real `poseannot.camera` projector renders bodies UPRIGHT + in-frame on all three clips (default 23/23, A 18/18,
+  B 5/5). Also killed the duplicate servers (user had 8000 AND 8899 up); one clean uvicorn on :8899.
+
+- **2026-07-09 (#61 f=3500 homography re-decomposition — TRIED, REVERTED as a regression; #61 STILL OPEN)** —
+  The idea was to rebuild the broadcast camera from the trusted homography `H` (which grounds the feet on the
+  painted lines) by decomposing `K⁻¹H⁻¹ = [r1 r2 t]` at a guessed focal `f=3500`, `r3=r1×r2`, SVD-orthonormalise,
+  sign via `t[2]>0`, marking the result `raw_frame_aligned=True` to skip the legacy 180°-roll gate. **This
+  shipped as 9dec2e0 and was WRONG — the overlay rendered every body HEAD-DOWN and horizontally displaced (user
+  caught it; my zoomed-screenshot "validation" and `focal_size_probe`'s `abs(head−foot)` metric both HID the
+  vertical inversion).** Objective re-diagnosis (`scripts/debug/redecomp_branch.py` + a focal sweep):
+  (a) bodies are UPRIGHT in world (headZ 1.7 > footZ 0.2, plane_z=0) yet project head-down;
+  (b) the rebuilt camera reproduces `H` only at the pitch CENTER and diverges with distance — **~277 px ground
+  error at 40 m** — so it is NOT the homography turned into a pinhole (a single plane cannot fix the focal;
+  degeneracy already noted below, and the SVD "snap" then distorts r1,r2);
+  (c) it puts the camera BELOW the pitch (`C_z<0`) at EVERY focal tried (−7 m @ f=300 … −18 m @ f=3500);
+  (d) NO rigid fix works — identity gives pitch-correct/bodies-head-down, a 180°-roll gives bodies-upright/
+  pitch-INVERTED (they demand OPPOSITE corrections ⇒ the camera is geometrically wrong, not just frame-rolled),
+  and all 4 `cv2.decomposeHomographyMat` branches give 0/23 upright.
+  **Reverted 2026-07-09:** restored the three scene artifacts to the original PnLCalib camera (`fx=772`,
+  `rfa=False`) — default+A from their `.orig` backups, B given A's original camera (B's own `.orig` cam was
+  garbage: `tz≈−391`). Re-validated via the real `poseannot.camera` path: default 23/23, A 18/18, B 5/5 bodies
+  **upright + in-frame** (the flip gate fires as designed). The original camera renders upright but small
+  (pitch reads high / players ~3× too small) — that is the REAL, honest #61 bar, still unsolved. Kept the code
+  as harmless scaffolding (`CameraTrack.raw_frame_aligned` field, projector skip, the debug scripts) — with no
+  scene setting the flag True it behaves exactly as before; `scripts/recalibrate_camera.py` is annotated
+  SUPERSEDED/FLAWED so its output is not trusted. **Correct next approach for #61:** get a real focal — a
+  Zhang/vanishing-point solve on a frame with two visible pitch directions (STATUS estimate ≈2110), or a pod
+  PnLCalib re-run that persists keypoints + vertical references — NOT a single-plane re-decomposition at a
+  guessed focal. Touches (revert): `docs/STATUS.md`, scene artifacts restored; code from 9dec2e0 left in place.
 
 - **2026-07-09 (variant B placement fixed locally + #61 focal-ambiguity proven)** — **Two findings, one
   fix shipped.** (1) **#59 B ROOT-CAUSED & REPAIRED (local, no pod):** measured B's `pose.transl` = it was

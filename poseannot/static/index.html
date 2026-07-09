@@ -574,7 +574,11 @@ Alpine.data("poseAnnot", () => ({
     },
 
     async switchClip(id) {
-      if (!id || id === this.activeClipId) return;
+      // NOTE: do NOT guard on `id === activeClipId` — x-model updates activeClipId
+      // to the new value BEFORE this @change handler runs, so that check is always
+      // true and silently swallows every switch. A native <select> only fires
+      // 'change' on an actual value change, so no same-clip guard is needed.
+      if (!id) return;
       const r = await fetch("/api/clips/select", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -1,6 +1,17 @@
 #!/usr/bin/env python
 """Rebuild the scene camera from the trusted homography — task #61.
 
+    !!! SUPERSEDED / FLAWED — DO NOT USE (2026-07-09) !!!
+    This single-plane re-decomposition at a GUESSED focal is a proven regression:
+    it renders every body HEAD-DOWN + displaced and does NOT reproduce H (~277 px
+    ground error at 40 m; camera lands BELOW the pitch at every focal). A single
+    plane cannot determine the focal (degeneracy) and the SVD orthonormalisation
+    then distorts r1,r2. Reverted in commit history; see docs/STATUS.md
+    "#61 ... TRIED, REVERTED". #61 needs a REAL focal (Zhang/vanishing-point, or a
+    pod PnLCalib solve persisting keypoints + vertical refs), not this. Kept only
+    as a record of the dead end. Proof harness: scripts/debug/redecomp_branch.py.
+
+
 Measured 2026-07-09 (scripts/debug/calib_probe.py): the stored PnLCalib
 extrinsics place the 3D camera up in the crowd — the projected pitch lands in
 the stands and players render ~3x too small. The per-frame homography ``H``
