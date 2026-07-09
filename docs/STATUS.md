@@ -365,6 +365,32 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-09 (variant B placement fixed locally + #61 focal-ambiguity proven)** — **Two findings, one
+  fix shipped.** (1) **#59 B ROOT-CAUSED & REPAIRED (local, no pod):** measured B's `pose.transl` = it was
+  stored as `(foot_pixel_x, foot_pixel_y, pelvis_height_m)` — x∈[494,1641], y∈[510,729] are raw 1920-space
+  image pixels (they exceed 1280, so can't be calib space), z≈1.0 is metric; the foot XY never went
+  through the homography. B's stored `camera` was also a bad solve (transl ≈[867,-281,-392] vs A's sane
+  [-34,2.9,73]). Since A and B are the SAME 33-frame video they share one camera+calibration, so
+  `scripts/fix_b_placement.py` adopts A's `camera`+`field` into B and re-grounds every foot pixel through
+  `calibration.image_to_world` — the *identical* path `GVHMRPoseEstimator._ground_root` uses for A. Result:
+  86% of foot samples land on-pitch, 7/8 subject roots project on-screen (was 0/8), verified live through
+  the running server (`/api/frame/0/skeletons` → 7/8 full 22-joint skeletons at A's ~22 px scale; tid=5 is
+  a far-field outlier whose foot sits high in-frame → homography over-extrapolates past the sideline, and
+  is culled). Idempotent (re-grounds from a pristine `scene.json.orig`). Durable pipeline fix (SAM-3D
+  backend should call `_ground_root` with the good camera on the next pod run) still open, but the artifact
+  is now correct. (2) **#61 scale is a PROVEN focal ambiguity, NOT a BA-fixable problem:** solving focal
+  from each per-frame homography (Zhang orthogonality) yields a real root on only 1/48 frames (that one:
+  f≈2110, ×2.73 vs stored 772 — corroborating the ~3× observed scale error); the robust joint Zhang solve
+  over all 48 homographies is rank-deficient (trailing singular values → 0). This is the structural
+  degeneracy of a pan/tilt/zoom camera viewing a single plane: no translational parallax + one vanishing
+  point near infinity ⇒ the plane cannot determine focal. So **temporal bundle adjustment (the "#61 as BA"
+  framing) will NOT fix the scale.** Real levers: (a) LOCAL — impose a focal prior (fx ≈ ×2.7–3, ~2100) and
+  re-decompose the homographies into a consistent camera; the shipped manual camera-panel `zoom` already
+  does exactly this multiplier, so the true focal is one eyeball-test away (user = ground truth on scale);
+  (b) POD/durable — re-run PnLCalib persisting keypoints + add vertical references (goalposts 2.44 m, known
+  player statures) to break the ambiguity. `field.calibration.keypoints` exists in the schema but is never
+  populated, so a durable BA would first need the pod run to persist them.
+
 - **2026-07-08 (manual overlay-camera + pitch reference)** — **Added a manual overlay-camera control
   panel + a projected pitch-markings overlay to poseannot.** Motivation: the flip fix made A upright,
   but the residual PnLCalib inaccuracy (per-player offset + ~3× too small, #61) left the overlay too
