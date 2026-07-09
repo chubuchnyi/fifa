@@ -55,7 +55,7 @@
     <button @click="togglePitch()" :class="{ active: showPitch }"
             title="overlay the measured pitch markings (P)">pitch</button>
     <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
-            title="manual overlay-camera controls (angles + distance)">camera</button>
+            title="overlay orientation: rotate/move/flip about the pitch centre (C)">orient</button>
     <span class="user">
       <span x-text="user"></span> · <a href="/logout">logout</a>
     </span>
@@ -135,27 +135,52 @@
       <button @click="resetView()" title="fit (0)" style="min-width:34px;">fit</button>
     </div>
 
-    <!-- Manual overlay-camera controls. The solved PnLCalib camera is only
-         approximate (per-player offset + ~3x scale); these nudge the projection
-         so the user can hand-align the overlay to the video. Applied server-side
-         (see camera.CameraAdjust) to skeletons, mesh and the pitch reference. -->
+    <!-- Overlay orientation. Rotate/translate/flip the WHOLE overlay (pitch +
+         skeletons + mesh) about the pitch-markings centre, plus a separate
+         per-skeleton flip. Projected in the browser (no server round-trip per
+         tick), so dragging is smooth. -->
     <div class="cam-panel" x-show="showCamAdjust" x-cloak>
       <div class="cam-hd">
-        <span>overlay camera</span>
+        <span>overlay orient</span>
         <span class="spacer"></span>
-        <button @click="resetCam()" title="reset all to neutral">reset</button>
+        <button @click="resetOvr()" title="reset all to neutral">reset</button>
         <button @click="showCamAdjust = false" title="close">✕</button>
       </div>
-      <template x-for="c in camControls" :key="c.k">
+      <div class="cam-sec">rotate about pitch centre</div>
+      <template x-for="c in ovrRot" :key="c.k">
         <div class="cam-row">
           <label x-text="c.label"></label>
           <input type="range" :min="c.min" :max="c.max" :step="c.step"
-                 x-model.number="cam[c.k]" @input="onCamChange()" />
+                 x-model.number="ovr[c.k]" @input="onOvrChange()" />
           <input class="cam-num" type="number" :min="c.min" :max="c.max" :step="c.step"
-                 x-model.number="cam[c.k]" @input="onCamChange()" />
+                 x-model.number="ovr[c.k]" @input="onOvrChange()" />
         </div>
       </template>
-      <div class="cam-hint">align the green pitch dots to the painted lines — the players follow.</div>
+      <div class="cam-sec">move (metres)</div>
+      <template x-for="c in ovrTr" :key="c.k">
+        <div class="cam-row">
+          <label x-text="c.label"></label>
+          <input type="range" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="ovr[c.k]" @input="onOvrChange()" />
+          <input class="cam-num" type="number" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="ovr[c.k]" @input="onOvrChange()" />
+        </div>
+      </template>
+      <div class="cam-row cam-flip">
+        <label>flip overlay</label>
+        <template x-for="c in ovrFlipO" :key="c.k">
+          <button @click="ovr[c.k] = !ovr[c.k]; onOvrChange()"
+                  :class="{ active: ovr[c.k] }" x-text="c.label"></button>
+        </template>
+      </div>
+      <div class="cam-row cam-flip">
+        <label>flip skeletons</label>
+        <template x-for="c in ovrFlipS" :key="c.k">
+          <button @click="ovr[c.k] = !ovr[c.k]; onOvrChange()"
+                  :class="{ active: ovr[c.k] }" x-text="c.label"></button>
+        </template>
+      </div>
+      <div class="cam-hint">rotate/move the green pitch dots onto the painted lines — the players follow. Flip skeletons if bodies read upside-down.</div>
     </div>
   </div>
 
@@ -215,7 +240,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-08 · campanel+pitch";
+const BUILD_ID = "2026-07-09 · overlay-orient (client-side)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -226,6 +251,40 @@ const BONES = [
   [9, 13], [13, 16], [16, 18], [18, 20],   // left arm
   [9, 14], [14, 17], [17, 19], [19, 21],   // right arm
 ];
+
+// ── tiny 3×3 matrix helpers for the client-side overlay transform ──
+// The overlay (pitch + skeletons + optional mesh) is oriented in the browser:
+// p' = R · S · (p − C) + C + t, then projected with the base camera. No server
+// round-trip per slider tick — that was the old "жутко тормозит" lag.
+function deg2rad(d) { return d * Math.PI / 180; }
+function mat3mul(A, B) {
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < 3; i++)
+    for (let j = 0; j < 3; j++) {
+      let s = 0;
+      for (let k = 0; k < 3; k++) s += A[i][k] * B[k][j];
+      C[i][j] = s;
+    }
+  return C;
+}
+function mat3vec(M, v) {
+  return [
+    M[0][0] * v[0] + M[0][1] * v[1] + M[0][2] * v[2],
+    M[1][0] * v[0] + M[1][1] * v[1] + M[1][2] * v[2],
+    M[2][0] * v[0] + M[2][1] * v[1] + M[2][2] * v[2],
+  ];
+}
+// Rotation of points about the world X, then Y, then Z axes (R = Rz·Ry·Rx).
+function eulerXYZ(rxDeg, ryDeg, rzDeg) {
+  const rx = deg2rad(rxDeg), ry = deg2rad(ryDeg), rz = deg2rad(rzDeg);
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cz = Math.cos(rz), sz = Math.sin(rz);
+  const Rx = [[1, 0, 0], [0, cx, -sx], [0, sx, cx]];
+  const Ry = [[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]];
+  const Rz = [[cz, -sz, 0], [sz, cz, 0], [0, 0, 1]];
+  return mat3mul(Rz, mat3mul(Ry, Rx));
+}
 
 // scene_state.BODY_JOINT_NAMES[i] with i=0 pelvis. body_pose[j] controls
 // joint (j+1) — i.e. body_pose[3] = left_knee.  Server accepts joint_index
@@ -487,18 +546,33 @@ Alpine.data("poseAnnot", () => ({
     showPitch: true,          // draw the measured pitch markings under the poses
     pitch2d: [],              // [[u,v],...] projected pitch points (current cam)
     pitchColor: "#39d353",    // green, like the painted lines
-    showCamAdjust: false,     // camera-controls panel visible?
-    cam: { zoom: 1, panx: 0, pany: 0, yaw: 0, pitch: 0, roll: 0, dolly: 0 },
-    camControls: [
-      { k: "zoom",  label: "zoom",   min: 0.25, max: 5,    step: 0.05 },
-      { k: "panx",  label: "pan X",  min: -2000, max: 2000, step: 5 },
-      { k: "pany",  label: "pan Y",  min: -1200, max: 1200, step: 5 },
-      { k: "yaw",   label: "yaw°",   min: -45,  max: 45,   step: 0.2 },
-      { k: "pitch", label: "pitch°", min: -45,  max: 45,   step: 0.2 },
-      { k: "roll",  label: "roll°",  min: -45,  max: 45,   step: 0.2 },
-      { k: "dolly", label: "dist m", min: -60,  max: 60,   step: 0.5 },
+    showCamAdjust: false,     // overlay-orient panel visible?
+    // Overlay orientation: a rigid transform of the whole overlay (pitch +
+    // skeletons + mesh) about the pitch-markings centre, applied in the browser.
+    //   r{x,y,z} — rotate° about world X/Y/Z (through the pitch centre)
+    //   t{x,y,z} — translate metres along world X/Y/Z
+    //   of{x,y,z} — flip/mirror the WHOLE overlay about the pitch centre
+    //   sf{x,y,z} — flip/mirror each SKELETON about its own centroid (in place)
+    ovr: { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0,
+           ofx: false, ofy: false, ofz: false, sfx: false, sfy: false, sfz: false },
+    ovrRot: [
+      { k: "rx", label: "rot X°", min: -180, max: 180, step: 0.5 },
+      { k: "ry", label: "rot Y°", min: -180, max: 180, step: 0.5 },
+      { k: "rz", label: "rot Z°", min: -180, max: 180, step: 0.5 },
     ],
-    _camT: null,              // debounce handle for onCamChange
+    ovrTr: [
+      { k: "tx", label: "move X m", min: -60, max: 60, step: 0.1 },
+      { k: "ty", label: "move Y m", min: -60, max: 60, step: 0.1 },
+      { k: "tz", label: "move Z m", min: -60, max: 60, step: 0.1 },
+    ],
+    ovrFlipO: [
+      { k: "ofx", label: "X" }, { k: "ofy", label: "Y" }, { k: "ofz", label: "Z" },
+    ],
+    ovrFlipS: [
+      { k: "sfx", label: "X" }, { k: "sfy", label: "Y" }, { k: "sfz", label: "Z" },
+    ],
+    _ov3d: null,              // cached { camera, pitch, subjects } for current frame
+    _ovrRaf: null,            // requestAnimationFrame handle for coalesced re-project
     bones: BONES,
     accentBright: "#a8d4ff",
     editedColor: "#ffb14f",
@@ -643,10 +717,8 @@ Alpine.data("poseAnnot", () => ({
       this.frameInput = n + 1;
       this.frameSrc = `/api/frame/${n}?ts=${Date.now()}`;
       this.selectedJoint = null;
-      await this.refreshMesh2d();
-      await this.refreshPitch();
-      await this.refreshSkeletons();
-      await this.refreshThree();
+      await this.refreshThree();       // active subj 3D joints+mesh (also feeds mesh overlay)
+      await this.refreshOverlay3d();   // fetch pitch + all skeletons 3D once → project in JS
     },
 
     onFrameLoaded(e) {
@@ -656,72 +728,119 @@ Alpine.data("poseAnnot", () => ({
       this.fitLayer();
     },
 
-    async refreshSkeletons() {
-      const r = await fetch(`/api/frame/${this.frame}/skeletons?${this.camQS()}`);
-      if (!r.ok) { this.allSkeletons = []; this.rebuildOverlay(); return; }
-      const d = await r.json();
-      this.allSkeletons = d.subjects || [];
-      this.rebuildOverlay();
-    },
-
-    // Projected SMPL-X mesh of the active subject (3D overlay mode only). Sets
-    // activeMesh2d but does NOT rebuild — callers rebuild once mesh + skeletons
-    // are both current, avoiding a flash of stale mesh at the previous frame.
-    async refreshMesh2d() {
-      if (this.overlayMode !== "3d" || this.selectedTrackId === null) {
-        this.activeMesh2d = null;
+    // Fetch the frame's 3D data (flip-corrected camera + pitch world points +
+    // every subject's 3D joints) ONCE, then project client-side. Orientation
+    // edits re-project from this cache with no further server round-trip.
+    async refreshOverlay3d() {
+      const r = await fetch(`/api/overlay3d/${this.frame}`);
+      if (!r.ok) {
+        this._ov3d = null;
+        this.pitch2d = []; this.allSkeletons = []; this.activeMesh2d = null;
+        this.rebuildOverlay();
         return;
       }
-      const r = await fetch(`/api/subject/${this.selectedTrackId}/mesh2d/${this.frame}?${this.camQS()}`);
-      if (!r.ok) { this.activeMesh2d = null; return; }
-      const d = await r.json();
-      this.activeMesh2d = d.pts || null;
+      this._ov3d = await r.json();
+      this.projectOverlay();
     },
 
-    // Projected measured pitch markings (alignment reference), under the current
-    // overlay-camera nudge. Set-only; caller rebuilds.
-    async refreshPitch() {
-      if (!this.showPitch) { this.pitch2d = []; return; }
-      const r = await fetch(`/api/pitch/${this.frame}?${this.camQS()}`);
-      if (!r.ok) { this.pitch2d = []; return; }
-      const d = await r.json();
-      this.pitch2d = d.pts || [];
+    // Apply the overlay-orientation transform + camera projection entirely in the
+    // browser. Cheap enough to run on every slider tick (coalesced via rAF), which
+    // is what killed the old per-tick server round-trips ("жутко тормозит").
+    //   whole overlay:  p' = R · S_overlay · (p − C) + C + t   (C = pitch centre)
+    //   skeletons additionally flip about their OWN centroid first (in place).
+    projectOverlay() {
+      const d = this._ov3d;
+      if (!d) {
+        this.pitch2d = []; this.allSkeletons = []; this.activeMesh2d = null;
+        this.rebuildOverlay();
+        return;
+      }
+      const cam = d.camera, C = d.pitch.center, o = this.ovr;
+      const Rw = eulerXYZ(o.rx, o.ry, o.rz);
+      const So = [o.ofx ? -1 : 1, o.ofy ? -1 : 1, o.ofz ? -1 : 1];
+      const t = [o.tx, o.ty, o.tz];
+      const orient = (p) => {
+        const q = mat3vec(Rw, [(p[0] - C[0]) * So[0], (p[1] - C[1]) * So[1], (p[2] - C[2]) * So[2]]);
+        return [q[0] + C[0] + t[0], q[1] + C[1] + t[1], q[2] + C[2] + t[2]];
+      };
+      const R = cam.R, T = cam.t;
+      const project = (p) => {   // world → pixel; behind-camera → null. returns [u,v,z_cam]
+        const zc = R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2] + T[2];
+        if (zc <= 1e-6) return null;
+        const xc = R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2] + T[0];
+        const yc = R[1][0] * p[0] + R[1][1] * p[1] + R[1][2] * p[2] + T[1];
+        return [cam.fx * xc / zc + cam.cx, cam.fy * yc / zc + cam.cy, zc];
+      };
+      // pitch markings
+      if (this.showPitch) {
+        const out = [];
+        for (const p of d.pitch.points) { const uv = project(orient(p)); if (uv) out.push([uv[0], uv[1]]); }
+        this.pitch2d = out;
+      } else { this.pitch2d = []; }
+      // skeletons — optional per-skeleton flip about own centroid, THEN overlay transform
+      const Ss = [o.sfx ? -1 : 1, o.sfy ? -1 : 1, o.sfz ? -1 : 1];
+      const skelFlip = o.sfx || o.sfy || o.sfz;
+      this.allSkeletons = d.subjects.map((s) => {
+        let J = s.joints;
+        if (skelFlip) {
+          let cx = 0, cy = 0, cz = 0, n = 0;
+          for (const j of J) { if (j && Number.isFinite(j[0])) { cx += j[0]; cy += j[1]; cz += j[2]; n++; } }
+          if (n) {
+            cx /= n; cy /= n; cz /= n;
+            J = J.map((j) => (j && Number.isFinite(j[0]))
+              ? [(j[0] - cx) * Ss[0] + cx, (j[1] - cy) * Ss[1] + cy, (j[2] - cz) * Ss[2] + cz] : j);
+          }
+        }
+        const pts = J.map((j) => {
+          if (!j || !Number.isFinite(j[0])) return null;
+          const uv = project(orient(j));
+          return uv ? [uv[0], uv[1]] : null;
+        });
+        return { track_id: s.track_id, pts };
+      });
+      // active subject's SMPL-X mesh (3D overlay mode) — reuse verts refreshThree
+      // already fetched; project through the SAME transform, depth-normalised.
+      if (this.overlayMode === "3d" && this._liveMesh && this._liveMesh.verts) {
+        const verts = this._liveMesh.verts;
+        const proj = new Array(verts.length);
+        let zmin = Infinity, zmax = -Infinity;
+        for (let i = 0; i < verts.length; i++) {
+          const uv = project(orient(verts[i]));
+          proj[i] = uv;
+          if (uv) { if (uv[2] < zmin) zmin = uv[2]; if (uv[2] > zmax) zmax = uv[2]; }
+        }
+        const span = zmax > zmin ? zmax - zmin : 1;
+        this.activeMesh2d = proj.map((uv) => uv ? [uv[0], uv[1], (uv[2] - zmin) / span] : null);
+      } else {
+        this.activeMesh2d = null;
+      }
+      this.rebuildOverlay();
     },
 
-    // Query string for the manual overlay-camera nudge, appended to every
-    // projection fetch so skeletons, mesh and pitch move together.
-    camQS() {
-      const c = this.cam;
-      return `zoom=${c.zoom}&panx=${c.panx}&pany=${c.pany}`
-        + `&yaw=${c.yaw}&pitch=${c.pitch}&roll=${c.roll}&dolly=${c.dolly}`;
+    // Coalesce continuous slider events into one re-project per animation frame —
+    // pure client-side maths, so dragging the controls stays smooth.
+    onOvrChange() {
+      if (this._ovrRaf) return;
+      this._ovrRaf = requestAnimationFrame(() => {
+        this._ovrRaf = null;
+        this.projectOverlay();
+      });
     },
 
-    // Debounced re-projection: sliders fire continuously while dragging, so
-    // coalesce into one refresh (~60 ms) of pitch + mesh + skeletons.
-    onCamChange() {
-      clearTimeout(this._camT);
-      this._camT = setTimeout(async () => {
-        await this.refreshPitch();
-        await this.refreshMesh2d();
-        await this.refreshSkeletons();   // rebuilds the overlay last
-      }, 60);
+    resetOvr() {
+      this.ovr = { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0,
+                   ofx: false, ofy: false, ofz: false, sfx: false, sfy: false, sfz: false };
+      this.projectOverlay();
     },
 
-    resetCam() {
-      this.cam = { zoom: 1, panx: 0, pany: 0, yaw: 0, pitch: 0, roll: 0, dolly: 0 };
-      this.onCamChange();
-    },
-
-    async togglePitch() {
+    togglePitch() {
       this.showPitch = !this.showPitch;
-      await this.refreshPitch();
-      this.rebuildOverlay();
+      this.projectOverlay();
     },
 
-    async toggleOverlayMode() {
+    toggleOverlayMode() {
       this.overlayMode = this.overlayMode === "3d" ? "2d" : "3d";
-      await this.refreshMesh2d();
-      this.rebuildOverlay();
+      this.projectOverlay();
     },
 
     rebuildOverlay() {
@@ -828,9 +947,8 @@ Alpine.data("poseAnnot", () => ({
     async selectTrack(tid) {
       this.selectedTrackId = tid;
       this.selectedJoint = null;
-      await this.refreshMesh2d();
-      this.rebuildOverlay();
-      await this.refreshThree();
+      await this.refreshThree();   // new subject's 3D joints + mesh (feeds mesh overlay)
+      this.projectOverlay();       // re-project: active highlight + mesh follow the new subject
     },
 
     selectJoint(jointIdx) {
@@ -886,8 +1004,7 @@ Alpine.data("poseAnnot", () => ({
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
       updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
-      await this.refreshMesh2d();
-      await this.refreshSkeletons();
+      await this.refreshOverlay3d();   // edited joints changed server-side → re-fetch + re-project
       await this.refreshEditedFrames();
     },
 
@@ -911,8 +1028,7 @@ Alpine.data("poseAnnot", () => ({
       this._liveJoints = d.joints;
       this._liveMesh = { verts: d.verts, faces: d.faces };
       updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
-      await this.refreshMesh2d();
-      await this.refreshSkeletons();
+      await this.refreshOverlay3d();   // undo changed joints server-side → re-fetch + re-project
       await this.refreshEditedFrames();
     },
 

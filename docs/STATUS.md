@@ -365,6 +365,32 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-09 (poseannot overlay-orientation controls REDESIGNED — client-side projection; task #64)** —
+  User: the overlay-camera controls were unusable — "жутко тормозит" (terrible lag), rotation axes + offsets
+  confusing. Asked for: rotation about **3 world axes through the pitch-markings centre** + translation on
+  **3 axes (metres)**, a **flip/mirror of the whole overlay**, and a **separate flip/mirror of the skeletons**.
+  ROOT of the lag: every slider tick fired **3 sequential server round-trips** (`/api/pitch`, `/mesh2d`,
+  `/frame/{n}/skeletons`, each re-running `frame_projector`+`project_points` server-side) behind a 60 ms
+  debounce. ROOT of the confusion: the old `CameraAdjust` nudged the **camera** (zoom/pan/yaw/pitch/roll/dolly
+  in camera space), not the overlay about the pitch centre. **Fix = move projection to the browser.** New
+  `GET /api/overlay3d/{frame}` (`poseannot/app.py`) returns, in ONE round-trip, the flip-corrected camera
+  (K,R,t), the **3D** pitch world points + their bbox centre, and every subject's **3D** joints — all in the
+  same world frame. The client (`poseannot/static/index.html`) fetches that once per frame, then on every
+  slider tick applies a rigid transform `p' = R·S_overlay·(p−C)+C + t` (C = pitch centre, R = `eulerXYZ` about
+  world X/Y/Z, S = flip signs, t = metres) and projects with a plain pinhole — **zero server calls per tick**,
+  coalesced via `requestAnimationFrame`. Skeleton flip (`sfx/sfy/sfz`) mirrors each body about its **own
+  centroid** first (in-place — directly targets head-down bodies), then the whole-overlay transform. Controls
+  reworked: 3 rotation sliders (±180°), 3 translation sliders (±60 m), 6 flip toggles (overlay X/Y/Z + skel
+  X/Y/Z), reset. Header button `camera`→`orient`; `BUILD_ID` bumped. OBJECTIVE VALIDATION (math/geometry only —
+  NOT pixel-on-player alignment, which stays the user's call): (a) client identity-transform projection
+  reproduces the old `/api/pitch/0` pixels to **0.000000 px** over 1444 pts (JS pinhole ≡ server
+  `project_points`); (b) `eulerXYZ` orthonormal err 1e-16, det 1, right-handed; (c) skeleton flip keeps
+  centroid fixed (6e-17 drift); (d) `node --check` clean, all Alpine bindings resolve. Endpoint live: 23 subj ×
+  22 joints, pitch centre `[0,0,0]`. Old server endpoints (`/api/pitch`, `/skeletons`, `/mesh2d`,
+  `CameraAdjust`) now UNUSED by the client but left functional (only self/probe-docstring refs). **Restarted
+  the local dev server (was no-`--reload`) to load the new route; user must hard-reload the browser.** Final
+  alignment correctness = user's eye.
+
 - **2026-07-09 (poseannot server WEDGE on clip switch — async event-loop starvation; FIXED)** — After the
   clip-switcher fix (next entry) made switches actually fire, the user hit a worse symptom: the page "не
   грузится, висит загрузка" and every route (INCLUDING `/static`) timed out with 0 bytes while the worker

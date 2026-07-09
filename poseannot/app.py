@@ -365,6 +365,47 @@ def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
     }
 
 
+@app.get("/api/overlay3d/{frame}")
+def api_overlay3d(frame: int, user: str = Depends(current_user)) -> dict:
+    """Everything the browser needs to project + hand-orient the overlay ITSELF,
+    in one round-trip: the flip-corrected camera (K, R, t), the 3D pitch-marking
+    world points with their bbox centre, and every subject's 3D body joints — all
+    in the SAME world frame. The client applies the user's rigid transform
+    (rotate/translate/flip about the pitch centre) and projects with a plain
+    pinhole on each slider tick, so orientation edits never touch the server.
+    Replaces the old per-tick ``?zoom=&pan=&yaw=`` re-projection round-trips."""
+    del user
+    st = get_state()
+    if st.scene.camera is None or getattr(st.scene, "field", None) is None:
+        raise HTTPException(500, "scene has no camera/field")
+    if frame < 0 or frame >= st.n_frames:
+        raise HTTPException(404, f"frame {frame} out of range")
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    field = st.scene.field
+    world = pitch_line_world_points(field.dimensions, plane_z=field.plane_z, spacing=0.5)
+    world = np.asarray(world, dtype=float)
+    if len(world):
+        center = ((world.min(axis=0) + world.max(axis=0)) / 2.0).tolist()
+    else:
+        center = [0.0, 0.0, float(field.plane_z)]
+    subjects = []
+    for tid, sub in sorted(st.subjects.items()):
+        if 0 <= frame < sub.frames.shape[0]:
+            subjects.append({"track_id": tid, "joints": sub.joints[frame].tolist()})
+    return {
+        "camera": {
+            "fx": proj.fx, "fy": proj.fy, "cx": proj.cx, "cy": proj.cy,
+            "R": proj.R.tolist(), "t": proj.t.tolist(),
+            "frame_flipped": bool(proj.frame_flipped),
+        },
+        "pitch": {"points": world.tolist(), "center": center},
+        "subjects": subjects,
+        "video_size": [int(vsize[0]), int(vsize[1])],
+    }
+
+
 @app.get("/api/health")
 async def health() -> dict:
     return {"ok": True}

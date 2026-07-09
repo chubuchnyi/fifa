@@ -148,6 +148,21 @@ body.login { display: flex; align-items: center; justify-content: center; }
   background: var(--bg); color: var(--fg); border: 1px solid var(--border);
   width: 100%; padding: 1px 3px; border-radius: 3px; font-family: inherit; font-size: 0.78rem;
 }
+.cam-panel .cam-sec {
+  margin: 8px 0 2px; font-size: 0.62rem; text-transform: uppercase;
+  letter-spacing: 0.5px; color: var(--fg); opacity: 0.65;
+}
+.cam-row.cam-flip { display: flex; align-items: center; gap: 6px; }
+.cam-row.cam-flip label { flex: 1; }
+.cam-row.cam-flip button {
+  background: var(--bg); border: 1px solid var(--border); color: var(--fg-dim);
+  width: 30px; height: 22px; border-radius: 3px; cursor: pointer;
+  font-family: inherit; font-size: 0.78rem;
+}
+.cam-row.cam-flip button:hover { border-color: var(--accent); color: var(--fg); }
+.cam-row.cam-flip button.active {
+  background: var(--accent); border-color: var(--accent); color: #10141a; font-weight: 700;
+}
 .cam-panel .cam-hint { margin-top: 6px; color: var(--fg-dim); font-size: 0.72rem; line-height: 1.3; }
 
 .right { grid-area: right; background: var(--bg-panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
