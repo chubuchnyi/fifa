@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-07 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-09 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -364,6 +364,28 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-09 (poseannot server WEDGE on clip switch — async event-loop starvation; FIXED)** — After the
+  clip-switcher fix (next entry) made switches actually fire, the user hit a worse symptom: the page "не
+  грузится, висит загрузка" and every route (INCLUDING `/static`) timed out with 0 bytes while the worker
+  spun one core. Root cause: **fake-async handlers blocking the asyncio event loop.** `POST /api/clips/select`
+  was `async def` and called `get_state(force_reload=True)` — a synchronous SMPL-X FK rebuild that takes
+  **~5-25 s** (default 23 subj/60f = 21.8 s; A 11 s; measured `scripts/debug/clip_build_probe.py`) — directly
+  on the loop thread. ALL 16 `api_*` GET/POST handlers were `async def` yet did purely synchronous CPU/IO/lock
+  work (get_state, video decode, projection, FK) on the loop; only `api_clips_upload` genuinely awaits
+  (`UploadFile.read`). So a single switch froze the whole server for the rebuild, and the user clicking
+  source→A→B stacked several 5-25 s blocking rebuilds → apparent PERMANENT hang. NB the offline probe proved
+  no single clip's build/render is infinite (default/A/B/clip all complete + render upright); it was pure
+  loop starvation. Fix (`poseannot/app.py`): declare all 16 `api_*` handlers plain `def` so Starlette runs
+  them in its threadpool (keep `api_clips_upload` async — it awaits); add an `@app.on_event("startup")` daemon
+  that pre-warms `get_state()` so the first `/api/scene` is a cache hit, not a 22 s spinner. Proof: with a
+  25 s rebuild running in the background, 10× `/static` + `/` probes all returned **200 in 4-28 ms** (pre-fix:
+  hung). Full authed path re-verified 200 with real data (A: scene 21 subj/10 ms, pitch 23 ms, JPEG 113 ms,
+  skeletons 21×22 pts; default 23 subj). Frontend: `switchClip()` now shows "switching … rebuilding poses
+  (~5-25 s)…" so the inherent rebuild wait isn't a frozen-looking page (`poseannot/static/index.html`).
+  KNOWN residual: a switch still takes 5-25 s (real FK cost) but the server stays fully responsive — no wedge.
+  `_ACTIVE_ID` is in-memory only, so a restart always resets to `default`. Reusable probe:
+  `scripts/debug/clip_build_probe.py` (per-clip build+render under an OS `timeout`).
 
 - **2026-07-09 (GUI unbroken: dead clip-switcher root-caused + fixed; "dead controls" = stale page)** — User
   reported (on a long-open tab) that switching source/A/B did nothing with an EMPTY Network log, the 2D/3D

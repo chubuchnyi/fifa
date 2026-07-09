@@ -64,6 +64,22 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.on_event("startup")
+def _prewarm_scene_state() -> None:
+    """Build the FK cache off the request path so the first /api/scene is a cache
+    hit, not a 5-22s SMPL-X build. Daemon thread → startup never blocks/fails on
+    it; any real error resurfaces on the actual request."""
+    import threading
+
+    def _warm() -> None:
+        try:
+            get_state()
+        except Exception:  # noqa: BLE001 — best-effort warm-up
+            pass
+
+    threading.Thread(target=_warm, name="poseannot-prewarm", daemon=True).start()
+
+
 # ─── auth pages ──────────────────────────────────────────────────────────────
 @app.get("/", response_class=HTMLResponse)
 async def root() -> FileResponse:
@@ -108,7 +124,7 @@ async def logout() -> RedirectResponse:
 
 # ─── read-only API ───────────────────────────────────────────────────────────
 @app.get("/api/scene")
-async def api_scene(user: str = Depends(current_user)) -> dict:
+def api_scene(user: str = Depends(current_user)) -> dict:
     del user
     st = get_state()
     tracks = []
@@ -137,7 +153,7 @@ async def api_scene(user: str = Depends(current_user)) -> dict:
 
 
 @app.get("/api/frame/{n}")
-async def api_frame(n: int, user: str = Depends(current_user)) -> Response:
+def api_frame(n: int, user: str = Depends(current_user)) -> Response:
     del user
     cfg = load_config()
     bgr = read_frame(str(cfg.source_video), n)
@@ -145,7 +161,7 @@ async def api_frame(n: int, user: str = Depends(current_user)) -> Response:
 
 
 @app.get("/api/subject/{tid}/mesh/{frame}")
-async def api_mesh(
+def api_mesh(
     tid: int, frame: int, user: str = Depends(current_user),
 ) -> dict:
     del user
@@ -163,7 +179,7 @@ async def api_mesh(
 
 
 @app.get("/api/subject/{tid}/joints/{frame}")
-async def api_joints(
+def api_joints(
     tid: int, frame: int, user: str = Depends(current_user),
 ) -> dict:
     del user
@@ -191,7 +207,7 @@ def camera_adjust_params(
 
 
 @app.get("/api/subject/{tid}/joints2d/{frame}")
-async def api_joints2d(
+def api_joints2d(
     tid: int, frame: int, user: str = Depends(current_user),
 ) -> dict:
     """SMPL-X joints projected to pixel coordinates for the 2D overlay."""
@@ -223,7 +239,7 @@ async def api_joints2d(
 
 
 @app.get("/api/subject/{tid}/mesh2d/{frame}")
-async def api_mesh2d(
+def api_mesh2d(
     tid: int, frame: int, stride: int = 0,
     adj: CameraAdjust = Depends(camera_adjust_params),
     user: str = Depends(current_user),
@@ -275,7 +291,7 @@ async def api_mesh2d(
 
 
 @app.get("/api/frame/{n}/skeletons")
-async def api_frame_skeletons(
+def api_frame_skeletons(
     n: int, adj: CameraAdjust = Depends(camera_adjust_params),
     user: str = Depends(current_user),
 ) -> dict:
@@ -293,7 +309,7 @@ async def api_frame_skeletons(
 
 
 @app.get("/api/pitch/{frame}")
-async def api_pitch(
+def api_pitch(
     frame: int, adj: CameraAdjust = Depends(camera_adjust_params),
     user: str = Depends(current_user),
 ) -> dict:
@@ -318,7 +334,7 @@ async def api_pitch(
 
 
 @app.get("/api/frame/{n}/poses3d")
-async def api_frame_poses3d(n: int, user: str = Depends(current_user)) -> dict:
+def api_frame_poses3d(n: int, user: str = Depends(current_user)) -> dict:
     """All subjects' 3D body joints at position ``n`` — for the 3D show-all view."""
     del user
     st = get_state()
@@ -331,7 +347,7 @@ async def api_frame_poses3d(n: int, user: str = Depends(current_user)) -> dict:
 
 
 @app.get("/api/camera/{frame}")
-async def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
+def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
     del user
     st = get_state()
     if st.scene.camera is None:
@@ -394,7 +410,7 @@ def _joints2d_for(state, cache, frame: int, video_size, adjust=None) -> list:
 
 
 @app.post("/api/edit")
-async def api_edit(req: EditRequest, user: str = Depends(current_user)) -> dict:
+def api_edit(req: EditRequest, user: str = Depends(current_user)) -> dict:
     """Persist a single-frame body_pose axis-angle edit; return refreshed frame."""
     st = get_state()
     if req.track_id not in st.subjects:
@@ -417,7 +433,7 @@ async def api_edit(req: EditRequest, user: str = Depends(current_user)) -> dict:
 
 
 @app.post("/api/edit/undo")
-async def api_edit_undo(req: UndoRequest, user: str = Depends(current_user)) -> dict:
+def api_edit_undo(req: UndoRequest, user: str = Depends(current_user)) -> dict:
     del user
     st = get_state()
     if req.track_id not in st.subjects:
@@ -435,7 +451,7 @@ async def api_edit_undo(req: UndoRequest, user: str = Depends(current_user)) -> 
 
 
 @app.get("/api/edits")
-async def api_edits(user: str = Depends(current_user)) -> dict:
+def api_edits(user: str = Depends(current_user)) -> dict:
     """Return {track_id: [edited_frames]} for timeline colouring."""
     del user
     m = edited_frames()
@@ -443,7 +459,7 @@ async def api_edits(user: str = Depends(current_user)) -> dict:
 
 
 @app.get("/api/edits/download")
-async def api_edits_download(user: str = Depends(current_user)) -> FileResponse:
+def api_edits_download(user: str = Depends(current_user)) -> FileResponse:
     """Download the persisted corrections file (edits.json) for the active clip."""
     del user
     path = load_config().corrections_out
@@ -458,7 +474,7 @@ class ClipSelectRequest(BaseModel):
 
 
 @app.get("/api/clips")
-async def api_clips(user: str = Depends(current_user)) -> dict:
+def api_clips(user: str = Depends(current_user)) -> dict:
     del user
     return {
         "active": clips_mod.active_id(),
@@ -467,7 +483,7 @@ async def api_clips(user: str = Depends(current_user)) -> dict:
 
 
 @app.post("/api/clips/select")
-async def api_clips_select(
+def api_clips_select(
     req: ClipSelectRequest, user: str = Depends(current_user),
 ) -> dict:
     del user
