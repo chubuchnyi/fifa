@@ -61,6 +61,25 @@
     </span>
   </div>
 
+  <!-- Pipeline stage rail: the DAG as a clickable glass-box strip. Clicking a
+       stage loads its StageView (inspector panel + wires the matching overlay
+       layer). Glyph = per-clip availability: ● live · ◍ partial · ○ needs run. -->
+  <div class="stage-rail">
+    <span class="rail-label">pipeline</span>
+    <template x-for="(st, i) in stages" :key="st.id">
+      <span style="display:inline-flex; align-items:center;">
+        <button class="stage-node"
+                :class="[st.status, { selected: st.id === activeStageId }]"
+                @click="selectStage(st.id)"
+                :title="st.label + ' — ' + st.status + ' · ' + st.family + ' · rerun ' + st.rerun_cost">
+          <span class="glyph" x-text="stageGlyph(st)"></span>
+          <span x-text="st.label"></span>
+        </button>
+        <span class="stage-arrow" x-show="i < stages.length - 1">→</span>
+      </span>
+    </template>
+  </div>
+
   <!-- Upload clip bundle -->
   <div class="upload-panel" x-show="showUpload" x-cloak @click.outside="showUpload = false">
     <div class="uh">upload clip bundle</div>
@@ -190,6 +209,45 @@
       </div>
       <div class="cam-hint">rotate/move the green pitch dots onto the painted lines — the players follow. Flip skeletons if bodies read upside-down.</div>
     </div>
+
+    <!-- Stage inspector: the selected stage's StageView (read-only Phase 1) —
+         input/output shape, temporal mode, real param defaults (from core/),
+         honest camera-frame/profile notes, and per-clip availability. -->
+    <div class="stage-inspect" x-show="activeStage()" x-cloak>
+      <template x-if="activeStage()">
+        <div>
+          <div class="si-hd">
+            <span x-text="activeStage().label"></span>
+            <span class="spacer"></span>
+            <button @click="activeStageId = null" title="close">✕</button>
+          </div>
+          <div class="si-badges">
+            <span class="badge" :class="'status-' + activeStage().status" x-text="activeStage().status"></span>
+            <span class="badge" x-text="activeStage().temporal"></span>
+            <span class="badge" x-text="activeStage().family"></span>
+            <span class="badge" x-text="'rerun: ' + activeStage().rerun_cost"></span>
+          </div>
+          <div class="si-io">
+            <div class="io-row"><span class="io-k">in&nbsp;▸ </span><span x-text="activeStage().input.desc"></span></div>
+            <div class="io-row"><span class="io-k">out ▸ </span><span x-text="activeStage().output.desc"></span></div>
+            <div class="io-row" x-show="activeStage().depends_on.length">
+              <span class="io-k">deps ▸ </span><span x-text="activeStage().depends_on.join(', ')"></span>
+            </div>
+          </div>
+          <div class="si-params" x-show="activeStage().params.length">
+            <div class="p-lbl">params</div>
+            <template x-for="p in activeStage().params" :key="p.key">
+              <div class="p-row">
+                <span class="p-key" x-text="p.key"></span>
+                <span class="p-val" x-text="Array.isArray(p.value) ? p.value.join(' | ') : p.value"></span>
+              </div>
+            </template>
+          </div>
+          <div class="si-note" x-show="activeStage().note" x-text="activeStage().note"></div>
+          <div class="si-avail" x-show="activeStage().avail_note" x-text="'▸ ' + activeStage().avail_note"></div>
+        </div>
+      </template>
+    </div>
   </div>
 
   <!-- Right: 3D pose view (Three.js) -->
@@ -248,7 +306,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-09 · orient-fix (panel clicks + zoom + ±100)";
+const BUILD_ID = "2026-07-09 · studio stage rail + inspector (glass-box)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -593,6 +651,13 @@ Alpine.data("poseAnnot", () => ({
       show: true, build: BUILD_ID,
       three: "init…", refresh: "—", pelvis: "—", meshN: 0,
     },
+    // ── Pipeline Studio: glass-box stage rail + inspector (docs/pipeline-studio.md) ──
+    stages: [],           // /api/studio/stages → [{id,label,temporal,family,rerun_cost,status,input,output,params,note,avail_note}]
+    activeStageId: null,  // selected stage id, or null (inspector hidden)
+    stageManifest: null,  // full manifest payload (families legend etc.)
+    ballXyz: null,        // active-frame ball world xyz (ball2d/ball3d layer)
+    ballMeta: null,       // { on_ground, conf } for the current ball frame
+    ballMarker2d: null,   // { u, v, meta } projected ball marker (drawn in overlay)
 
     trackColor(tid) { return trackColorFor(tid); },
     zoomStyle() {
@@ -643,6 +708,7 @@ Alpine.data("poseAnnot", () => ({
       if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
       await this.refreshClips();
       await this.refreshEditedFrames();
+      await this.loadStages();
       await this.loadFrame(0);
       this.attachKeyboard();
     },
@@ -727,6 +793,7 @@ Alpine.data("poseAnnot", () => ({
       this.selectedJoint = null;
       await this.refreshThree();       // active subj 3D joints+mesh (also feeds mesh overlay)
       await this.refreshOverlay3d();   // fetch pitch + all skeletons 3D once → project in JS
+      if (this.activeStageLayer() === "ball") await this.refreshStageBall();  // ball marker follows the frame
     },
 
     onFrameLoaded(e) {
@@ -823,6 +890,14 @@ Alpine.data("poseAnnot", () => ({
       } else {
         this.activeMesh2d = null;
       }
+      // ball marker (ball2d/ball3d stage layer): project the world xyz through the
+      // SAME orientation + camera transform so it tracks the oriented overlay.
+      if (this.ballXyz && this.activeStageLayer() === "ball") {
+        const uv = project(orient(this.ballXyz));
+        this.ballMarker2d = uv ? { u: uv[0], v: uv[1], meta: this.ballMeta } : null;
+      } else {
+        this.ballMarker2d = null;
+      }
       this.rebuildOverlay();
     },
 
@@ -850,6 +925,57 @@ Alpine.data("poseAnnot", () => ({
     toggleOverlayMode() {
       this.overlayMode = this.overlayMode === "3d" ? "2d" : "3d";
       this.projectOverlay();
+    },
+
+    // ── Pipeline Studio: stage rail + inspector ────────────────────────────
+    async loadStages() {
+      const r = await fetch("/api/studio/stages");
+      if (!r.ok) return;
+      const d = await r.json();
+      this.stageManifest = d;
+      this.stages = d.stages || [];
+    },
+    activeStage() {
+      if (this.activeStageId === null) return null;
+      return this.stages.find((s) => s.id === this.activeStageId) || null;
+    },
+    activeStageLayer() {
+      const st = this.activeStage();
+      return st && st.output ? st.output.layer : null;
+    },
+    stageGlyph(st) {
+      if (st.status === "live") return "●";
+      if (st.status === "partial") return "◍";
+      return "○";
+    },
+    selectStage(id) {
+      // toggle: re-clicking the open stage closes the inspector + clears its layer
+      if (this.activeStageId === id) {
+        this.activeStageId = null;
+        this.ballMarker2d = null;
+        this.projectOverlay();
+        return;
+      }
+      this.activeStageId = id;
+      const st = this.stages.find((s) => s.id === id);
+      const layer = st && st.output ? st.output.layer : null;
+      // wire the selected stage to the existing overlay layers
+      if (layer === "pitch") this.showPitch = true;         // calibrate → pitch markings
+      if (layer === "ball") { this.refreshStageBall(); return; }  // ball2d/ball3d → ball marker
+      this.ballMarker2d = null;                             // any non-ball stage: drop the marker
+      this.projectOverlay();
+    },
+    async refreshStageBall() {
+      const r = await fetch(`/api/studio/ball/${this.frame}`);
+      if (!r.ok) {   // scene carries no ball track — manifest already flags it unmaterialized
+        this.ballXyz = null; this.ballMeta = null; this.ballMarker2d = null;
+        this.projectOverlay();
+        return;
+      }
+      const d = await r.json();
+      this.ballXyz = d.xyz || null;
+      this.ballMeta = { on_ground: d.on_ground, conf: d.conf };
+      this.projectOverlay();   // project the world xyz through the SAME oriented-camera transform
     },
 
     rebuildOverlay() {
@@ -914,6 +1040,16 @@ Alpine.data("poseAnnot", () => ({
             + ` font-size="24" fill="${col}" opacity="0.65" paint-order="stroke"`
             + ` stroke="#000" stroke-width="3">t${sk.track_id}</text>`);
         }
+      }
+      // ball marker (ball2d/ball3d stage layer) — drawn last, above the skeletons
+      if (this.ballMarker2d) {
+        const b = this.ballMarker2d;
+        const grounded = b.meta && b.meta.on_ground;
+        const col = grounded ? "#ffd24a" : "#ff8c3a";
+        out.push(`<circle cx="${b.u}" cy="${b.v}" r="8" fill="none" stroke="${col}" stroke-width="3"/>`);
+        out.push(`<circle cx="${b.u}" cy="${b.v}" r="2.6" fill="${col}"/>`);
+        out.push(`<text x="${b.u + 12}" y="${b.v - 8}" font-size="22" fill="${col}"`
+          + ` paint-order="stroke" stroke="#000" stroke-width="3">ball${grounded ? ' ●grnd' : ''}</text>`);
       }
       this.overlaySvgStr = out.join("");
     },

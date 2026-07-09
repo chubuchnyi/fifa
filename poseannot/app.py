@@ -45,6 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import clips as clips_mod
+from . import studio as studio_mod
 from .auth import authenticate, current_user, issue_token
 from .camera import CameraAdjust, frame_projector, project_points
 from .config import load as load_config
@@ -409,6 +410,54 @@ def api_overlay3d(frame: int, user: str = Depends(current_user)) -> dict:
 @app.get("/api/health")
 async def health() -> dict:
     return {"ok": True}
+
+
+# ─── studio API (Pipeline Studio — per-stage manifest, read-only) ────────────
+@app.get("/api/studio/stages")
+def api_studio_stages(user: str = Depends(current_user)) -> dict:
+    """The pipeline stage DAG as an inspectable manifest (docs/pipeline-studio.md).
+
+    Static structure + params from the pure configs, plus a per-clip ``status``
+    per stage telling the UI which stages it can visualise from this scene.json
+    now (``live``) vs. which need a Phase-0 run bundle (``unmaterialized``)."""
+    del user
+    st = get_state()
+    return studio_mod.build_manifest(
+        st.scene, n_frames=st.n_frames, active_clip=clips_mod.active_id(),
+    )
+
+
+@app.get("/api/studio/ball/{frame}")
+def api_studio_ball(frame: int, user: str = Depends(current_user)) -> dict:
+    """Ball world position at ``frame`` projected to pixels (Ball 2D/3D stage layer).
+
+    Returns ``{pt: [u,v] | None, xyz, on_ground, conf}``; 404-free when the scene
+    carries no ball track (the manifest already flags that stage unmaterialized)."""
+    del user
+    st = get_state()
+    ball = getattr(st.scene, "ball", None)
+    if ball is None:
+        raise HTTPException(404, "scene has no ball track")
+    pos = np.asarray(getattr(ball, "positions_3d", []), dtype=float)
+    if frame < 0 or frame >= pos.shape[0]:
+        raise HTTPException(404, f"frame {frame} out of range for ball track")
+    on_ground = getattr(ball, "on_ground", None)
+    conf = getattr(ball, "height_confidence", None)
+    out: dict = {
+        "xyz": pos[frame].tolist(),
+        "on_ground": bool(on_ground[frame]) if on_ground is not None else None,
+        "conf": float(conf[frame]) if conf is not None else None,
+        "pt": None,
+    }
+    if st.scene.camera is not None:
+        cfg = load_config()
+        vsize = frame_size(str(cfg.source_video))
+        proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+        uv = project_points(pos[frame][None, :], proj)[0]
+        if np.isfinite(uv).all():
+            out["pt"] = [float(uv[0]), float(uv[1])]
+        out["frame_flipped"] = bool(proj.frame_flipped)
+    return out
 
 
 # ─── write API (v1 — joint edits) ───────────────────────────────────────────

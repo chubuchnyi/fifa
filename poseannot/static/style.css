@@ -38,12 +38,13 @@ body.login { display: flex; align-items: center; justify-content: center; }
 /* ── main app grid ── */
 .app-shell {
   display: grid;
-  grid-template-rows: 44px 1fr 60px;
+  grid-template-rows: 44px 46px 1fr 60px;
   grid-template-columns: 200px minmax(0, 1fr) minmax(420px, 44vw);
   grid-template-areas:
-    "toolbar toolbar toolbar"
-    "sidebar main    right"
-    "timeline timeline timeline";
+    "toolbar   toolbar   toolbar"
+    "stagerail stagerail stagerail"
+    "sidebar   main      right"
+    "timeline  timeline  timeline";
   height: 100vh;
   overflow: hidden;   /* lock controls to the viewport; panels scroll internally */
 }
@@ -72,6 +73,74 @@ body.login { display: flex; align-items: center; justify-content: center; }
   border-radius: 3px; padding: 0.25rem 0.4rem; font-family: inherit; font-size: 0.85em;
   max-width: 240px;
 }
+
+/* ── pipeline stage rail (glass-box DAG strip) ── */
+.stage-rail {
+  grid-area: stagerail; background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 1px;
+  padding: 0 0.7rem; overflow-x: auto; overflow-y: hidden;
+  font-size: 0.8rem; white-space: nowrap;
+}
+.stage-rail .rail-label {
+  color: var(--fg-dim); font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 0.6px; margin-right: 0.5rem; flex: none;
+}
+.stage-node {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 0.18rem 0.45rem; cursor: pointer; flex: none;
+  background: var(--bg); color: var(--fg); font-family: inherit; font-size: 0.8rem;
+}
+.stage-node:hover { border-color: var(--accent); }
+.stage-node.selected { border-color: var(--accent); background: rgba(107, 181, 255, 0.16); color: var(--accent-bright); }
+.stage-node .glyph { font-size: 0.9em; line-height: 1; }
+.stage-node.live    .glyph { color: var(--verified); }
+.stage-node.partial .glyph { color: var(--edited); }
+.stage-node.unmaterialized { opacity: 0.68; }
+.stage-node.unmaterialized .glyph { color: var(--raw); }
+.stage-arrow { color: var(--raw); flex: none; padding: 0 1px; user-select: none; }
+
+/* ── stage inspector (per-stage StageView, floating over the canvas) ── */
+.stage-inspect {
+  position: absolute; top: 10px; left: 10px; z-index: 6;
+  width: 322px; max-height: calc(100% - 20px); overflow-y: auto;
+  background: rgba(36, 39, 44, 0.97); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0.6rem 0.7rem; font-size: 0.8rem; line-height: 1.4;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+}
+.stage-inspect .si-hd {
+  display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.45rem;
+  font-weight: 600; color: var(--accent-bright); font-size: 0.9rem;
+}
+.stage-inspect .si-hd .spacer { flex: 1; }
+.stage-inspect .si-hd button {
+  background: none; border: 1px solid var(--border); color: var(--fg-dim);
+  border-radius: 3px; cursor: pointer; padding: 0.05rem 0.4rem; font-family: inherit;
+}
+.stage-inspect .si-hd button:hover { border-color: var(--accent); color: var(--accent); }
+.stage-inspect .si-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.5rem; }
+.stage-inspect .badge {
+  font-size: 0.68rem; border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.05rem 0.45rem; color: var(--fg-dim);
+}
+.stage-inspect .badge.status-live { color: var(--verified); border-color: var(--verified); }
+.stage-inspect .badge.status-partial { color: var(--edited); border-color: var(--edited); }
+.stage-inspect .badge.status-unmaterialized { color: var(--raw); }
+.stage-inspect .si-io { margin: 0.3rem 0; }
+.stage-inspect .si-io .io-row { margin: 0.22rem 0; word-break: break-word; }
+.stage-inspect .si-io .io-k { color: var(--fg-dim); }
+.stage-inspect .si-params { margin-top: 0.5rem; border-top: 1px solid var(--border); padding-top: 0.45rem; }
+.stage-inspect .si-params .p-lbl { color: var(--fg-dim); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem; }
+.stage-inspect .si-params .p-row { display: flex; justify-content: space-between; gap: 0.6rem; margin: 0.14rem 0; }
+.stage-inspect .si-params .p-key { color: var(--fg-dim); }
+.stage-inspect .si-params .p-val { color: var(--fg); font-family: ui-monospace, monospace; text-align: right; word-break: break-word; }
+.stage-inspect .si-note {
+  margin-top: 0.5rem; font-size: 0.74rem; color: var(--edited); line-height: 1.4;
+  background: rgba(255, 177, 79, 0.08); border-left: 2px solid var(--edited);
+  padding: 0.35rem 0.45rem; border-radius: 0 3px 3px 0;
+}
+.stage-inspect .si-avail { margin-top: 0.4rem; font-size: 0.74rem; color: var(--fg-dim); }
 
 [x-cloak] { display: none !important; }
 .upload-panel {
