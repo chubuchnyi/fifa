@@ -365,6 +365,36 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-09 (#61 RESOLVED — camera rebuilt from the trusted homography; validated E2E)** — **The stored
+  PnLCalib 3D extrinsics were simply BROKEN, not merely mis-scaled.** `scripts/debug/calib_probe.py` (3-way
+  pitch overlay on frame 0) shows the stored camera projects the pitch up into the CROWD while the per-frame
+  homography `H` (image→world plane, `field.calibration.homographies`) — a SEPARATE solve that already grounds
+  the feet — lands the pitch exactly on the painted lines. So `H` is the trustworthy calibration and the fix
+  is to *rebuild the camera from it*. For a ground point (Z=0) `[u v 1]ᵀ ~ K[r1 r2 t][x y 1]ᵀ = H⁻¹[x y 1]ᵀ`,
+  so given trusted `H⁻¹` and a focal `f` we recover a consistent `(R,t)` by decomposing `K⁻¹H⁻¹` (normalise on
+  col0, `r3=r1×r2`, SVD-orthonormalise, `det>0`, `t[2]>0`). **`scripts/recalibrate_camera.py`** does this and
+  re-bakes `camera` into A, B, and the default scene (idempotent — always re-decomposes from the stored
+  homography; auto-default `f=3500`, `--focal` override per project rule). Ground projection is focal-INVARIANT
+  under re-decomposition (the camera slides back as `f` rises: `t[z]` median 21→42→63→83 m for f=1158→4600, all
+  three scenes converge on **t[z]≈63.8 m** confirming one real camera); focal sets only the 3D-body height
+  scale. Focal picked objectively (`scripts/debug/focal_size_probe.py`): 1.8 m sticks at the 18 grounded feet
+  give median 52/70/79 px at f=1158/2300/3500; measured standing players (#7≈86 px) match **f≈3500**, chosen as
+  the default (user = ground truth on scale, camera-panel fine-tunes the residual). **Flip conflict fixed:** the
+  re-decomposed `R` has `R[1,2]=+0.98` on every frame, so it trips `poseannot.camera`'s legacy `-R[1,2]<0`
+  180°-roll gate as a FALSE POSITIVE — added a `CameraTrack.raw_frame_aligned` marker (default False, backward-
+  compatible decode) that the projector checks to SKIP the roll for rebuilt cameras. **Corrects the entry
+  below:** the manual camera-panel `zoom` does NOT equal a focal change — it multiplies `fx` about the
+  principal point with `R,t` FIXED, so ground points slide off the painted lines; a true focal change requires
+  re-decomposition (camera moves back, ground stays put, bodies grow). Most of the "3× too small" was the
+  broken extrinsics (stored cam gave 22 px sticks vs 52 px even at f=1158), the remainder is focal. **Validated
+  E2E live** (Chrome on :8899): on clip B (8 tracks) and the default clip (23 tracks) every skeleton renders
+  player-sized ON its real player across the full pitch depth, and the projected pitch overlay's green dots
+  trace the center-circle arc on the grass (not the crowd). A few far players (t13/t18) still sit slightly high
+  from foot-pixel depth over-extrapolation (the #59 residual), fine-tunable per-joint. Touches:
+  `src/pitch3d/core/scene/camera.py` (+`raw_frame_aligned`), `poseannot/camera.py` (flip gate),
+  `scripts/recalibrate_camera.py` + `scripts/debug/{calib_probe,focal_size_probe}.py` (new). Durable-pipeline
+  follow-up: the pod calib path should emit `raw_frame_aligned` cameras (rebuilt-from-homography) going forward.
+
 - **2026-07-09 (variant B placement fixed locally + #61 focal-ambiguity proven)** — **Two findings, one
   fix shipped.** (1) **#59 B ROOT-CAUSED & REPAIRED (local, no pod):** measured B's `pose.transl` = it was
   stored as `(foot_pixel_x, foot_pixel_y, pelvis_height_m)` — x∈[494,1641], y∈[510,729] are raw 1920-space

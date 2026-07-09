@@ -74,6 +74,11 @@ class CameraTrack:
         translation: World→camera translation per frame, shape ``(T, 3)`` in meters.
         estimated: True if poses are estimated (broadcast cam); False if prescribed
             (a synthesized ViewSynthesizer trajectory).
+        raw_frame_aligned: True if the extrinsics already project onto the video's
+            native (as-decoded) frame — i.e. the camera was rebuilt from the
+            raw-frame homography (scripts/recalibrate_camera.py). Consumers that
+            carry a legacy 180°-roll workaround (poseannot.camera.frame_projector)
+            must skip it when this is set. Legacy PnLCalib solves leave it False.
     """
 
     intrinsics: CameraIntrinsics
@@ -81,6 +86,7 @@ class CameraTrack:
     rotation_quat: np.ndarray
     translation: np.ndarray
     estimated: bool = True
+    raw_frame_aligned: bool = False
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int)

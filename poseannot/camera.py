@@ -93,7 +93,10 @@ def frame_projector(
     # solved CameraTrack is self-consistent only on the frame turned upside-down,
     # so a no-roll projection lands every body HEAD-DOWN on the as-decoded frame.
     # Detect via the validated gate ``-R[1,2] < 0`` (⟺ R[1,2] > 0).
-    flipped = bool(-R[1, 2] < 0)
+    # A camera rebuilt from the raw-frame homography (recalibrate_camera.py) is
+    # already frame-aligned and trips this gate as a false positive, so skip it.
+    aligned = bool(getattr(camera_track, "raw_frame_aligned", False))
+    flipped = (not aligned) and bool(-R[1, 2] < 0)
     if flipped:
         # The correction is a full 180° roll about the optical axis:
         # D=diag(-1,-1,1) maps (u,v) -> (W-u, H-v) (cx=W/2, cy=H/2 exactly).
