@@ -365,6 +365,30 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-09 (poseannot orient controls "do nothing" — ROOT-CAUSED to pointer-capture hijack; FIXED + self-validated in Chrome; task #64 reopened→closed)** —
+  After the redesign (next entry) the user reported in-browser that **reset / flip-overlay / flip-skeletons /
+  sliders did nothing**, the 2D/3D toggle "does nothing", the overlay sits wrong vs the frame, ±60 m was too
+  small, and a **zoom** slider was missing — and demanded I test+validate **myself in Chrome** (not headless).
+  My prior "0.000000 px" checks verified the MATH but never exercised the DOM event path, which is exactly
+  where the bug was. ROOT CAUSE: the `.cam-panel` (orient panel) lives **inside** `.main`, and `.main`'s
+  `@pointerdown="onPanStart"` calls `setPointerCapture()` — so every pointerdown on a panel button/slider
+  **started a frame-pan and stole the interaction**; the `@click`/`@input` handlers never fired. (That's why
+  the same methods worked when called directly via the Alpine instance but "did nothing" on click.) `.zoom-hud`
+  was already excluded; `.cam-panel`/`.upload-panel` were not. **Fix** (`poseannot/static/index.html`): exclude
+  `.zoom-hud, .cam-panel, .upload-panel` in both `onPanStart` and `onWheel`. Secondary fixes: (a) 2D/3D "does
+  nothing" = the projected-mesh dots were `r≈2.6` in 1920-viewBox → **~0.9 px on a 730 px canvas** (invisible);
+  enlarged to `r=(7−4·depth)` so the 10 475-vertex cloud reads as a body. (b) Translation limits **±60→±100 m**.
+  (c) **New zoom control** (`ovr.zoom`, ×0.2–5, applied as a focal multiplier `fx·zoom, fy·zoom` about the
+  principal point) — the manual knob for the residual "~3× too small" calibration gap (#61). SELF-VALIDATED in
+  Chrome via **real clicks/drags** (build `orient-fix`): flip-overlay-X click → `ofx=true`, button active,
+  overlay mirrors, `_panning=false` (no pan hijack); rot-Z drag → rotates, `view.tx` unchanged (frame did NOT
+  pan); reset → all-neutral + buttons de-highlight; 2D/3D toggle → `mesh10475` renders (12 823 vs 2 348 SVG
+  els); zoom drag → `2.74×`, active-mesh bbox grew 9×26→25×72 px; flip-skeletons-X → `sfx=true`. Screenshots
+  captured each step. Residual overlay mis-position is calibration **#61** (still open) — zoom+move are now the
+  hand-correction path. Cleanup: removed the temp `cc_test` login from `users.yaml`. **index.html is a static
+  file served with `no-store`, so no server restart needed** (the app.py `/api/overlay3d` route from the
+  redesign is already live).
+
 - **2026-07-09 (poseannot overlay-orientation controls REDESIGNED — client-side projection; task #64)** —
   User: the overlay-camera controls were unusable — "жутко тормозит" (terrible lag), rotation axes + offsets
   confusing. Asked for: rotation about **3 world axes through the pitch-markings centre** + translation on

@@ -166,6 +166,14 @@
                  x-model.number="ovr[c.k]" @input="onOvrChange()" />
         </div>
       </template>
+      <div class="cam-sec">zoom (overlay scale)</div>
+      <div class="cam-row">
+        <label>zoom ×</label>
+        <input type="range" min="0.2" max="5" step="0.01"
+               x-model.number="ovr.zoom" @input="onOvrChange()" />
+        <input class="cam-num" type="number" min="0.2" max="5" step="0.01"
+               x-model.number="ovr.zoom" @input="onOvrChange()" />
+      </div>
       <div class="cam-row cam-flip">
         <label>flip overlay</label>
         <template x-for="c in ovrFlipO" :key="c.k">
@@ -240,7 +248,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-09 · overlay-orient (client-side)";
+const BUILD_ID = "2026-07-09 · orient-fix (panel clicks + zoom + ±100)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -553,7 +561,7 @@ Alpine.data("poseAnnot", () => ({
     //   t{x,y,z} — translate metres along world X/Y/Z
     //   of{x,y,z} — flip/mirror the WHOLE overlay about the pitch centre
     //   sf{x,y,z} — flip/mirror each SKELETON about its own centroid (in place)
-    ovr: { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0,
+    ovr: { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0, zoom: 1,
            ofx: false, ofy: false, ofz: false, sfx: false, sfy: false, sfz: false },
     ovrRot: [
       { k: "rx", label: "rot X°", min: -180, max: 180, step: 0.5 },
@@ -561,9 +569,9 @@ Alpine.data("poseAnnot", () => ({
       { k: "rz", label: "rot Z°", min: -180, max: 180, step: 0.5 },
     ],
     ovrTr: [
-      { k: "tx", label: "move X m", min: -60, max: 60, step: 0.1 },
-      { k: "ty", label: "move Y m", min: -60, max: 60, step: 0.1 },
-      { k: "tz", label: "move Z m", min: -60, max: 60, step: 0.1 },
+      { k: "tx", label: "move X m", min: -100, max: 100, step: 0.1 },
+      { k: "ty", label: "move Y m", min: -100, max: 100, step: 0.1 },
+      { k: "tz", label: "move Z m", min: -100, max: 100, step: 0.1 },
     ],
     ovrFlipO: [
       { k: "ofx", label: "X" }, { k: "ofy", label: "Y" }, { k: "ofz", label: "Z" },
@@ -764,12 +772,13 @@ Alpine.data("poseAnnot", () => ({
         return [q[0] + C[0] + t[0], q[1] + C[1] + t[1], q[2] + C[2] + t[2]];
       };
       const R = cam.R, T = cam.t;
+      const zoom = o.zoom || 1;   // focal multiplier: scale the overlay about the principal point
       const project = (p) => {   // world → pixel; behind-camera → null. returns [u,v,z_cam]
         const zc = R[2][0] * p[0] + R[2][1] * p[1] + R[2][2] * p[2] + T[2];
         if (zc <= 1e-6) return null;
         const xc = R[0][0] * p[0] + R[0][1] * p[1] + R[0][2] * p[2] + T[0];
         const yc = R[1][0] * p[0] + R[1][1] * p[1] + R[1][2] * p[2] + T[1];
-        return [cam.fx * xc / zc + cam.cx, cam.fy * yc / zc + cam.cy, zc];
+        return [cam.fx * zoom * xc / zc + cam.cx, cam.fy * zoom * yc / zc + cam.cy, zc];
       };
       // pitch markings
       if (this.showPitch) {
@@ -828,7 +837,7 @@ Alpine.data("poseAnnot", () => ({
     },
 
     resetOvr() {
-      this.ovr = { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0,
+      this.ovr = { rx: 0, ry: 0, rz: 0, tx: 0, ty: 0, tz: 0, zoom: 1,
                    ofx: false, ofy: false, ofz: false, sfx: false, sfy: false, sfz: false };
       this.projectOverlay();
     },
@@ -863,8 +872,11 @@ Alpine.data("poseAnnot", () => ({
         for (const p of this.activeMesh2d) {
           if (!p) continue;
           const d = p[2];                               // 0 (near) … 1 (far)
-          const r = (2.6 - 1.6 * d).toFixed(2);
-          const op = (0.55 - 0.40 * d).toFixed(3);
+          // viewBox is 1920 wide shown in ~700px, so radii shrink ~2.7×. Keep
+          // these large enough that the 10k-vertex cloud reads as a body surface
+          // (the old 2.6px → ~0.9px on screen was invisible: "3D does nothing").
+          const r = (7.0 - 4.0 * d).toFixed(2);
+          const op = (0.5 - 0.3 * d).toFixed(3);
           out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="${r}"`
             + ` fill="${this.meshColor}" opacity="${op}"/>`);
         }
@@ -1118,6 +1130,7 @@ Alpine.data("poseAnnot", () => ({
     },
 
     onWheel(e) {
+      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel")) return;
       const box = this.$refs.canvasFrame;
       if (!box) return;
       const rect = box.getBoundingClientRect();
@@ -1127,7 +1140,11 @@ Alpine.data("poseAnnot", () => ({
 
     onPanStart(e) {
       if (e.button !== 0) return;
-      if (e.target.closest && e.target.closest(".zoom-hud")) return;
+      // The overlay-orient panel and zoom HUD live INSIDE .main. Without this
+      // guard, pointerdown on their buttons/sliders starts a pan and
+      // setPointerCapture steals the interaction, so clicks/drags never reach
+      // the controls — the "reset/flip/sliders do nothing" bug.
+      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel")) return;
       this._panning = true;
       this._panLast = { x: e.clientX, y: e.clientY };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
