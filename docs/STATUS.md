@@ -365,6 +365,31 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-09 (POSE BAKE-OFF A/B — FULL video E2E of BOTH variants on the pod, pulled local; MooseFS cold-run stall root-caused + fixed with a page-cache prewarm; tasks #65–#70)** —
+  Ran the complete decode→detect→track→PnLCalib→pose→WASB→render→FK-export→Blender(4-cam)→ffmpeg path for
+  **both** pose backends at production knobs (60 f · cams broadcast,sideline,top,goal · 1280×720 · 32 spp ·
+  coherence+physics ON, demo-edits OFF) via the new **`scripts/pod_ab_video.sh`** (VARIANT=A|B; identical
+  detect/track/calibrate/render, differing ONLY in `--pose-backend`). Pod `abso48i2h1j0ex` (RTX PRO 4500
+  Blackwell, euro MooseFS volume). **A = SMPLest-X** (`smplestx_backend`): 28m27s (13:35:53→14:04:20 UTC).
+  **B = SAM 3D Body** (`sam3dbody_backend`, MHR→SMPL-X): 29m32s (14:06:54→14:36:26 UTC), **no segfault** — the
+  `pymomentum-gpu==0.1.90.post0` pin + `LD_LIBRARY_PATH=<torch>/lib` ABI env held. Each variant produced 4
+  camera MP4s (broadcast 1.4M · sideline 1.3M · goal 1.1M · top ~165K), `export/scene.json` 6.5M, **29 tracked
+  subjects** (mesh npz), preview frames. Pulled to local **`out/anim_A/`** + **`out/anim_B/`** (video/ +
+  export/scene.json + render/); byte-sizes match the pod. **Pod STOPPED** ($0.012/hr storage only). A-vs-B pose
+  QUALITY comparison is DEFERRED — deliver both videos to the user to eye-judge first (no analysis yet).
+  **ROOT-CAUSE + FIX (the reusable finding):** a COLD run appears to "idle" — GPU 0 %, main thread parked in FUSE
+  `request_wait_answer` — because the **venv AND model weights live on the MooseFS euro network volume**, so
+  Python import + `torch.load` pay a **per-file FUSE round-trip latency tax** (~150 KB/s *effective*). This is
+  NOT a bandwidth limit: a bulk read of the same volume clocks **417 MB/s cold** and a warmed re-read **6.1
+  GB/s**, and the kernel page cache **persists across processes** here (verified by dd re-read). **Mitigation
+  that worked:** bulk-sequential-read the import trees + weights into page cache before the run
+  (`find <trees> -print0 | xargs -0 -P48 -n8 cat >/dev/null`) — A jumped 4 MiB→3.6 GiB GPU + started emitting
+  output the instant the venv was warmed; B additionally needs `sam-3d-body`(model.ckpt 2.0G)+`MHR`(mhr_model.pt
+  664M). Caveat: prewarm caches file *contents*; residual pre-GPU time is import-time `stat`/negative-lookup
+  latency that content-prewarm can't remove (B's larger import stack = longer pre-GPU phase). **Baked into
+  `pod_ab_video.sh`**: a `PREWARM=1` (default; `PREWARM=0`/`PREWARM_JOBS` overrides) step that warms the
+  variant-appropriate trees up front, so a fresh pod no longer eats the ~20-min stall. `bash -n` clean.
+
 - **2026-07-09 (poseannot orient controls "do nothing" — ROOT-CAUSED to pointer-capture hijack; FIXED + self-validated in Chrome; task #64 reopened→closed)** —
   After the redesign (next entry) the user reported in-browser that **reset / flip-overlay / flip-skeletons /
   sliders did nothing**, the 2D/3D toggle "does nothing", the overlay sits wrong vs the frame, ±60 m was too
