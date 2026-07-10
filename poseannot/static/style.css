@@ -160,6 +160,27 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .stage-inspect .si-rerun .rr-gate input { cursor: inherit; margin: 0; }
 .stage-inspect .si-rerun .rr-flag { color: var(--edited); }
 .stage-inspect .si-rerun .rr-report { margin-left: auto; color: var(--verified); font-family: ui-monospace, monospace; font-size: 0.7rem; }
+.stage-inspect .si-rerun .rr-gate-wrap { display: flex; flex-direction: column; }
+.stage-inspect .si-rerun .rr-params {
+  display: flex; flex-direction: column; gap: 0.12rem;
+  margin: 0.1rem 0 0.35rem 1.35rem; padding-left: 0.5rem;
+  border-left: 1px solid var(--border);
+}
+.stage-inspect .si-rerun .rr-param {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  font-family: ui-monospace, monospace; font-size: 0.7rem;
+}
+.stage-inspect .si-rerun .rr-pk { color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stage-inspect .si-rerun .rr-param.dirty .rr-pk { color: var(--accent-bright); font-weight: 600; }
+.stage-inspect .si-rerun .rr-pn {
+  width: 5.5rem; flex: none; text-align: right;
+  padding: 0.1rem 0.3rem; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg-panel); color: var(--fg);
+  font-family: ui-monospace, monospace; font-size: 0.7rem;
+}
+.stage-inspect .si-rerun .rr-param.dirty .rr-pn { border-color: var(--accent); color: var(--accent-bright); }
+.stage-inspect .si-rerun .rr-pn:disabled { opacity: 0.5; }
+.stage-inspect .si-rerun .rr-param input[type="checkbox"] { margin: 0; }
 .stage-inspect .si-rerun .rr-actions { display: flex; gap: 0.4rem; }
 .stage-inspect .si-rerun .rr-actions button {
   flex: 1; background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg);

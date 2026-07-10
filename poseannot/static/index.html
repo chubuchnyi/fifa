@@ -273,15 +273,39 @@
             </div>
             <div class="rr-gates">
               <template x-for="g in (rerunCatalog && rerunCatalog.gates) || []" :key="g.id">
-                <label class="rr-gate" :class="{ flagship: g.flagship, unavail: !g.available }"
-                       :title="g.available ? '' : g.reason">
-                  <input type="checkbox" :checked="gateOn(g)" :disabled="!g.available || rerunBusy"
-                         @change="toggleGate(g.id, $event.target.checked)" />
-                  <span x-text="g.label"></span>
-                  <span class="rr-flag" x-show="g.flagship" title="flagship demo gate">★</span>
-                  <span class="rr-report" x-show="rerunReport && rerunReport.gates && rerunReport.gates[g.id]"
-                        x-text="fmtGateReport(g.id)"></span>
-                </label>
+                <div class="rr-gate-wrap">
+                  <label class="rr-gate" :class="{ flagship: g.flagship, unavail: !g.available }"
+                         :title="g.available ? '' : g.reason">
+                    <input type="checkbox" :checked="gateOn(g)" :disabled="!g.available || rerunBusy"
+                           @change="toggleGate(g.id, $event.target.checked)" />
+                    <span x-text="g.label"></span>
+                    <span class="rr-flag" x-show="g.flagship" title="flagship demo gate">★</span>
+                    <span class="rr-report" x-show="rerunReport && rerunReport.gates && rerunReport.gates[g.id]"
+                          x-text="fmtGateReport(g.id)"></span>
+                  </label>
+                  <!-- live param editor: shown when the gate is ON and exposes
+                       numeric/bool fields. Editing a value tunes exactly what the
+                       gate runs with on the next Re-run (applied on top of the
+                       profile default via _dc_replace, server-side). -->
+                  <div class="rr-params" x-show="gateOn(g) && g.params && g.params.length">
+                    <template x-for="p in (g.params || [])" :key="p.key">
+                      <div class="rr-param" :class="{ dirty: paramDirty(g, p) }"
+                           :title="p.key + ' (' + p.type + ') · default ' + p.value">
+                        <span class="rr-pk" x-text="p.key"></span>
+                        <template x-if="p.type === 'bool'">
+                          <input type="checkbox" :checked="paramVal(g.id, p.key)" :disabled="rerunBusy"
+                                 @change="setParam(g.id, p.key, $event.target.checked, 'bool')" />
+                        </template>
+                        <template x-if="p.type !== 'bool'">
+                          <input type="number" class="rr-pn" :disabled="rerunBusy"
+                                 :step="p.type === 'int' ? '1' : 'any'"
+                                 :value="paramVal(g.id, p.key)"
+                                 @change="setParam(g.id, p.key, $event.target.value, p.type)" />
+                        </template>
+                      </div>
+                    </template>
+                  </div>
+                </div>
               </template>
             </div>
             <div class="rr-actions">
@@ -291,6 +315,10 @@
               </button>
               <button class="rr-revert" @click="doRevert()" :disabled="rerunBusy || !rerunActive">
                 Revert to baseline
+              </button>
+              <button class="rr-reset" @click="resetParams()" :disabled="rerunBusy || !anyParamDirty()"
+                      title="reset all gate params to the profile defaults">
+                Reset params
               </button>
             </div>
             <div class="rr-status" x-show="rerunReport" x-text="rerunSummary()"></div>
@@ -357,7 +385,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-10 · gate-click fix + global busy overlay";
+const BUILD_ID = "2026-07-10 · live gate params editor (re-run overrides)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -715,6 +743,7 @@ Alpine.data("poseAnnot", () => ({
     rerunCatalog: null,   // GET /api/studio/rerun/catalog → {profile,gates,profiles}
     rerunProfile: "default",
     rerunGates: {},       // gate id → desired-enabled (seeded from profile defaults)
+    rerunParams: {},      // gate id → {field: value} live param overrides (seeded from catalog)
     rerunBusy: false,     // POST in flight (FK rebuild is FK-bound ~19s; labelled honestly)
     rerunActive: false,   // a re-run layer is currently applied ⇒ revert available
     rerunReport: null,    // last run report {applied,gates,corrections_added,affected_subjects,total_ms}
@@ -1078,13 +1107,60 @@ Alpine.data("poseAnnot", () => ({
       this.rerunCatalog = d;
       this.rerunError = d.error || null;
       const g = {};
+      const params = {};
       for (const gate of (d.gates || [])) {
-        if (gate.available) g[gate.id] = !!gate.default_enabled;
+        if (!gate.available) continue;
+        g[gate.id] = !!gate.default_enabled;
+        // Seed each gate's live params from the profile defaults the catalog
+        // reports (switching profile re-seeds — the shown value is honest).
+        const gp = {};
+        for (const p of (gate.params || [])) gp[p.key] = p.value;
+        params[gate.id] = gp;
       }
       this.rerunGates = g;
+      this.rerunParams = params;
     },
     gateOn(g) { return !!this.rerunGates[g.id]; },
     toggleGate(id, on) { this.rerunGates[id] = !!on; },
+    // ── live param overrides (fed to the re-run on top of the profile defaults) ──
+    paramVal(gid, key) {
+      const gp = this.rerunParams[gid];
+      return gp ? gp[key] : undefined;
+    },
+    setParam(gid, key, raw, type) {
+      if (!this.rerunParams[gid]) this.rerunParams[gid] = {};
+      let v = raw;
+      if (type === "bool") v = !!raw;
+      else if (type === "int") { v = parseInt(raw, 10); if (Number.isNaN(v)) return; }
+      else { v = parseFloat(raw); if (Number.isNaN(v)) return; }   // float
+      this.rerunParams[gid][key] = v;
+    },
+    // A param differs from the profile default when the catalog value ≠ live value.
+    paramDirty(g, p) {
+      const v = this.paramVal(g.id, p.key);
+      return v !== undefined && v !== p.value;
+    },
+    // Re-seed every gate's params back to the catalog (profile) defaults.
+    resetParams() {
+      const params = {};
+      for (const gate of ((this.rerunCatalog && this.rerunCatalog.gates) || [])) {
+        if (!gate.available) continue;
+        const gp = {};
+        for (const p of (gate.params || [])) gp[p.key] = p.value;
+        params[gate.id] = gp;
+      }
+      this.rerunParams = params;
+    },
+    // Any gate carrying a non-default param ⇒ the "reset params" button is live.
+    anyParamDirty() {
+      for (const gate of ((this.rerunCatalog && this.rerunCatalog.gates) || [])) {
+        if (!gate.available) continue;
+        for (const p of (gate.params || [])) {
+          if (this.paramDirty(gate, p)) return true;
+        }
+      }
+      return false;
+    },
     fmtGateReport(id) {
       const rep = this.rerunReport && this.rerunReport.gates && this.rerunReport.gates[id];
       if (!rep) return "";
@@ -1107,7 +1183,11 @@ Alpine.data("poseAnnot", () => ({
       try {
         const r = await fetch("/api/studio/rerun", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ profile: this.rerunProfile, overrides: this.rerunGates }),
+          body: JSON.stringify({
+            profile: this.rerunProfile,
+            overrides: this.rerunGates,
+            params: this.rerunParams,
+          }),
         });
         if (!r.ok) { this.rerunError = `rerun ${r.status}`; return; }
         this.rerunReport = await r.json();

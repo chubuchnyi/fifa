@@ -21,6 +21,7 @@ Run:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -466,6 +467,9 @@ class RerunRequest(BaseModel):
     profile: str = "default"
     #: per-gate on/off override; absent gates fall back to the profile default.
     overrides: dict[str, bool] = Field(default_factory=dict)
+    #: per-gate field overrides ({gate_id: {field: value}}) applied on top of the
+    #: profile defaults; unknown/uncastable fields are dropped server-side.
+    params: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
 
 @app.get("/api/studio/rerun/catalog")
@@ -490,7 +494,9 @@ def api_studio_rerun(req: RerunRequest, user: str = Depends(current_user)) -> di
     to tens of seconds); the UI shows a spinner."""
     del user
     st = get_state()
-    return rerun_mod.run_corrections(st, profile=req.profile, overrides=req.overrides)
+    return rerun_mod.run_corrections(
+        st, profile=req.profile, overrides=req.overrides, params=req.params,
+    )
 
 
 @app.post("/api/studio/rerun/clear")

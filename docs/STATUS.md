@@ -365,6 +365,35 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-10 (PIPELINE STUDIO Increment 3 — LIVE per-gate params editor wired into the re-run engine; tasks #86–#88)** —
+  Made the correction-gate params **live-editable** and fed them into the existing ephemeral re-run, completing
+  the Phase-2 "params editor" for the correction family. **Design decision (resolves the mismatch flagged in
+  Increment 2):** the studio manifest (`studio.py`) had exposed physics params as *module constants*
+  (`kin.HUMAN_MAX_SPEED`) that don't map to what the gates actually run off. So the editor sources params from
+  the **same per-gate config dataclass the re-run runs off** — `getattr(phys, attr)` for each gate
+  (`phys.orient_verticality`, `phys.kinematic`, `phys.coherence`, …) — introspected via
+  `dataclasses.fields`. No module-constant path; a profile switch re-seeds the shown defaults honestly.
+  **Backend** (`poseannot/rerun.py`): `_editable_params(cfg)` lists a gate's numeric/bool fields (skips
+  `enabled` — the on/off checkbox owns it; skips str/enum so a typo can't build an invalid config);
+  `_clean_param_overrides(cfg, params)` casts each incoming value to the field's declared type (bool before
+  int — `isinstance(True,int)` is True) and drops unknown/uncastable keys. `gate_catalog()` now returns
+  `params:[{key,value,type}]` per available gate (48 editable params across 12 gates); `run_corrections(…,
+  params={gate_id:{field:value}})` applies them on top of the profile default in one `dataclasses.replace`
+  (alongside the forced `enabled=True`) and **echoes the applied params back in the per-gate report**.
+  `RerunRequest` gains a `params` field (`app.py`). **Frontend** (`index.html`): `rerunParams` state seeded
+  from the catalog in `loadRerunCatalog()`; each enabled gate renders its params as editable **number/checkbox
+  inputs** (rendered as a sibling of the `<label>` so clicking an input doesn't toggle the gate); `@change`
+  (not `@input`) so decimals don't snap mid-type; `setParam` casts, `paramDirty`/`anyParamDirty` drive an
+  accent **dirty-highlight** + a **"Reset params"** button (re-seeds profile defaults); `doRerun()` POSTs
+  `params`. CSS for `.rr-params/.rr-param/.rr-pn`. **Proven that a param genuinely changes reconstruction
+  output**, three ways: (1) direct gate call — `orient_verticality` `max_tilt_rad` 0.61→**21** corr, 3.0→**0**,
+  0.05→**23**; (2) live HTTP endpoint (minted JWT, raw-pose clip) — same 21 / 0, params echoed in report;
+  (3) **full in-browser E2E via Chrome ext** — select Physics → real click enables `orient_verticality` (params
+  appear) → real-type `max_tilt_rad`=0.05 (dirty-highlight, Reset enables) → Re-run (busy overlay
+  "re-running correction gates…") → report `applied:[coherence,kinematic,orient_verticality]`,
+  `orient_verticality +23` with `params:{max_tilt_rad:0.05,inferred_confidence:0.25}` echoed → Revert restores
+  baseline. Pod stayed OFF.
+
 - **2026-07-10 (PIPELINE STUDIO Increment 2 — usability fixes + IN-BROWSER verification via Chrome ext; tasks #82–#85)** —
   User tested Increment 2 in the browser and hit two real bugs + a systemic UX gap. **Bug 1+2 (same root
   cause):** gate checkboxes only "toggled" when a profile was picked from the dropdown, and the Re-run/Revert

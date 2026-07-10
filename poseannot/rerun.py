@@ -28,6 +28,7 @@ and cannot run here — they are surfaced as ``available: false`` rather than fa
 from __future__ import annotations
 
 import time
+from dataclasses import fields as _dc_fields
 from dataclasses import replace as _dc_replace
 from typing import Any
 
@@ -109,6 +110,62 @@ def _dedup_last_wins(corrections: list) -> list:
     return [latest[i] for i in order]
 
 
+def _editable_params(gate_cfg: Any) -> list[dict]:
+    """Numeric/bool fields of a gate's config, as editable specs for the UI.
+
+    Sourced from the SAME config object the gate runs off (``getattr(phys, attr)``),
+    so switching profile updates the shown defaults. ``enabled`` is omitted — the
+    gate on/off checkbox already owns it. String/enum fields (e.g. ``smooth_method``,
+    ``teleport_policy``) are skipped: the editor is numeric+bool only, so a typo
+    can't produce an invalid config.
+    """
+    if gate_cfg is None:
+        return []
+    out: list[dict] = []
+    for f in _dc_fields(gate_cfg):
+        if f.name == "enabled":
+            continue
+        v = getattr(gate_cfg, f.name)
+        # bool is a subclass of int — test it first.
+        if isinstance(v, bool):
+            typ = "bool"
+        elif isinstance(v, int):
+            typ = "int"
+        elif isinstance(v, float):
+            typ = "float"
+        else:
+            continue
+        out.append({"key": f.name, "value": v, "type": typ})
+    return out
+
+
+def _clean_param_overrides(gate_cfg: Any, params: dict[str, Any]) -> dict[str, Any]:
+    """Cast incoming param values to each field's declared type; drop unknown keys.
+
+    JSON carries no int/float distinction, so coerce to the field's CURRENT type
+    (bool checked before int — ``isinstance(True, int)`` is True). Anything that
+    doesn't cast, or isn't a known numeric/bool field, is silently dropped so a
+    bad value can't wedge the run.
+    """
+    clean: dict[str, Any] = {}
+    for k, v in (params or {}).items():
+        if not hasattr(gate_cfg, k):
+            continue
+        cur = getattr(gate_cfg, k)
+        try:
+            if isinstance(cur, bool):
+                clean[k] = bool(v)
+            elif isinstance(cur, int):
+                clean[k] = int(v)
+            elif isinstance(cur, float):
+                clean[k] = float(v)
+            else:
+                continue
+        except (TypeError, ValueError):
+            continue
+    return clean
+
+
 def gate_catalog(profile: str = "default") -> dict:
     """Ordered gate list + profile default-enabled flags, for the UI toggles."""
     try:
@@ -126,6 +183,7 @@ def gate_catalog(profile: str = "default") -> dict:
             "id": gid, "label": label, "available": True,
             "default_enabled": default_enabled,
             "flagship": gid == FLAGSHIP_GATE,
+            "params": _editable_params(gate_cfg),
         })
     for gid, label, why in _PROVIDER_GATES:
         gates.append({
@@ -156,17 +214,25 @@ def run_corrections(
     *,
     profile: str = "default",
     overrides: dict[str, bool] | None = None,
+    params: dict[str, dict[str, Any]] | None = None,
     cfg: PoseAnnotConfig | None = None,
 ) -> dict:
     """Run the enabled correction gates on the baseline scene; rebuild affected FK.
 
-    Returns a report: which gates ran, per-gate timing + corrections added, the
-    affected subject ids, and FK-rebuild timing. The new corrections are tracked in
-    ``st.studio_correction_ids`` (ephemeral) and layered onto ``st.scene`` so the
-    existing joint/mesh endpoints serve the corrected poses.
+    ``overrides`` decides which gates run (on/off); ``params`` carries per-gate
+    field overrides (``{gate_id: {field: value}}``) applied on top of the profile
+    defaults via :func:`dataclasses.replace` — the same config object the gate runs
+    off, so tuning a knob is exactly what the real pipeline would do with that value.
+
+    Returns a report: which gates ran, per-gate timing + corrections added + any
+    param overrides that took effect, the affected subject ids, and FK-rebuild
+    timing. The new corrections are tracked in ``st.studio_correction_ids``
+    (ephemeral) and layered onto ``st.scene`` so the existing joint/mesh endpoints
+    serve the corrected poses.
     """
     cfg = cfg or load_config()
     overrides = overrides or {}
+    params = params or {}
     fps = float(cfg.fps or 25.0)
     t_start = time.perf_counter()
 
@@ -186,12 +252,21 @@ def run_corrections(
             gate_cfg = getattr(phys, attr, None)
             if not _effective_enabled(gid, gate_cfg, default_on, overrides):
                 continue
-            # We already decided this gate runs; each gate ALSO short-circuits on
-            # its own ``cfg.enabled`` (the 'default' profile ships most as False),
-            # so force it on for the call — otherwise a toggled-on gate no-ops.
+            # We already decided this gate runs; build its live config in one
+            # replace: (a) force ``enabled=True`` — each gate ALSO short-circuits
+            # on its own ``cfg.enabled`` (the 'default' profile ships most False),
+            # so a toggled-on gate would no-op; (b) apply any per-gate param
+            # overrides on top of the profile defaults.
             run_cfg = gate_cfg
-            if gate_cfg is not None and getattr(gate_cfg, "enabled", True) is False:
-                run_cfg = _dc_replace(gate_cfg, enabled=True)
+            param_ovr: dict[str, Any] = {}
+            if run_cfg is not None:
+                replacements: dict[str, Any] = {}
+                if getattr(run_cfg, "enabled", True) is False:
+                    replacements["enabled"] = True
+                param_ovr = _clean_param_overrides(run_cfg, params.get(gid, {}))
+                replacements.update(param_ovr)
+                if replacements:
+                    run_cfg = _dc_replace(run_cfg, **replacements)
             t0 = time.perf_counter()
             try:
                 if needs_fps:
@@ -205,6 +280,8 @@ def run_corrections(
                 "ms": round((time.perf_counter() - t0) * 1000, 1),
                 "corrections_added": int(getattr(rep, "corrections_added", 0) or 0),
             }
+            if param_ovr:
+                gate_reports[gid]["params"] = param_ovr
             applied.append(gid)
 
         # Gates append; everything past the baseline slice is gate-generated.
