@@ -321,6 +321,11 @@ body.login { display: flex; align-items: center; justify-content: center; }
 }
 .right .hdr button:hover { border-color: var(--accent); color: var(--accent); }
 .right .hdr button.active { border-color: var(--accent); color: var(--accent); background: rgba(107, 181, 255, 0.14); }
+.right .root-ovr { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; padding: 0.4rem 0.8rem; border-bottom: 1px solid var(--border); background: var(--bg-toolbar); }
+.right .root-ovr .ro-lbl { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--fg-dim); margin-right: 0.15rem; }
+.right .root-ovr .ro-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0.1rem 0.35rem; }
+.right .root-ovr .ro-btn { background: var(--bg); border: 1px solid var(--border); color: var(--fg); font-size: 0.72rem; padding: 0.12rem 0.4rem; border-radius: 3px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.right .root-ovr .ro-btn:hover { border-color: var(--accent); color: var(--accent); }
 .right #three-canvas { flex: 1; position: relative; min-height: 0; overflow: hidden; }
 
 .timeline {

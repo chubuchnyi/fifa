@@ -55,6 +55,7 @@ from pitch3d.core.scene.pitch import pitch_line_world_points
 from .scene_state import (
     BODY_JOINT_NAMES,
     apply_and_persist_edit,
+    apply_and_persist_root_edit,
     edited_frames,
     get_state,
     undo_last_edit,
@@ -508,16 +509,35 @@ def api_studio_rerun_clear(user: str = Depends(current_user)) -> dict:
 
 
 # ─── write API (v1 — joint edits) ───────────────────────────────────────────
+from pitch3d.core.scene.layers import TargetKind as _TargetKind
+
+#: wire edit-kind → scene TargetKind (undo filter). Root kinds edit the SMPL-X
+#: root; pose_body_joint edits one body joint.
+_EDIT_KIND_TO_TARGET: dict[str, _TargetKind] = {
+    "pose_body_joint": _TargetKind.POSE_BODY_JOINT,
+    "root_orientation": _TargetKind.ROOT_ORIENTATION,
+    "root_translation": _TargetKind.ROOT_TRANSLATION,
+}
+_ROOT_EDIT_KINDS = {"root_orientation", "root_translation"}
+
+
 class EditRequest(BaseModel):
     track_id: int
     frame: int
-    joint_index: int = Field(..., ge=0, lt=21, description="body_pose joint index 0..20")
-    axis_angle: list[float] = Field(..., min_length=3, max_length=3)
+    kind: str = "pose_body_joint"
+    joint_index: int | None = Field(
+        None, ge=0, lt=21, description="body_pose joint index 0..20 (pose_body_joint only)",
+    )
+    axis_angle: list[float] = Field(
+        ..., min_length=3, max_length=3,
+        description="pose_body_joint: absolute joint axis-angle; root_*: delta nudge",
+    )
 
 
 class UndoRequest(BaseModel):
     track_id: int
     frame: int
+    kind: str | None = None
     joint_index: int | None = None
 
 
@@ -548,21 +568,36 @@ def _joints2d_for(state, cache, frame: int, video_size, adjust=None) -> list:
 
 @app.post("/api/edit")
 def api_edit(req: EditRequest, user: str = Depends(current_user)) -> dict:
-    """Persist a single-frame body_pose axis-angle edit; return refreshed frame."""
+    """Persist a single-frame edit (body_pose joint, or root orient/transl offset)."""
     st = get_state()
     if req.track_id not in st.subjects:
         raise HTTPException(404, f"no subject {req.track_id}")
     if req.frame < 0 or req.frame >= st.subjects[req.track_id].frames.shape[0]:
         raise HTTPException(404, f"frame {req.frame} out of range")
 
-    cache, _ = apply_and_persist_edit(
-        st,
-        track_id=req.track_id,
-        frame=req.frame,
-        joint_index=req.joint_index,
-        axis_angle=req.axis_angle,
-        user=user,
-    )
+    if req.kind == "pose_body_joint":
+        if req.joint_index is None:
+            raise HTTPException(400, "pose_body_joint edit requires joint_index")
+        cache, _ = apply_and_persist_edit(
+            st,
+            track_id=req.track_id,
+            frame=req.frame,
+            joint_index=req.joint_index,
+            axis_angle=req.axis_angle,
+            user=user,
+        )
+    elif req.kind in _ROOT_EDIT_KINDS:
+        cache, _ = apply_and_persist_root_edit(
+            st,
+            track_id=req.track_id,
+            frame=req.frame,
+            kind=req.kind,
+            delta=req.axis_angle,
+            user=user,
+        )
+    else:
+        raise HTTPException(400, f"unknown edit kind {req.kind!r}")
+
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
     j2d = _joints2d_for(st, cache, req.frame, vsize)
@@ -575,9 +610,10 @@ def api_edit_undo(req: UndoRequest, user: str = Depends(current_user)) -> dict:
     st = get_state()
     if req.track_id not in st.subjects:
         raise HTTPException(404, f"no subject {req.track_id}")
+    tk = _EDIT_KIND_TO_TARGET.get(req.kind) if req.kind else None
     cache = undo_last_edit(
         st, track_id=req.track_id, frame=req.frame,
-        joint_index=req.joint_index,
+        joint_index=req.joint_index, kind=tk,
     )
     if cache is None:
         return {"ok": False, "reason": "no matching edit"}

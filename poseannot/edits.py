@@ -21,8 +21,15 @@ from pathlib import Path
 
 import numpy as np
 
-from pitch3d.core.correction.engine import make_keyframes
+from pitch3d.core.correction.engine import make_keyframes, make_offset
 from pitch3d.core.scene.layers import Correction, CorrectionTarget, TargetKind
+
+#: string edit-kind (wire/API) → the scene TargetKind it addresses. The root
+#: kinds edit the SMPL-X root (global_orient / transl) rather than a body joint.
+_ROOT_KINDS: dict[str, TargetKind] = {
+    "root_orientation": TargetKind.ROOT_ORIENTATION,
+    "root_translation": TargetKind.ROOT_TRANSLATION,
+}
 from pitch3d.core.scene.serialization import from_json, to_json
 
 _LOCK = threading.Lock()
@@ -85,6 +92,34 @@ def build_body_pose_edit(
     )
 
 
+def build_root_edit(
+    *,
+    track_id: int,
+    frame: int,
+    kind: str,
+    delta: list[float] | np.ndarray,
+    user: str,
+) -> Correction:
+    """Build a single-frame CONSTANT_OFFSET correction for the subject root.
+
+    ``kind`` is a wire string in ``_ROOT_KINDS``. ``delta`` is a pure nudge the
+    engine composes onto the resolved root: an axis-angle offset for
+    ROOT_ORIENTATION (left-composed) or an xyz metre offset for
+    ROOT_TRANSLATION (added). The client sends only the delta — no current-value
+    round-trip, no client-side quaternion math.
+    """
+    tk = _ROOT_KINDS[kind]
+    d = np.asarray(delta, dtype=float).reshape(3)
+    ts = _now_iso()
+    return make_offset(
+        f"manual-{user}-t{track_id}-f{frame}-{kind}-{ts}",
+        CorrectionTarget(kind=tk, subject_track_id=int(track_id)),
+        (int(frame), int(frame)),
+        d,
+        note=f"manual-{user}-{ts}",
+    )
+
+
 def append_edit(path: Path, correction: Correction) -> list[Correction]:
     """Append ``correction`` to ``path`` under lock and return the full list."""
     with _LOCK:
@@ -100,8 +135,9 @@ def pop_last_matching(
     track_id: int,
     frame: int,
     joint_index: int | None = None,
+    kind: TargetKind | None = None,
 ) -> Correction | None:
-    """Pop the most recent edit matching (track_id, frame, joint_index?) — undo primitive."""
+    """Pop the most recent edit matching (track_id, frame, joint_index?, kind?) — undo primitive."""
     with _LOCK:
         current = load_edits(path)
         for i in range(len(current) - 1, -1, -1):
@@ -111,6 +147,8 @@ def pop_last_matching(
             if not (c.frame_range.start <= frame <= c.frame_range.end):
                 continue
             if joint_index is not None and c.target.joint_index != joint_index:
+                continue
+            if kind is not None and c.target.kind != kind:
                 continue
             popped = current.pop(i)
             save_edits(path, current)

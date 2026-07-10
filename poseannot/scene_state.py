@@ -20,14 +20,19 @@ import smplx
 import torch
 
 from pitch3d.core.correction.engine import resolve_subject_motion
-from pitch3d.core.scene.layers import Correction
+from pitch3d.core.scene.layers import Correction, TargetKind
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
 
 from .config import PoseAnnotConfig
 from .config import load as load_config
 from .edits import append_edit as _persist_edit
-from .edits import build_body_pose_edit, load_edits, pop_last_matching
+from .edits import (
+    build_body_pose_edit,
+    build_root_edit,
+    load_edits,
+    pop_last_matching,
+)
 
 # SMPLest-X → z-up world remap (see scripts/render_smplx_mesh.py comment).
 R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
@@ -185,12 +190,38 @@ def apply_and_persist_edit(
     return cache, corr
 
 
+def apply_and_persist_root_edit(
+    st: SceneState,
+    *,
+    track_id: int,
+    frame: int,
+    kind: str,
+    delta,
+    user: str,
+    cfg: PoseAnnotConfig | None = None,
+) -> tuple[SubjectCache, Correction]:
+    """Persist a root (orientation/translation) offset edit, fold it in, rebuild FK."""
+    cfg = cfg or load_config()
+    corr = build_root_edit(
+        track_id=track_id, frame=frame, kind=kind, delta=delta, user=user,
+    )
+    _persist_edit(cfg.corrections_out, corr)
+    with st.lock:
+        from dataclasses import replace as _dc_replace
+        st.scene = _dc_replace(
+            st.scene, corrections=[*st.scene.corrections, corr],
+        )
+    cache = rebuild_subject_cache(st, track_id, cfg)
+    return cache, corr
+
+
 def undo_last_edit(
     st: SceneState,
     *,
     track_id: int,
     frame: int,
     joint_index: int | None = None,
+    kind: TargetKind | None = None,
     cfg: PoseAnnotConfig | None = None,
 ) -> SubjectCache | None:
     """Pop the most recent matching edit; rebuild FK.
@@ -200,7 +231,7 @@ def undo_last_edit(
     cfg = cfg or load_config()
     popped = pop_last_matching(
         cfg.corrections_out,
-        track_id=track_id, frame=frame, joint_index=joint_index,
+        track_id=track_id, frame=frame, joint_index=joint_index, kind=kind,
     )
     if popped is None:
         return None

@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-09 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-10 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -364,6 +364,34 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-10 (PIPELINE STUDIO Increment 4 — generalized OUTPUT editing: whole-subject root orient/move nudges; tasks #89–#92)** —
+  Widened the shipping pose-edit path (which only exposed per-joint `POSE_BODY_JOINT` axis-angle) to the two
+  root targets the correction engine **already resolves but the UI never surfaced**: `ROOT_ORIENTATION`
+  (→ `global_orient`) and `ROOT_TRANSLATION` (→ `transl`) — both at `engine.py:274-283`. **Design decision:**
+  edits are `CONSTANT_OFFSET` deltas (nudges), not absolutes — the client sends a pure 3-vector, the server
+  composes (`apply_offset_rotation` left-composes the axis-angle) / adds (`apply_offset_vector`), so there is
+  **no client-side quaternion math and no current-value round-trip**. Same dual-layer model as everything else:
+  each nudge = one `Correction` row appended to `edits.json`, resolved at the next FK pass. **Backend:**
+  `edits.py` `build_root_edit(kind, delta)` via `make_offset` + `_ROOT_KINDS` wire-map; `pop_last_matching`
+  gains a `kind` filter (undo can target a root layer without a joint_index). `scene_state.py`
+  `apply_and_persist_root_edit()` mirrors the joint path (persist → fold into `st.scene.corrections` → rebuild
+  ONE subject's FK); `undo_last_edit` threads `kind`. `app.py` `EditRequest` gains `kind` (default
+  `pose_body_joint`; `joint_index` now optional; `axis_angle` doubles as the generic 3-vector), `/api/edit`
+  routes by kind (400 on unknown kind / on joint-edit w/o joint_index), `UndoRequest`+`_EDIT_KIND_TO_TARGET`
+  map for undo. **Frontend** (`index.html`): `nudgeRoot(kind, delta)` / `undoRootEdit(kind)` mirror
+  `commitGizmoEdit`; a compact **Root override** strip under the 3D header — ORIENT ±15° X/Y/Z± + flip (180°
+  about up) + undo, MOVE ±5 cm X/Y/Z± + undo — shown when a subject is selected. CSS
+  `.root-ovr/.ro-btn/.ro-lbl/.ro-sep`. **Verified two ways, both green:** (1) in-process TestClient E2E (minted
+  JWT) — translation offsets STACK (+0.5 z twice = +1.0), undo pops LIFO back to baseline, a 180° flip shifts
+  joints (max 0.83 m) and its undo restores them to **residual 0.00000**, unknown-kind → 400, pose_body_joint
+  w/o joint_index → 400, undo-when-empty → `ok:false`; edits.json restored byte-identical after. (2) **full
+  in-browser E2E (Chrome ext, subject t1 frame 0):** real DOM click on **flip** → POST persisted
+  `manual-admin-t1-f0-root_orientation` (constant_offset, delta[3]) to edits.json (34738→36025 B, 21→22 corr) →
+  FK re-ran → **3D figure visibly rotated 180°** (faced left → faced right); real click on orient **↺** →
+  undo removed the correction (edits.json back to 34738 B / 21 corr / 0 root edits) → figure reverted. Note:
+  the per-track frame badge counts frames-per-track, so a second edit on an already-edited frame doesn't bump
+  it (expected). Pod stayed OFF.
 
 - **2026-07-10 (PIPELINE STUDIO Increment 3 — LIVE per-gate params editor wired into the re-run engine; tasks #86–#88)** —
   Made the correction-gate params **live-editable** and fed them into the existing ephemeral re-run, completing

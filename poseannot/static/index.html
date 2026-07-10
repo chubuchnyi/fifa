@@ -344,6 +344,32 @@
               :title="showAll ? 'showing all players (A)' : 'showing active only (A)'"
               x-text="showAll ? 'show: all' : 'show: active'"></button>
     </div>
+    <!-- Root override: whole-subject orientation / position nudges. Each click
+         appends a CONSTANT_OFFSET correction (delta), FK re-runs for this
+         subject, the 3D + 2D overlays refresh live. -->
+    <div class="root-ovr" x-show="selectedTrackId !== null" x-cloak>
+      <span class="ro-lbl" title="rotate whole body — axis-angle offset (SMPL-X axes); watch the 3D view">orient ±15°</span>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [-0.2618,0,0])">X−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0.2618,0,0])">X+</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0,-0.2618,0])">Y−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0,0.2618,0])">Y+</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0,0,-0.2618])">Z−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0,0,0.2618])">Z+</button>
+      <button class="ro-btn" @click="nudgeRoot('root_orientation', [0,3.14159,0])"
+              title="flip 180° about world-up">flip</button>
+      <button class="ro-btn" @click="undoRootEdit('root_orientation')"
+              title="undo last orientation nudge">↺</button>
+      <span class="ro-sep"></span>
+      <span class="ro-lbl" title="move whole body — metre offset in world coords (x,y ground · z up)">move ±5cm</span>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [-0.05,0,0])">X−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [0.05,0,0])">X+</button>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [0,-0.05,0])">Y−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [0,0.05,0])">Y+</button>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [0,0,-0.05])">Z−</button>
+      <button class="ro-btn" @click="nudgeRoot('root_translation', [0,0,0.05])">Z+</button>
+      <button class="ro-btn" @click="undoRootEdit('root_translation')"
+              title="undo last move nudge">↺</button>
+    </div>
     <div id="three-canvas" x-ref="threeCanvas"></div>
   </div>
 
@@ -385,7 +411,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-10 · live gate params editor (re-run overrides)";
+const BUILD_ID = "2026-07-10 · root override (orient/move output edits)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -1419,6 +1445,49 @@ Alpine.data("poseAnnot", () => ({
       this._liveMesh = { verts: d.verts, faces: d.faces };
       updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
       await this.refreshOverlay3d();   // undo changed joints server-side → re-fetch + re-project
+      await this.refreshEditedFrames();
+    },
+
+    // Root output edit — nudge the whole subject's global_orient (axis-angle
+    // delta) or transl (metre delta). Server composes/adds the delta as a
+    // CONSTANT_OFFSET correction, so we only ever send the nudge.
+    async nudgeRoot(kind, delta) {
+      if (this.selectedTrackId === null) return;
+      const body = {
+        track_id: this.selectedTrackId,
+        frame: this.frame,
+        kind,
+        axis_angle: delta,
+      };
+      const r = await fetch("/api/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) { console.warn("root edit failed", r.status); return; }
+      const d = await r.json();
+      this._liveJoints = d.joints;
+      this._liveMesh = { verts: d.verts, faces: d.faces };
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshOverlay3d();
+      await this.refreshEditedFrames();
+    },
+
+    async undoRootEdit(kind) {
+      if (this.selectedTrackId === null) return;
+      const body = { track_id: this.selectedTrackId, frame: this.frame, kind };
+      const r = await fetch("/api/edit/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.ok) { console.info("nothing to undo"); return; }
+      this._liveJoints = d.joints;
+      this._liveMesh = { verts: d.verts, faces: d.faces };
+      updateThreePose(d.joints, d.verts, d.faces, this.selectedJoint, this._liveOthers);
+      await this.refreshOverlay3d();
       await this.refreshEditedFrames();
     },
 
