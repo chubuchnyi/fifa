@@ -365,6 +365,27 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-10 (PIPELINE STUDIO Increment 2 — usability fixes + IN-BROWSER verification via Chrome ext; tasks #82–#85)** —
+  User tested Increment 2 in the browser and hit two real bugs + a systemic UX gap. **Bug 1+2 (same root
+  cause):** gate checkboxes only "toggled" when a profile was picked from the dropdown, and the Re-run/Revert
+  buttons "did nothing" on click. Root cause found via the Chrome extension (`elementFromPoint` confirmed the
+  checkbox was the top element; a synthetic `change` toggled it but a real mouse click did not): the `.main`
+  div's `@pointerdown="onPanStart"` calls `setPointerCapture()`, and its guard whitelist
+  (`.zoom-hud, .cam-panel, .upload-panel`) did **not** include `.stage-inspect` — so every pointerdown on the
+  re-run panel started a frame-pan and stole the click. Exact bug class as commit 1656ec2. **Fix:** add
+  `.stage-inspect` to the `closest()` guard in both `onPanStart` and `onWheel`. **Systemic UX fix (user:
+  "интерфейс очень тормозит… нужно с этим что-то делать системно"):** added a **global busy overlay** —
+  `busy`/`busyMsg` state + `beginBusy()`/`endBusy()` helpers + a fixed full-viewport dim+spinner card, wired
+  into **every** long op (initial load, clip switch ~20s FK, re-run ~20s, revert, upload), each with a
+  `try/finally` so it always clears. The overlay also captures pointer events, so dead-control clicks during a
+  long op are eaten. **Verified end-to-end in a real browser** (Chrome ext, raw-pose clip, 23 subjects): a real
+  click now toggles `orient_verticality`; Re-run fires (busy overlay "re-running…", +67 corr, orient +21,
+  21.3s) and at frame 15 the active subject flips head-down→**upright** (body-up −→ +0.598, all 23 subjects
+  0 inverted); Revert fires (busy overlay "reverting…") and restores baseline; clip switch shows
+  "switching to default — rebuilding poses…" then reloads clean. Note: inversion is **frame-dependent** —
+  frame 0 baseline is all-upright, frame 15 has 11 inverted (earlier "9 inverted" was a specific frame, not
+  universal). This closes task #41 (visual browser E2E). Pod stayed OFF.
+
 - **2026-07-10 (PIPELINE STUDIO Increment 2 — INTERACTIVE correction re-run in the glass-box UI; tasks #77–#81)** —
   Turned the read-only correction stages into a live, editable seam. The operator selects a
   **correction-family stage** (`coherence` or `physics`) → the inspector now shows a **profile dropdown +

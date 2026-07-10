@@ -171,6 +171,33 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .stage-inspect .si-rerun .rr-status { margin-top: 0.45rem; font-size: 0.72rem; color: var(--fg-dim); font-family: ui-monospace, monospace; }
 .stage-inspect .si-rerun .rr-err { margin-top: 0.35rem; font-size: 0.72rem; color: var(--raw); }
 
+/* Global busy overlay — visible during any long op (clip switch, re-run, upload,
+   initial load). Fixed + full viewport, dims the app and captures pointer events
+   so the whole UI clearly reads as "working" and dead-control clicks are eaten. */
+.busy-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(16, 18, 22, 0.62); backdrop-filter: blur(1.5px);
+  cursor: progress;
+}
+.busy-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.85rem;
+  padding: 1.4rem 1.9rem; border-radius: 10px;
+  background: var(--bg-panel); border: 1px solid var(--border);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+.busy-spinner {
+  width: 38px; height: 38px; border-radius: 50%;
+  border: 3px solid rgba(107, 181, 255, 0.22);
+  border-top-color: var(--accent);
+  animation: busy-spin 0.8s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+.busy-msg {
+  color: var(--fg); font-size: 0.85rem; letter-spacing: 0.2px;
+  max-width: 340px; text-align: center; font-family: ui-monospace, monospace;
+}
+
 [x-cloak] { display: none !important; }
 .upload-panel {
   position: absolute; top: 48px; left: 130px; z-index: 30;

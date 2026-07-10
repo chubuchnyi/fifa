@@ -21,6 +21,17 @@
      race and can leave the app empty (0 tracks → no overlay, blank 3D). -->
 <div class="app-shell" x-data="poseAnnot()">
 
+  <!-- Global busy overlay: any long op (clip switch, re-run, upload, initial
+       load) calls beginBusy()/endBusy(). Covers the viewport so the app never
+       silently freezes — it visibly reads as "working" and swallows stray
+       clicks on controls that would do nothing mid-operation. -->
+  <div class="busy-overlay" x-show="busy" x-cloak>
+    <div class="busy-card">
+      <div class="busy-spinner"></div>
+      <div class="busy-msg" x-text="busyMsg || 'working…'"></div>
+    </div>
+  </div>
+
   <!-- Toolbar -->
   <div class="toolbar">
     <span class="brand">poseannot</span>
@@ -346,7 +357,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-10 · interactive correction re-run (gate toggles)";
+const BUILD_ID = "2026-07-10 · gate-click fix + global busy overlay";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -622,6 +633,8 @@ function updateThreePose(joints, meshVerts, meshFaces, selectedJoint, others = [
 
 Alpine.data("poseAnnot", () => ({
     user: "user",
+    busy: false,              // global busy overlay: any long op in flight
+    busyMsg: "",              // human-readable label for the current long op
     clipLabel: "loading…",
     clipList: [],
     activeClipId: "default",
@@ -732,9 +745,17 @@ Alpine.data("poseAnnot", () => ({
       return `${this.overlayMode} · ${n} el · mesh${mp} · vb=${vb || "NULL"}`;
     },
 
+    // Global busy overlay controls. Long ops call beginBusy() before the
+    // blocking await and endBusy() in a finally so the overlay always clears,
+    // even on error. Kept dead-simple (boolean) — the overlay eats pointer
+    // events, so a second op can't start while one is running.
+    beginBusy(msg) { this.busyMsg = msg || "working…"; this.busy = true; },
+    endBusy() { this.busy = false; this.busyMsg = ""; },
+
     async init() {
       if (this._inited) return;   // idempotency guard against any double-invoke
       this._inited = true;
+      this.beginBusy("loading clip — building poses…");
       initThree(this);
       this.diag.three = threeState ? "inited" : "FAILED";
       window.addEventListener("resize", () => { this.fitLayer(); this.resetView(); });
@@ -744,21 +765,25 @@ Alpine.data("poseAnnot", () => ({
       if (this.$refs.canvasFrame) {
         new ResizeObserver(() => this.fitLayer()).observe(this.$refs.canvasFrame);
       }
-      const r = await fetch("/api/scene");
-      if (r.status === 401) { window.location = "/"; return; }
-      const j = await r.json();
-      this.nFrames = j.n_frames;
-      this.tracks = j.tracks;
-      this.jointNames = j.joint_names;
-      if (j.clip) {
-        this.clipLabel = `${j.clip.video_name}  ·  ${j.n_subjects} subjects  ·  ${j.n_frames} frames @ ${j.clip.fps.toFixed(2)}fps`;
+      try {
+        const r = await fetch("/api/scene");
+        if (r.status === 401) { window.location = "/"; return; }
+        const j = await r.json();
+        this.nFrames = j.n_frames;
+        this.tracks = j.tracks;
+        this.jointNames = j.joint_names;
+        if (j.clip) {
+          this.clipLabel = `${j.clip.video_name}  ·  ${j.n_subjects} subjects  ·  ${j.n_frames} frames @ ${j.clip.fps.toFixed(2)}fps`;
+        }
+        if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
+        await this.refreshClips();
+        await this.refreshEditedFrames();
+        await this.loadStages();
+        await this.loadFrame(0);
+        this.attachKeyboard();
+      } finally {
+        this.endBusy();
       }
-      if (this.tracks.length) this.selectedTrackId = this.tracks[0].track_id;
-      await this.refreshClips();
-      await this.refreshEditedFrames();
-      await this.loadStages();
-      await this.loadFrame(0);
-      this.attachKeyboard();
     },
 
     async refreshClips() {
@@ -776,20 +801,28 @@ Alpine.data("poseAnnot", () => ({
       // 'change' on an actual value change, so no same-clip guard is needed.
       if (!id) return;
       // The server rebuilds SMPL-X FK for the new clip synchronously (~5-25s);
-      // show feedback so the wait doesn't look like a frozen page.
-      this.upl.msg = "switching to " + id + " — rebuilding poses (~5-25s)…";
-      const r = await fetch("/api/clips/select", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clip_id: id }),
-      });
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        this.upl.msg = "switch failed: " + (e.detail || r.status);
-        await this.refreshClips();   // re-sync <select> to the still-active clip
-        return;
+      // the global busy overlay makes the wait read as "working", not frozen.
+      this.beginBusy("switching to " + id + " — rebuilding poses (~5-25s)…");
+      try {
+        const r = await fetch("/api/clips/select", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ clip_id: id }),
+        });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          this.upl.msg = "switch failed: " + (e.detail || r.status);
+          await this.refreshClips();   // re-sync <select> to the still-active clip
+          this.endBusy();
+          return;
+        }
+        // Keep the overlay up through the reload; init() re-raises it on the
+        // fresh page, so there is no flash of an interactive-looking UI.
+        window.location.reload();   // simplest: re-init everything for the new clip
+      } catch (e) {
+        this.upl.msg = "switch failed: " + e;
+        this.endBusy();
       }
-      window.location.reload();   // simplest: re-init everything for the new clip
     },
 
     async doUpload() {
@@ -799,22 +832,28 @@ Alpine.data("poseAnnot", () => ({
       }
       this.upl.busy = true;
       this.upl.msg = "uploading…";
+      this.beginBusy("uploading clip bundle…");
       const fd = new FormData();
       fd.append("clip_id", this.upl.name || "clip");
       fd.append("video", this.upl.video);
       fd.append("scene", this.upl.scene);
       if (this.upl.edits) fd.append("edits", this.upl.edits);
-      const r = await fetch("/api/clips/upload", { method: "POST", body: fd });
-      this.upl.busy = false;
-      if (!r.ok) {
-        const e = await r.json().catch(() => ({}));
-        this.upl.msg = "failed: " + (e.detail || r.status);
-        return;
+      let d;
+      try {
+        const r = await fetch("/api/clips/upload", { method: "POST", body: fd });
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}));
+          this.upl.msg = "failed: " + (e.detail || r.status);
+          return;
+        }
+        d = await r.json();
+        this.upl.msg = "uploaded ✓ — switching…";
+        await this.refreshClips();
+        this.showUpload = false;
+      } finally {
+        this.upl.busy = false;
+        this.endBusy();   // switchClip re-raises the overlay for the FK rebuild
       }
-      const d = await r.json();
-      this.upl.msg = "uploaded ✓ — switching…";
-      await this.refreshClips();
-      this.showUpload = false;
       await this.switchClip(d.clip.id);
     },
 
@@ -1064,6 +1103,7 @@ Alpine.data("poseAnnot", () => ({
     async doRerun() {
       if (this.rerunBusy) return;
       this.rerunBusy = true; this.rerunError = null;
+      this.beginBusy("re-running correction gates — rebuilding poses…");
       try {
         const r = await fetch("/api/studio/rerun", {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -1078,12 +1118,14 @@ Alpine.data("poseAnnot", () => ({
         this.rerunError = String(e);
       } finally {
         this.rerunBusy = false;
+        this.endBusy();
       }
     },
     // Drop the ephemeral layer → server restores the frozen baseline + rebuilds FK.
     async doRevert() {
       if (this.rerunBusy) return;
       this.rerunBusy = true; this.rerunError = null;
+      this.beginBusy("reverting to baseline — rebuilding poses…");
       try {
         const r = await fetch("/api/studio/rerun/clear", { method: "POST" });
         if (!r.ok) { this.rerunError = `revert ${r.status}`; return; }
@@ -1094,6 +1136,7 @@ Alpine.data("poseAnnot", () => ({
         this.rerunError = String(e);
       } finally {
         this.rerunBusy = false;
+        this.endBusy();
       }
     },
 
@@ -1385,7 +1428,7 @@ Alpine.data("poseAnnot", () => ({
     },
 
     onWheel(e) {
-      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel")) return;
+      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel, .stage-inspect")) return;
       const box = this.$refs.canvasFrame;
       if (!box) return;
       const rect = box.getBoundingClientRect();
@@ -1395,11 +1438,12 @@ Alpine.data("poseAnnot", () => ({
 
     onPanStart(e) {
       if (e.button !== 0) return;
-      // The overlay-orient panel and zoom HUD live INSIDE .main. Without this
-      // guard, pointerdown on their buttons/sliders starts a pan and
-      // setPointerCapture steals the interaction, so clicks/drags never reach
-      // the controls — the "reset/flip/sliders do nothing" bug.
-      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel")) return;
+      // The overlay-orient panel, zoom HUD and stage inspector live INSIDE
+      // .main. Without this guard, pointerdown on their buttons/sliders/
+      // checkboxes starts a pan and setPointerCapture steals the interaction,
+      // so clicks/drags never reach the controls — the "reset/flip/sliders/
+      // re-run gate toggles do nothing" bug.
+      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel, .stage-inspect")) return;
       this._panning = true;
       this._panLast = { x: e.clientX, y: e.clientY };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
