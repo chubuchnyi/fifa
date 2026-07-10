@@ -24,7 +24,8 @@ from pitch3d.core.scene.layers import Correction
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
 
-from .config import PoseAnnotConfig, load as load_config
+from .config import PoseAnnotConfig
+from .config import load as load_config
 from .edits import append_edit as _persist_edit
 from .edits import build_body_pose_edit, load_edits, pop_last_matching
 
@@ -59,6 +60,14 @@ class SceneState:
     subjects: dict[int, SubjectCache] = field(default_factory=dict)
     n_frames: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
+    #: ids of corrections currently layered by an ephemeral Studio re-run
+    #: (physics/coherence gates). Non-empty ⇒ a re-run is active.
+    studio_correction_ids: set[str] = field(default_factory=set)
+    #: frozen snapshot of ``scene.corrections`` taken before the FIRST studio
+    #: re-run — the true baseline. "Revert to baseline" restores exactly this,
+    #: which is robust even when a gate regenerates a correction id that already
+    #: existed (deterministic gate ids collide on already-corrected scenes).
+    studio_baseline_corrections: list[Correction] | None = None
 
 
 @lru_cache(maxsize=1)

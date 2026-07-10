@@ -142,6 +142,35 @@ body.login { display: flex; align-items: center; justify-content: center; }
 }
 .stage-inspect .si-avail { margin-top: 0.4rem; font-size: 0.74rem; color: var(--fg-dim); }
 
+/* Correction re-run panel (physics/coherence family) */
+.stage-inspect .si-rerun { margin-top: 0.55rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.stage-inspect .si-rerun .rr-profile { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin: 0.35rem 0 0.5rem; }
+.stage-inspect .si-rerun select {
+  background: var(--bg-panel); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 3px; padding: 0.12rem 0.3rem; font-family: inherit; font-size: 0.76rem; flex: 1;
+}
+.stage-inspect .si-rerun .rr-gates { display: flex; flex-direction: column; gap: 0.1rem; margin-bottom: 0.55rem; }
+.stage-inspect .si-rerun .rr-gate {
+  display: flex; align-items: center; gap: 0.35rem; font-size: 0.76rem; color: var(--fg);
+  cursor: pointer; padding: 0.06rem 0.2rem; border-radius: 3px;
+}
+.stage-inspect .si-rerun .rr-gate:hover { background: rgba(255, 255, 255, 0.04); }
+.stage-inspect .si-rerun .rr-gate.unavail { color: var(--fg-dim); cursor: not-allowed; opacity: 0.6; }
+.stage-inspect .si-rerun .rr-gate.flagship { color: var(--accent-bright); font-weight: 600; }
+.stage-inspect .si-rerun .rr-gate input { cursor: inherit; margin: 0; }
+.stage-inspect .si-rerun .rr-flag { color: var(--edited); }
+.stage-inspect .si-rerun .rr-report { margin-left: auto; color: var(--verified); font-family: ui-monospace, monospace; font-size: 0.7rem; }
+.stage-inspect .si-rerun .rr-actions { display: flex; gap: 0.4rem; }
+.stage-inspect .si-rerun .rr-actions button {
+  flex: 1; background: var(--bg-panel); border: 1px solid var(--border); color: var(--fg);
+  border-radius: 3px; padding: 0.3rem 0.4rem; cursor: pointer; font-family: inherit; font-size: 0.76rem;
+}
+.stage-inspect .si-rerun .rr-run { border-color: var(--accent); color: var(--accent-bright); }
+.stage-inspect .si-rerun .rr-actions button:hover:not(:disabled) { border-color: var(--accent-bright); }
+.stage-inspect .si-rerun .rr-actions button:disabled { opacity: 0.5; cursor: default; }
+.stage-inspect .si-rerun .rr-status { margin-top: 0.45rem; font-size: 0.72rem; color: var(--fg-dim); font-family: ui-monospace, monospace; }
+.stage-inspect .si-rerun .rr-err { margin-top: 0.35rem; font-size: 0.72rem; color: var(--raw); }
+
 [x-cloak] { display: none !important; }
 .upload-panel {
   position: absolute; top: 48px; left: 130px; z-index: 30;

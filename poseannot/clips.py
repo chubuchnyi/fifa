@@ -81,8 +81,34 @@ def _discover() -> list[Clip]:
     return out
 
 
+# Curated raw/debug scenes under ``out/`` — surfaced as builtins so the Studio
+# correction re-run has an inverted-body scene to fix (the flagship demo) and the
+# operator can compare a raw pose against the finished, physics-corrected default.
+# (id, label, scene.json relative to repo root); listed only if the file exists.
+_CURATED: list[tuple[str, str, str]] = [
+    ("raw-pose", "Colombia · uncorrected pose (inverted bodies)",
+     "out/anim_full_realism/scene.json"),
+]
+
+
+def _extra_builtins() -> list[Clip]:
+    out: list[Clip] = []
+    for cid, label, rel in _CURATED:
+        scene = REPO_ROOT / rel
+        if not scene.exists() or _DEFAULT.source_video is None:
+            continue
+        out.append(Clip(
+            id=cid, label=label,
+            source_video=_DEFAULT.source_video,
+            scene_json=str(scene),
+            corrections_out=str(scene.parent / "edits.json"),
+            has_scene=True, builtin=True,
+        ))
+    return out
+
+
 def list_clips() -> list[Clip]:
-    return [_DEFAULT, *_discover()]
+    return [_DEFAULT, *_extra_builtins(), *_discover()]
 
 
 def get_clip(clip_id: str) -> Clip | None:
@@ -104,7 +130,7 @@ def select(clip_id: str) -> Clip:
         raise KeyError(clip_id)
     if not c.has_scene or not c.source_video:
         raise ValueError(f"clip '{clip_id}' has no scene.json/video — nothing to annotate")
-    if c.builtin:
+    if c.id == "default":
         _config.set_override(None)
     else:
         _config.set_override({

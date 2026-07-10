@@ -365,6 +365,34 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-10 (PIPELINE STUDIO Increment 2 — INTERACTIVE correction re-run in the glass-box UI; tasks #77–#81)** —
+  Turned the read-only correction stages into a live, editable seam. The operator selects a
+  **correction-family stage** (`coherence` or `physics`) → the inspector now shows a **profile dropdown +
+  per-gate checkboxes + "Re-run (~20s)" + "Revert to baseline"**. Re-run runs the enabled
+  correction/coherence gates on the *frozen baseline* scene as an **ephemeral in-memory layer** (NEVER
+  written to `edits.json`) and rebuilds SMPL-X FK only for the subjects the new corrections touch; the
+  existing `/api/subject/.../joints|mesh` path then serves the corrected poses, so the 3D + 2D overlays
+  move with no special-casing. **Backend** — new `poseannot/rerun.py`: a 12-gate registry whose order +
+  per-gate configs mirror `controller.run_reconstruction`; 4 provider-dependent gates (foot_plant,
+  momentum_smooth, contact_lock, gravity_project) are surfaced `available:false` (need live-pipeline
+  pelvis/foot providers) rather than faked. Two `SceneState` fields (`studio_correction_ids`,
+  `studio_baseline_corrections`) make repeated re-runs independent (always from the frozen baseline, never
+  cumulative) and robust to deterministic-gate-id collisions on already-corrected scenes (frozen-snapshot
+  restore + `_dedup_last_wins`). Endpoints `GET /api/studio/rerun/catalog`, `POST /api/studio/rerun`,
+  `POST /api/studio/rerun/clear`. **Two bugs found + fixed while building:** (1) *flagship no-op* — my
+  overrides decide whether I CALL a gate, but each gate ALSO self-short-circuits on its own `cfg.enabled`,
+  and the `default` profile ships most gates `enabled:false`; fix = force `enabled=True` on the cfg once my
+  code decides to run it. (2) *id collision* on already-corrected scenes (677-correction scene regenerates
+  existing `auto-orient-vertical-N` ids) — fixed by the frozen baseline snapshot + dedup. **FLAGSHIP proven
+  end-to-end through the real HTTP API** (raw-pose clip = `out/anim_full_realism/scene.json`, 23 subjects):
+  baseline **9 inverted** bodies (head.z−pelvis.z < 0, e.g. t4 −0.325, t11 −0.447) → toggle
+  `orient_verticality` on → re-run (orient gate +21 corrections, ~21s total, FK-bound) → **9/9 stand
+  upright** (t4 +0.563, t11 +0.588, all ≈+0.6 m) → Revert → **9/9 exactly restored** to baseline. `node
+  --check` clean on the inline module; every markup method/state name resolves; two correction-family
+  stages confirmed present in the manifest so the panel renders. **NOT yet eye-judged in a real browser**
+  (Chrome ext unavailable, task #41) — the data path is verified headless; the user is ground truth on the
+  visual render. Pod stayed OFF the whole increment.
+
 - **2026-07-09 (POSE BAKE-OFF A/B — FULL video E2E of BOTH variants on the pod, pulled local; MooseFS cold-run stall root-caused + fixed with a page-cache prewarm; tasks #65–#70)** —
   Ran the complete decode→detect→track→PnLCalib→pose→WASB→render→FK-export→Blender(4-cam)→ffmpeg path for
   **both** pose backends at production knobs (60 f · cams broadcast,sideline,top,goal · 1280×720 · 32 spp ·

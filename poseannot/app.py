@@ -45,6 +45,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import clips as clips_mod
+from . import rerun as rerun_mod
 from . import studio as studio_mod
 from .auth import authenticate, current_user, issue_token
 from .camera import CameraAdjust, frame_projector, project_points
@@ -458,6 +459,46 @@ def api_studio_ball(frame: int, user: str = Depends(current_user)) -> dict:
             out["pt"] = [float(uv[0]), float(uv[1])]
         out["frame_flipped"] = bool(proj.frame_flipped)
     return out
+
+
+# ─── studio re-run API (correction gates as an ephemeral, revertable layer) ──
+class RerunRequest(BaseModel):
+    profile: str = "default"
+    #: per-gate on/off override; absent gates fall back to the profile default.
+    overrides: dict[str, bool] = Field(default_factory=dict)
+
+
+@app.get("/api/studio/rerun/catalog")
+def api_studio_rerun_catalog(
+    profile: str = "default", user: str = Depends(current_user),
+) -> dict:
+    """Ordered correction-gate list + profile default-enabled flags, for the UI.
+
+    Gates available from scene.json alone are ``available:true``; the four that
+    need a live-pipeline provider are surfaced ``available:false`` with a reason."""
+    del user
+    return rerun_mod.gate_catalog(profile)
+
+
+@app.post("/api/studio/rerun")
+def api_studio_rerun(req: RerunRequest, user: str = Depends(current_user)) -> dict:
+    """Run the enabled correction gates on the frozen baseline; rebuild affected FK.
+
+    The gates append revertable ``Correction`` layers (never mutate poses), so the
+    existing joint/mesh endpoints then serve the corrected poses. Ephemeral: nothing
+    is written to edits.json. Synchronous — a full-scene re-run is FK-bound (~seconds
+    to tens of seconds); the UI shows a spinner."""
+    del user
+    st = get_state()
+    return rerun_mod.run_corrections(st, profile=req.profile, overrides=req.overrides)
+
+
+@app.post("/api/studio/rerun/clear")
+def api_studio_rerun_clear(user: str = Depends(current_user)) -> dict:
+    """Drop the ephemeral studio corrections; restore + rebuild the baseline poses."""
+    del user
+    st = get_state()
+    return rerun_mod.clear_corrections(st)
 
 
 # ─── write API (v1 — joint edits) ───────────────────────────────────────────

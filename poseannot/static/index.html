@@ -245,6 +245,46 @@
           </div>
           <div class="si-note" x-show="activeStage().note" x-text="activeStage().note"></div>
           <div class="si-avail" x-show="activeStage().avail_note" x-text="'▸ ' + activeStage().avail_note"></div>
+
+          <!-- Correction re-run (physics/coherence family only): pick a physics
+               profile, toggle individual gates, re-run the chain as an EPHEMERAL
+               correction layer, revert to baseline. Flagship: toggle
+               orient_verticality on the raw-pose clip → inverted bodies stand up. -->
+          <div class="si-rerun" x-show="activeStage().family === 'correction'">
+            <div class="p-lbl">re-run correction chain</div>
+            <div class="rr-profile">
+              <span class="p-key">profile</span>
+              <select x-model="rerunProfile" @change="loadRerunCatalog()" :disabled="rerunBusy">
+                <template x-for="p in (rerunCatalog && rerunCatalog.profiles) || []" :key="p">
+                  <option :value="p" x-text="p"></option>
+                </template>
+              </select>
+            </div>
+            <div class="rr-gates">
+              <template x-for="g in (rerunCatalog && rerunCatalog.gates) || []" :key="g.id">
+                <label class="rr-gate" :class="{ flagship: g.flagship, unavail: !g.available }"
+                       :title="g.available ? '' : g.reason">
+                  <input type="checkbox" :checked="gateOn(g)" :disabled="!g.available || rerunBusy"
+                         @change="toggleGate(g.id, $event.target.checked)" />
+                  <span x-text="g.label"></span>
+                  <span class="rr-flag" x-show="g.flagship" title="flagship demo gate">★</span>
+                  <span class="rr-report" x-show="rerunReport && rerunReport.gates && rerunReport.gates[g.id]"
+                        x-text="fmtGateReport(g.id)"></span>
+                </label>
+              </template>
+            </div>
+            <div class="rr-actions">
+              <button class="rr-run" @click="doRerun()" :disabled="rerunBusy">
+                <span x-show="!rerunBusy">Re-run (~20s)</span>
+                <span x-show="rerunBusy">running…</span>
+              </button>
+              <button class="rr-revert" @click="doRevert()" :disabled="rerunBusy || !rerunActive">
+                Revert to baseline
+              </button>
+            </div>
+            <div class="rr-status" x-show="rerunReport" x-text="rerunSummary()"></div>
+            <div class="rr-err" x-show="rerunError" x-text="'⚠ ' + rerunError"></div>
+          </div>
         </div>
       </template>
     </div>
@@ -306,7 +346,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-09 · studio stage rail + inspector (glass-box)";
+const BUILD_ID = "2026-07-10 · interactive correction re-run (gate toggles)";
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -658,6 +698,14 @@ Alpine.data("poseAnnot", () => ({
     ballXyz: null,        // active-frame ball world xyz (ball2d/ball3d layer)
     ballMeta: null,       // { on_ground, conf } for the current ball frame
     ballMarker2d: null,   // { u, v, meta } projected ball marker (drawn in overlay)
+    // ── Studio correction re-run (physics/coherence gates; EPHEMERAL layer) ──
+    rerunCatalog: null,   // GET /api/studio/rerun/catalog → {profile,gates,profiles}
+    rerunProfile: "default",
+    rerunGates: {},       // gate id → desired-enabled (seeded from profile defaults)
+    rerunBusy: false,     // POST in flight (FK rebuild is FK-bound ~19s; labelled honestly)
+    rerunActive: false,   // a re-run layer is currently applied ⇒ revert available
+    rerunReport: null,    // last run report {applied,gates,corrections_added,affected_subjects,total_ms}
+    rerunError: null,
 
     trackColor(tid) { return trackColorFor(tid); },
     zoomStyle() {
@@ -958,6 +1006,8 @@ Alpine.data("poseAnnot", () => ({
       }
       this.activeStageId = id;
       const st = this.stages.find((s) => s.id === id);
+      // correction-family stages get the interactive re-run panel (gate toggles)
+      if (st && st.family === "correction") this.loadRerunCatalog();
       const layer = st && st.output ? st.output.layer : null;
       // wire the selected stage to the existing overlay layers
       if (layer === "pitch") this.showPitch = true;         // calibrate → pitch markings
@@ -976,6 +1026,75 @@ Alpine.data("poseAnnot", () => ({
       this.ballXyz = d.xyz || null;
       this.ballMeta = { on_ground: d.on_ground, conf: d.conf };
       this.projectOverlay();   // project the world xyz through the SAME oriented-camera transform
+    },
+
+    // ── Studio correction re-run (physics/coherence gates) ────────────────────
+    // Fetch the ordered gate list + profile defaults; seed the desired-enabled
+    // map from the profile's defaults (available gates only). Provider gates come
+    // back available:false with a reason and stay disabled in the UI.
+    async loadRerunCatalog() {
+      const r = await fetch(`/api/studio/rerun/catalog?profile=${encodeURIComponent(this.rerunProfile)}`);
+      if (!r.ok) { this.rerunError = `catalog ${r.status}`; return; }
+      const d = await r.json();
+      this.rerunCatalog = d;
+      this.rerunError = d.error || null;
+      const g = {};
+      for (const gate of (d.gates || [])) {
+        if (gate.available) g[gate.id] = !!gate.default_enabled;
+      }
+      this.rerunGates = g;
+    },
+    gateOn(g) { return !!this.rerunGates[g.id]; },
+    toggleGate(id, on) { this.rerunGates[id] = !!on; },
+    fmtGateReport(id) {
+      const rep = this.rerunReport && this.rerunReport.gates && this.rerunReport.gates[id];
+      if (!rep) return "";
+      if (rep.error) return "err";
+      return `+${rep.corrections_added}`;
+    },
+    rerunSummary() {
+      const r = this.rerunReport;
+      if (!r) return "";
+      const subs = (r.affected_subjects || []).length;
+      return `${(r.applied || []).length} gates · +${r.corrections_added} corr · ${subs} subj · ${r.total_ms}ms`;
+    },
+    // POST the full desired-enabled map as overrides (fully determines every gate),
+    // then re-fetch the active subject's 3D + all-skeleton overlay so the corrected
+    // poses render. Ephemeral: the server layers these corrections in memory only.
+    async doRerun() {
+      if (this.rerunBusy) return;
+      this.rerunBusy = true; this.rerunError = null;
+      try {
+        const r = await fetch("/api/studio/rerun", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile: this.rerunProfile, overrides: this.rerunGates }),
+        });
+        if (!r.ok) { this.rerunError = `rerun ${r.status}`; return; }
+        this.rerunReport = await r.json();
+        this.rerunActive = (this.rerunReport.corrections_added || 0) > 0;
+        await this.refreshThree();
+        await this.refreshOverlay3d();
+      } catch (e) {
+        this.rerunError = String(e);
+      } finally {
+        this.rerunBusy = false;
+      }
+    },
+    // Drop the ephemeral layer → server restores the frozen baseline + rebuilds FK.
+    async doRevert() {
+      if (this.rerunBusy) return;
+      this.rerunBusy = true; this.rerunError = null;
+      try {
+        const r = await fetch("/api/studio/rerun/clear", { method: "POST" });
+        if (!r.ok) { this.rerunError = `revert ${r.status}`; return; }
+        this.rerunReport = null; this.rerunActive = false;
+        await this.refreshThree();
+        await this.refreshOverlay3d();
+      } catch (e) {
+        this.rerunError = String(e);
+      } finally {
+        this.rerunBusy = false;
+      }
     },
 
     rebuildOverlay() {
