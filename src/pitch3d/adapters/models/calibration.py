@@ -34,17 +34,28 @@ from ...core.scene.provenance import Backend, ModelInfo
 class FrameKeypoints:
     """Backend output for one frame: matched pitch landmarks in image and world coords.
 
+    Optionally also carries **point-on-line** observations: image points known to lie on a named
+    pitch line but not at any identifiable position along it. A line detector produces these on
+    frames where the keypoint head finds few intersections, so they are exactly the extra evidence
+    that matters when the correspondence count is thin (see :func:`solve_homography`).
+
     Attributes:
         frame: Source frame index.
         image_uv: ``(K, 2)`` detected landmark positions, image px.
         world_xy: ``(K, 2)`` the landmarks' known pitch-plane coords (metres, ``Z = 0``).
         confidence: ``(K,)`` per-landmark detection confidence in ``[0, 1]`` (defaults to ones).
+        line_uv: ``(M, 2)`` image points lying on a known pitch line, or ``None``.
+        line_abc: ``(M, 3)`` each point's world line ``(a, b, c)``, ``a² + b² == 1``, or ``None``.
+        line_confidence: ``(M,)`` per-observation confidence (defaults to ones when lines present).
     """
 
     frame: int
     image_uv: np.ndarray
     world_xy: np.ndarray
     confidence: np.ndarray | None = None
+    line_uv: np.ndarray | None = None
+    line_abc: np.ndarray | None = None
+    line_confidence: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         self.image_uv = np.asarray(self.image_uv, dtype=float).reshape(-1, 2)
@@ -61,6 +72,30 @@ class FrameKeypoints:
             self.confidence = np.asarray(self.confidence, dtype=float).reshape(-1)
             if self.confidence.shape[0] != k:
                 raise ValueError(f"ragged keypoint confidence at frame {self.frame}")
+
+        if self.line_uv is None and self.line_abc is None:
+            return
+        if self.line_uv is None or self.line_abc is None:
+            raise ValueError(f"line_uv and line_abc must be given together at frame {self.frame}")
+        self.line_uv = np.asarray(self.line_uv, dtype=float).reshape(-1, 2)
+        self.line_abc = np.asarray(self.line_abc, dtype=float).reshape(-1, 3)
+        m = self.line_uv.shape[0]
+        if self.line_abc.shape[0] != m:
+            raise ValueError(
+                f"ragged line observations at frame {self.frame}: "
+                f"{m} image points, {self.line_abc.shape[0]} world lines"
+            )
+        if self.line_confidence is None:
+            self.line_confidence = np.ones(m, dtype=float)
+        else:
+            self.line_confidence = np.asarray(self.line_confidence, dtype=float).reshape(-1)
+            if self.line_confidence.shape[0] != m:
+                raise ValueError(f"ragged line confidence at frame {self.frame}")
+
+    @property
+    def n_lines(self) -> int:
+        """Point-on-line observations attached to this frame (0 when the backend supplies none)."""
+        return 0 if self.line_uv is None else int(self.line_uv.shape[0])
 
 
 @dataclass
@@ -139,22 +174,74 @@ def _apply_homography(h: np.ndarray, pts: np.ndarray) -> np.ndarray:
     return hom[:, :2] / hom[:, 2:3]
 
 
+def _check_line_observations(
+    line_uv: np.ndarray | None, line_abc: np.ndarray | None
+) -> tuple[np.ndarray, np.ndarray]:
+    """Validate a point-on-line observation set → ``(uv (M,2), abc (M,3))``; ``(0,·)`` if absent."""
+    if line_uv is None or line_abc is None:
+        if line_uv is not None or line_abc is not None:
+            raise ValueError("line_uv and line_abc must be given together")
+        return np.empty((0, 2)), np.empty((0, 3))
+    uv = np.asarray(line_uv, dtype=float).reshape(-1, 2)
+    abc = np.asarray(line_abc, dtype=float).reshape(-1, 3)
+    if uv.shape[0] != abc.shape[0]:
+        raise ValueError(f"ragged line observations: {uv.shape[0]} points, {abc.shape[0]} lines")
+    return uv, abc
+
+
+def point_line_residual(h: np.ndarray, line_uv: np.ndarray, line_abc: np.ndarray) -> np.ndarray:
+    """Per-observation distance (world metres) from ``H @ uv`` to its known pitch line.
+
+    Directly comparable to a point-to-point reprojection residual, because
+    :func:`~pitch3d.core.scene.pitch.world_line_from_segment` scales each ``(a, b, c)`` to
+    ``a² + b² == 1``.
+    """
+    uv, abc = _check_line_observations(line_uv, line_abc)
+    if uv.shape[0] == 0:
+        return np.empty(0)
+    world = _apply_homography(h, uv)
+    return np.abs(abc[:, 0] * world[:, 0] + abc[:, 1] * world[:, 1] + abc[:, 2])
+
+
 def solve_homography(
-    src: np.ndarray, dst: np.ndarray, weights: np.ndarray | None = None
+    src: np.ndarray,
+    dst: np.ndarray,
+    weights: np.ndarray | None = None,
+    *,
+    line_uv: np.ndarray | None = None,
+    line_abc: np.ndarray | None = None,
+    line_weights: np.ndarray | None = None,
 ) -> np.ndarray:
     """Normalized-DLT homography ``H`` with ``dst ~ H @ src`` (image→world), shape ``(3, 3)``.
 
-    Needs ≥ 4 non-collinear correspondences. Hartley-normalises both point sets for numerical
-    conditioning, solves by SVD, denormalises, and scales so ``H[2, 2] == 1``. If ``weights`` is
-    given (one non-negative weight per correspondence, e.g. per-landmark detection confidence),
-    each correspondence's two DLT rows are scaled by it, so uncertain landmarks pull the fit less.
-    ``weights=None`` reproduces the plain unweighted DLT exactly.
+    Hartley-normalises both point sets for numerical conditioning, solves by SVD, denormalises, and
+    scales so ``H[2, 2] == 1``. If ``weights`` is given (one non-negative weight per correspondence,
+    e.g. per-landmark detection confidence), each correspondence's two DLT rows are scaled by it, so
+    uncertain landmarks pull the fit less. ``weights=None`` reproduces the plain unweighted DLT.
+
+    ``line_uv``/``line_abc`` add **point-on-line** observations: an image point known only to lie
+    *somewhere* on a named pitch line, whose world line is ``(a, b, c)`` with ``a² + b² == 1``. Such
+    an observation fixes one coordinate instead of two, so it contributes a single DLT row
+    (``lᵀ H x = 0``) against a correspondence's two — but it needs no identifiable *point*, which is
+    what makes it available on frames where the keypoint head finds few intersections. Both kinds
+    live in the same 9 unknowns and the same SVD, and their residuals share units (metres), so
+    weights are comparable across them.
+
+    Needs 8 independent rows in total: ``2·len(src) + len(line_uv) ≥ 8``. Points alone therefore
+    still need ≥ 4; with lines present ≥ 2 correspondences suffice, but never zero — the world-side
+    Hartley normalisation is derived from ``dst``.
     """
     src = np.asarray(src, dtype=float).reshape(-1, 2)
     dst = np.asarray(dst, dtype=float).reshape(-1, 2)
-    n = src.shape[0]
-    if n < 4 or dst.shape[0] != n:
-        raise ValueError(f"need ≥4 matched correspondences, got {n} src / {dst.shape[0]} dst")
+    l_uv, l_abc = _check_line_observations(line_uv, line_abc)
+    n, m = src.shape[0], l_uv.shape[0]
+    if dst.shape[0] != n:
+        raise ValueError(f"ragged correspondences: {n} src / {dst.shape[0]} dst")
+    if 2 * n + m < 8 or n < (2 if m else 4):
+        raise ValueError(
+            f"under-determined: {n} correspondences + {m} point-on-line observations "
+            f"give {2 * n + m} DLT rows, need ≥8 from ≥{2 if m else 4} correspondences"
+        )
 
     t_src, t_dst = _normalization_matrix(src), _normalization_matrix(dst)
     src_n = _apply_homography(t_src, src)
@@ -164,12 +251,29 @@ def solve_homography(
     for (sx, sy), (dx, dy) in zip(src_n, dst_n, strict=True):
         rows.append([0.0, 0.0, 0.0, -sx, -sy, -1.0, dy * sx, dy * sy, dy])
         rows.append([sx, sy, 1.0, 0.0, 0.0, 0.0, -dx * sx, -dx * sy, -dx])
-    a = np.asarray(rows, dtype=float)
+    a = np.asarray(rows, dtype=float).reshape(-1, 9)
     if weights is not None:
         w = np.asarray(weights, dtype=float).reshape(-1)
         if w.shape[0] != n:
             raise ValueError(f"need one weight per correspondence, got {w.shape[0]} for {n}")
         a = a * np.repeat(np.clip(w, 0.0, None), 2)[:, None]  # two DLT rows per correspondence
+
+    if m:
+        # A world line transforms contragrediently to a world point, so the normalised line is
+        # T_dst⁻ᵀ·l; rescaling it back to a²+b²=1 keeps its row on the same metric scale as the
+        # point rows above, which is what lets one weight vector govern both.
+        lines_n = l_abc @ np.linalg.inv(t_dst)
+        lines_n = lines_n / np.hypot(lines_n[:, 0], lines_n[:, 1]).clip(1e-12)[:, None]
+        uv_n = _apply_homography(t_src, l_uv)
+        b_rows = np.einsum("mk,mj->mkj", lines_n, np.hstack([uv_n, np.ones((m, 1))]))
+        b = b_rows.reshape(m, 9)
+        if line_weights is not None:
+            lw = np.asarray(line_weights, dtype=float).reshape(-1)
+            if lw.shape[0] != m:
+                raise ValueError(f"need one weight per line observation, got {lw.shape[0]} for {m}")
+            b = b * np.clip(lw, 0.0, None)[:, None]
+        a = np.vstack([a, b])
+
     _, _, vt = np.linalg.svd(a)
     h_norm = vt[-1].reshape(3, 3)
 
@@ -192,6 +296,9 @@ def solve_homography_ransac(
     threshold: float = 1.0,
     max_iters: int = 200,
     seed: int = 0,
+    line_uv: np.ndarray | None = None,
+    line_abc: np.ndarray | None = None,
+    line_weights: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Robust image→world homography by RANSAC, returning ``(H, inlier_mask)``.
 
@@ -203,18 +310,34 @@ def solve_homography_ransac(
     all-true mask); if no ≥4 consensus emerges it falls back to fitting all points. Deterministic
     for a given ``seed``. On clean correspondences every sample agrees, so it reproduces the plain
     DLT.
+
+    Point-on-line observations (see :func:`solve_homography`) join the **refit**, not the sampling:
+    consensus is still decided by the identifiable correspondences, then any line observation
+    further than ``threshold`` metres from the winning hypothesis is dropped and the rest are added
+    to the final weighted solve. Lines therefore stiffen a fit the points already agree on rather
+    than voting on which points to trust — a mislabelled line class would otherwise carry a whole
+    consensus set with it. The returned mask covers ``src`` only.
+
+    Threshold and residuals are in **world metres** throughout, deliberately: a pitch homography is
+    strongly heteroscedastic (a uniform 2 px image error is ~0.03 m at the near touchline and
+    ~0.23 m at the far one, an 8.4x spread we measured in ``scripts/bench_ransac_usac.py``), so a
+    single pixel-domain inlier scale — what a black-box robust estimator marginalises over — does
+    not exist here. See ADR-0012.
     """
     src = np.asarray(src, dtype=float).reshape(-1, 2)
     dst = np.asarray(dst, dtype=float).reshape(-1, 2)
+    l_uv, l_abc = _check_line_observations(line_uv, line_abc)
+    lines = {"line_uv": l_uv, "line_abc": l_abc, "line_weights": line_weights} if l_uv.size else {}
     n = src.shape[0]
-    if n < 4 or dst.shape[0] != n:
-        raise ValueError(f"need ≥4 matched correspondences, got {n} src / {dst.shape[0]} dst")
-    if n == 4:
-        return solve_homography(src, dst, weights), np.ones(n, dtype=bool)
+    if dst.shape[0] != n:
+        raise ValueError(f"ragged correspondences: {n} src / {dst.shape[0]} dst")
+    if n <= 4:  # nothing to reject: every point must be used, lines just add rows
+        return solve_homography(src, dst, weights, **lines), np.ones(n, dtype=bool)
 
     rng = np.random.default_rng(seed)
     best_mask: np.ndarray | None = None
     best_key = (3, -np.inf)  # (inlier count, -mean residual); any ≥4-inlier hypothesis beats it
+    best_h: np.ndarray | None = None
     for _ in range(max_iters):
         idx = rng.choice(n, size=4, replace=False)
         try:
@@ -233,12 +356,19 @@ def solve_homography_ransac(
             continue
         key = (count, -float(resid[mask].mean()))
         if key > best_key:
-            best_key, best_mask = key, mask
+            best_key, best_mask, best_h = key, mask, h
 
     if best_mask is None:  # no consensus — best-effort fit over everything
-        return solve_homography(src, dst, weights), np.ones(n, dtype=bool)
+        return solve_homography(src, dst, weights, **lines), np.ones(n, dtype=bool)
     w = None if weights is None else np.asarray(weights, dtype=float).reshape(-1)[best_mask]
-    return solve_homography(src[best_mask], dst[best_mask], w), best_mask
+    if lines:
+        assert best_h is not None
+        with np.errstate(divide="ignore", invalid="ignore"):
+            keep = point_line_residual(best_h, l_uv, l_abc) < threshold
+        lines = {"line_uv": l_uv[keep], "line_abc": l_abc[keep]} if keep.any() else {}
+        if lines and line_weights is not None:
+            lines["line_weights"] = np.asarray(line_weights, dtype=float).reshape(-1)[keep]
+    return solve_homography(src[best_mask], dst[best_mask], w, **lines), best_mask
 
 
 def _confidence_from_error(err: float, scale_m: float) -> float:
@@ -271,8 +401,10 @@ class KeypointFieldCalibrator(FieldCalibrator):
     Attributes:
         backend: The landmark-detection backend. If ``None``, a real :class:`PitchKeypointBackend`
             is constructed lazily on first use (needs the ``cv`` extra + weights + GPU).
-        min_keypoints: Frames with fewer matched landmarks reuse the last good homography at
-            confidence 0 (drift is surfaced honestly, R-6), or identity if none yet.
+        min_keypoints: Evidence floor, counted in DLT rows as ``2 · min_keypoints``: a
+            correspondence supplies two rows, a point-on-line observation one. Frames below it
+            reuse the last good homography at confidence 0 (drift is surfaced honestly, R-6), or
+            identity if none yet. With no line observations this is simply "≥ this many landmarks".
         smooth_window: Centred temporal-smoothing window in frames (1 disables smoothing).
         conf_scale_m: Reprojection error (metres) that maps to confidence 0.5.
         ransac_threshold_m: Max reprojection residual (metres) for a landmark to count as an inlier.
@@ -313,7 +445,11 @@ class KeypointFieldCalibrator(FieldCalibrator):
         for fk in per:
             conf_kp = fk.confidence
             assert conf_kp is not None  # FrameKeypoints.__post_init__ fills this (ones if unset)
-            if fk.image_uv.shape[0] >= self.min_keypoints:
+            k, m = fk.image_uv.shape[0], fk.n_lines
+            # A correspondence is worth two DLT rows and a point-on-line observation one, so the
+            # solvability test is on *rows*; ≥2 points because the world-side Hartley normalisation
+            # is derived from them. With no lines this is exactly `k >= min_keypoints`.
+            if k >= 2 and 2 * k + m >= max(8, 2 * self.min_keypoints):
                 h, inliers = solve_homography_ransac(
                     fk.image_uv,
                     fk.world_xy,
@@ -321,12 +457,29 @@ class KeypointFieldCalibrator(FieldCalibrator):
                     threshold=self.ransac_threshold_m,
                     max_iters=self.ransac_iters,
                     seed=self.seed,
+                    line_uv=fk.line_uv,
+                    line_abc=fk.line_abc,
+                    line_weights=fk.line_confidence,
                 )
-                err = reprojection_error(h, fk.image_uv[inliers], fk.world_xy[inliers])
+                resid = np.linalg.norm(
+                    _apply_homography(h, fk.image_uv[inliers]) - fk.world_xy[inliers], axis=1
+                )
+                agree, mean_conf = inliers.astype(float), conf_kp[inliers]
+                if m:
+                    assert fk.line_confidence is not None
+                    line_resid = point_line_residual(h, fk.line_uv, fk.line_abc)
+                    line_in = line_resid < self.ransac_threshold_m
+                    # Points alone can be too few to over-constrain the fit (k=2 reprojects
+                    # exactly), so the lines that made the frame solvable must also score it —
+                    # otherwise a thin frame would report false confidence (R-6).
+                    resid = np.concatenate([resid, line_resid[line_in]])
+                    agree = np.concatenate([agree, line_in.astype(float)])
+                    mean_conf = np.concatenate([mean_conf, fk.line_confidence[line_in]])
+                err = float(np.sqrt((resid ** 2).mean())) if resid.size else float("inf")
                 conf = (
                     _confidence_from_error(err, self.conf_scale_m)
-                    * float(conf_kp[inliers].mean())
-                    * float(inliers.mean())  # honest down-weight by the agreeing-landmark fraction
+                    * float(mean_conf.mean() if mean_conf.size else 0.0)
+                    * float(agree.mean())  # honest down-weight by the agreeing-evidence fraction
                 )
                 last_good = h
             else:

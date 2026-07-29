@@ -65,6 +65,68 @@ def _box_lines(goal_x: float, inward: float, depth: float, half_w: float, spacin
     ]
 
 
+def pitch_plane_line_segments(
+    dimensions: FieldDimensions | None = None,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """World segments of the 17 straight, ``Z = 0`` pitch lines → ``{class: (A(2,), B(2,))}``.
+
+    Class names are SoccerNet's, which PnLCalib's line head also emits, so a detection keyed by
+    name looks up its world line here directly. Only *straight* lawn-plane lines are returned —
+    exactly the ones that constrain an image→world homography (circles are curved; goal frames sit
+    at ``Z ≠ 0``). The box metrics are the fixed Laws-of-the-Game values; only the outer rectangle
+    scales with ``dimensions``.
+    """
+    dims = dimensions or FieldDimensions()
+    hl, hw = dims.length / 2.0, dims.width / 2.0
+    pa_x, ga_x = -hl + PENALTY_BOX_DEPTH, -hl + GOAL_BOX_DEPTH
+    pa_hw, ga_hw = PENALTY_BOX_HALF_WIDTH, GOAL_BOX_HALF_WIDTH
+
+    def seg(ax: float, ay: float, bx: float, by: float) -> tuple[np.ndarray, np.ndarray]:
+        return np.array([ax, ay], dtype=float), np.array([bx, by], dtype=float)
+
+    return {
+        "Side line top": seg(-hl, -hw, hl, -hw),
+        "Side line bottom": seg(-hl, hw, hl, hw),
+        "Side line left": seg(-hl, -hw, -hl, hw),
+        "Side line right": seg(hl, -hw, hl, hw),
+        "Middle line": seg(0.0, -hw, 0.0, hw),
+        "Big rect. left top": seg(-hl, -pa_hw, pa_x, -pa_hw),
+        "Big rect. left bottom": seg(-hl, pa_hw, pa_x, pa_hw),
+        "Big rect. left main": seg(pa_x, -pa_hw, pa_x, pa_hw),
+        "Big rect. right top": seg(-pa_x, -pa_hw, hl, -pa_hw),
+        "Big rect. right bottom": seg(-pa_x, pa_hw, hl, pa_hw),
+        "Big rect. right main": seg(-pa_x, -pa_hw, -pa_x, pa_hw),
+        "Small rect. left top": seg(-hl, -ga_hw, ga_x, -ga_hw),
+        "Small rect. left bottom": seg(-hl, ga_hw, ga_x, ga_hw),
+        "Small rect. left main": seg(ga_x, -ga_hw, ga_x, ga_hw),
+        "Small rect. right top": seg(-ga_x, -ga_hw, hl, -ga_hw),
+        "Small rect. right bottom": seg(-ga_x, ga_hw, hl, ga_hw),
+        "Small rect. right main": seg(-ga_x, -ga_hw, -ga_x, ga_hw),
+    }
+
+
+def world_line_from_segment(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Homogeneous line ``(a, b, c)`` through two world points, scaled so ``a² + b² == 1``.
+
+    With that scaling ``|a·x + b·y + c|`` is the signed **metre** distance from ``(x, y)`` to the
+    line, which is what makes a point-on-line residual comparable to a point-to-point one.
+    """
+    p, q = np.asarray(a, dtype=float).reshape(2), np.asarray(b, dtype=float).reshape(2)
+    coeffs = np.array([p[1] - q[1], q[0] - p[0], p[0] * q[1] - q[0] * p[1]], dtype=float)
+    norm = float(np.hypot(coeffs[0], coeffs[1]))
+    if norm < 1e-12:
+        raise ValueError(f"degenerate segment: {p.tolist()} and {q.tolist()} coincide")
+    return coeffs / norm
+
+
+def pitch_line_coefficients(dimensions: FieldDimensions | None = None) -> dict[str, np.ndarray]:
+    """The straight pitch lines as normalised world coefficients → ``{class: (a, b, c)}``."""
+    return {
+        name: world_line_from_segment(a, b)
+        for name, (a, b) in pitch_plane_line_segments(dimensions).items()
+    }
+
+
 # FIFA touch/goal-line width is 12 cm; markings sit a hair above the grass to dodge z-fighting.
 LINE_WIDTH = 0.12
 _LINE_LIFT = 0.01

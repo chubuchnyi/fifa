@@ -29,6 +29,7 @@ from pitch3d.adapters.models.calibration import (
     _confidence_from_error,
     _temporal_smooth,
     image_to_world_from_cam_params,
+    point_line_residual,
     reprojection_error,
     solve_homography,
     solve_homography_ransac,
@@ -36,6 +37,7 @@ from pitch3d.adapters.models.calibration import (
 from pitch3d.core.ports.io import ClipRef
 from pitch3d.core.ports.perception import FieldCalibrator
 from pitch3d.core.scene.field import FieldCalibration
+from pitch3d.core.scene.pitch import world_line_from_segment
 
 # Ground-truth image→world homography (mild perspective) and a non-degenerate landmark set.
 _H_GT = np.array(
@@ -63,14 +65,17 @@ def _clip(frames=(0, 1, 2), width=1280, height=720) -> ClipRef:
 class _StubKeypointBackend:
     """Returns canned (image↔world) landmark matches per frame — stands in for the model."""
 
-    def __init__(self, per: dict[int, tuple]):
+    def __init__(self, per: dict[int, tuple], lines: tuple | None = None):
         self.per = per
+        self.lines = lines
 
     def detect_keypoints(self, clip: ClipRef) -> list[FrameKeypoints]:
         out = []
+        l_uv, l_abc = self.lines if self.lines else (None, None)
         for f in clip.frames.tolist():
             image_uv, world_xy = self.per[int(f)]
-            out.append(FrameKeypoints(frame=int(f), image_uv=image_uv, world_xy=world_xy))
+            out.append(FrameKeypoints(frame=int(f), image_uv=image_uv, world_xy=world_xy,
+                                      line_uv=l_uv, line_abc=l_abc))
         return out
 
 
@@ -150,6 +155,112 @@ def test_ransac_is_deterministic_for_seed():
     h2, m2 = solve_homography_ransac(_IMAGE_OUT, _WORLD_OUT, seed=7)
     np.testing.assert_array_equal(h1, h2)
     np.testing.assert_array_equal(m1, m2)
+
+
+# --- point-on-line constraints (R3, #95) ---------------------------------------
+#: Six world lines and one image point on each: the evidence PnLCalib's line head produces on a
+#: frame whose keypoint *intersections* are mostly off-screen or occluded.
+_LINE_ABC = np.array([
+    world_line_from_segment(*seg)
+    for seg in (
+        ([-52.5, -34.0], [52.5, -34.0]),   # top touchline
+        ([-52.5, 34.0], [52.5, 34.0]),     # bottom touchline
+        ([0.0, -34.0], [0.0, 34.0]),       # halfway
+        ([-36.0, -20.16], [-36.0, 20.16]), # left penalty box, main
+        ([36.0, -20.16], [36.0, 20.16]),   # right penalty box, main
+        ([-52.5, -34.0], [-52.5, 34.0]),   # left goal line
+    )
+])
+#: A world point on each of those lines, then pulled back into the image through _H_GT.
+_LINE_WORLD = np.array([
+    [10.0, -34.0], [-20.0, 34.0], [0.0, 7.0], [-36.0, -5.0], [36.0, 12.0], [-52.5, -2.0],
+])
+_LINE_UV = _apply_homography(np.linalg.inv(_H_GT), _LINE_WORLD)
+
+
+def test_line_observations_are_exactly_on_their_lines():
+    resid = point_line_residual(_H_GT, _LINE_UV, _LINE_ABC)
+    np.testing.assert_allclose(resid, 0.0, atol=1e-9)
+
+
+def test_two_points_plus_six_lines_recover_the_homography():
+    # 2*2 + 6 = 10 DLT rows. Points alone (4 rows) cannot solve this at all.
+    h = solve_homography(_IMAGE[:2], _WORLD[:2], line_uv=_LINE_UV, line_abc=_LINE_ABC)
+    np.testing.assert_allclose(h, _H_GT, atol=1e-9)
+
+
+def test_lines_do_not_perturb_an_already_determined_fit():
+    h = solve_homography(_IMAGE, _WORLD, line_uv=_LINE_UV, line_abc=_LINE_ABC)
+    np.testing.assert_allclose(h, solve_homography(_IMAGE, _WORLD), atol=1e-9)
+
+
+def test_under_determined_row_count_is_reported():
+    with pytest.raises(ValueError, match="7 DLT rows"):  # 2 points + 3 lines
+        solve_homography(_IMAGE[:2], _WORLD[:2], line_uv=_LINE_UV[:3], line_abc=_LINE_ABC[:3])
+
+
+def test_line_uv_and_abc_must_come_together():
+    with pytest.raises(ValueError, match="together"):
+        solve_homography(_IMAGE, _WORLD, line_uv=_LINE_UV)
+
+
+def test_line_weights_must_match_observation_count():
+    with pytest.raises(ValueError, match="one weight per line"):
+        solve_homography(
+            _IMAGE, _WORLD, line_uv=_LINE_UV, line_abc=_LINE_ABC, line_weights=np.ones(3)
+        )
+
+
+def test_ransac_drops_a_mislabelled_line():
+    # One observation tagged with the wrong pitch line — the failure mode a line *classifier* has,
+    # as opposed to the mislocalisation a keypoint head has.
+    bad_abc = np.vstack([_LINE_ABC, _LINE_ABC[0]])
+    bad_uv = np.vstack([_LINE_UV, _LINE_UV[2]])
+    h, _ = solve_homography_ransac(
+        _IMAGE, _WORLD, threshold=1.0, line_uv=bad_uv, line_abc=bad_abc
+    )
+    np.testing.assert_allclose(h, _H_GT, atol=1e-6)
+
+
+def test_frame_keypoints_validates_and_counts_lines():
+    fk = FrameKeypoints(
+        frame=0, image_uv=_IMAGE, world_xy=_WORLD, line_uv=_LINE_UV, line_abc=_LINE_ABC
+    )
+    assert fk.n_lines == 6
+    np.testing.assert_allclose(fk.line_confidence, 1.0)  # defaults filled like keypoint confidence
+    assert FrameKeypoints(frame=0, image_uv=_IMAGE, world_xy=_WORLD).n_lines == 0
+    with pytest.raises(ValueError, match="ragged line observations"):
+        FrameKeypoints(
+            frame=3, image_uv=_IMAGE, world_xy=_WORLD, line_uv=_LINE_UV, line_abc=_LINE_ABC[:4]
+        )
+
+
+def test_calibrator_solves_a_thin_frame_only_when_lines_are_present():
+    """3 keypoints is under-determined on points alone; the line head rescues the frame (R-6)."""
+    thin = (_IMAGE[:3], _WORLD[:3])
+    without = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({0: thin}), smooth_window=1
+    ).calibrate(_clip(frames=(0,)))
+    assert without.confidence[0] == 0.0  # carried, honestly flagged as unsolved
+    np.testing.assert_allclose(without.homographies[0], np.eye(3))
+
+    with_lines = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({0: thin}, lines=(_LINE_UV, _LINE_ABC)), smooth_window=1
+    ).calibrate(_clip(frames=(0,)))
+    assert with_lines.confidence[0] > 0.5
+    np.testing.assert_allclose(with_lines.homographies[0], _H_GT, atol=1e-6)
+
+
+def test_calibrator_confidence_is_scored_on_the_lines_that_made_it_solvable():
+    """A thin frame must not report false confidence just because 3 points reproject exactly."""
+    off = _LINE_UV + np.array([40.0, 40.0])  # line detections that disagree with the keypoints
+    good = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({0: (_IMAGE[:3], _WORLD[:3])}, lines=(_LINE_UV, _LINE_ABC))
+    ).calibrate(_clip(frames=(0,)))
+    bad = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({0: (_IMAGE[:3], _WORLD[:3])}, lines=(off, _LINE_ABC))
+    ).calibrate(_clip(frames=(0,)))
+    assert bad.confidence[0] < good.confidence[0]
 
 
 def test_confidence_decreases_with_error():

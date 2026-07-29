@@ -365,6 +365,60 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R3 / #95 — the salvage SHIPS: point-on-line constraints in the DLT. First brief item
+  to survive measurement)** — Four research-brief items have now been measured (R1, R10, R3-edges,
+  R3-salvage). The first three were falsified. **This one holds** — but the honest headline is
+  *robustness*, not precision, and it is much smaller than the first benchmark said.
+  **What was built.** A point-on-line observation — an image point known to lie *somewhere* on a
+  named pitch line — contributes **one** linear DLT row `lᵀ·H·x = 0` against a correspondence's two,
+  in the same 9 unknowns and the same SVD. Under Hartley normalisation the world line transforms
+  contragrediently (`T_dst⁻ᵀ·l`), then is rescaled to `a²+b²=1` so its residual is in **metres**,
+  directly comparable to a point residual — which is what lets one weight vector govern both.
+  * `core/scene/pitch.py`: `pitch_plane_line_segments()` / `world_line_from_segment()` /
+    `pitch_line_coefficients()`. `eval/datasets_soccernet.py::pitch_plane_lines` now **delegates**
+    to it — one pitch-line table, two callers, so GT and solver cannot drift apart.
+  * `adapters/models/calibration.py`: `solve_homography(..., line_uv=, line_abc=, line_weights=)`,
+    `solve_homography_ransac(...)` likewise, plus `point_line_residual()`. Lines join the **refit**,
+    not the sampling: consensus is still decided by identifiable points, then lines beyond the
+    threshold are dropped. (A mislabelled line class would otherwise carry a whole consensus set.)
+  * `FrameKeypoints` grew `line_uv` / `line_abc` / `line_confidence` / `n_lines`; the calibrator's
+    solvability test is now on **DLT rows** (`2·K + M ≥ max(8, 2·min_keypoints)`, `K ≥ 2`), which
+    reduces to the old `K ≥ min_keypoints` exactly when there are no lines.
+  * `pnlcalib_backend.py:115` — the defect this task existed for — no longer discards `lines_dict`.
+    It now emits point-on-line observations, gated by `PNLCALIB_USE_LINES` and by a **runtime frame
+    check**: fit points-only, measure the median point-on-line residual, and refuse the lines if it
+    exceeds 3 m. PnLCalib's keypoint world table and our pitch template are two independently
+    authored statements about the same pitch, so a mismatched axis convention would be silent and
+    catastrophic; this makes it loud and self-disabling. Auto-detect + manual override.
+  **Measured** — `scripts/bench_line_constraints.py`, local, no GPU, no dataset download; 24
+  synthetic broadcast frames × 12 trials, scored with our own `evaluate_calibration`. Keypoints are
+  derived as pitch-line *intersections* (which is what PnLCalib keypoints are), so keypoint count
+  and line evidence stay honestly coupled. Realistic model — **5 lines/frame, per-line bias 2 px +
+  1 px jitter**, keypoints 2 px iid:
+
+  | keypoints/frame | median m (points) | median m (+lines) | p95 m (points) | p95 m (+lines) |
+  |---|---|---|---|---|
+  | 3 | **unsolvable** (6 rows) | 0.324 | — | 2.59 |
+  | 4 | 1.679 | **0.254** | 95.78 | **1.26** |
+  | 6 | 0.347 | 0.269 | 5.38 | 5.03 |
+  | 10 ← *target clip* | 0.201 | **0.182** (−9%) | 0.971 | 0.815 |
+  | 14 | 0.156 | 0.148 (−6%) | 0.645 | 0.576 |
+
+  **Read it honestly.** At the operating point (the target clip yields 10–11 kp/frame) the median
+  improves **9%** — real but modest. The value is in the **tail and the floor**: at 4 keypoints p95
+  falls from **95.8 m → 1.26 m**, and 3-keypoint frames become solvable at 0.32 m instead of being
+  dropped and carried (R-6: reconstruct, don't hide).
+  **The methodological finding is the more useful one.** The first version of this benchmark modelled
+  line error as iid per point with all 17 lines visible, and reported **−43%** at the operating point.
+  Both assumptions are wrong: a stripe detector mislocalises the *whole line* (a bias no amount of
+  sampling along it averages away), and real framing shows ~5 lines, not 17. Fixing just those two
+  took the headline from −43% to −9%. The script now prints **both** tables side by side precisely so
+  the gap stays visible — this is how a benchmark flatters itself, and it nearly flattered this one.
+  **Not yet measured on real data.** These are synthetic frames with a modelled detector. The B1
+  SoccerNet number (0.236 m) and the target-clip re-run need the pod, and the pod is **off**.
+  Suite **1012 passed** / 14 skipped (10 new tests, incl. 2 points + 6 lines recovering `H` to 1e-9,
+  a mislabelled-line rejection, and confidence scoring on a thin frame).
+
 - **2026-07-29 (R3 / #95 — edge form REJECTED on measurement; salvaged into something better)** —
   ADR-0012 said to treat the remaining adopted brief items as hypotheses to measure. First one measured,
   first one falsified. **The premise:** IFAB caps pitch-line width at 0.12 m, so each painted line

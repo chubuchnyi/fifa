@@ -36,12 +36,8 @@ from pathlib import Path
 import numpy as np
 
 from ..core.ports.io import ClipRef
-
-# FIFA laws-of-the-game pitch metrics (metres). Defaults are the SoccerNet template (105 x 68).
-_PENALTY_AREA_LENGTH = 16.5
-_PENALTY_AREA_WIDTH = 40.32
-_GOAL_AREA_LENGTH = 5.5
-_GOAL_AREA_WIDTH = 18.32
+from ..core.scene.pitch import pitch_plane_line_segments
+from ..core.scene.units import FieldDimensions
 
 
 def pitch_plane_lines(
@@ -54,38 +50,11 @@ def pitch_plane_lines(
     ``[-width/2, +width/2]`` with the *top* touchline at ``-width/2`` and *bottom* at ``+width/2``.
     Units are metres. Only straight lines on the lawn plane are returned — exactly the lines that
     constrain an image→world homography (circles are curved; goal frames sit at ``Z ≠ 0``).
+
+    Thin wrapper over the core pitch template so the GT loader and the calibrator's point-on-line
+    constraints cannot drift apart: one table, two callers.
     """
-    hl, hw = length / 2.0, width / 2.0
-    pa_x = -hl + _PENALTY_AREA_LENGTH  # big-rect "main" line, left side
-    ga_x = -hl + _GOAL_AREA_LENGTH  # small-rect "main" line, left side
-    pa_hw = _PENALTY_AREA_WIDTH / 2.0
-    ga_hw = _GOAL_AREA_WIDTH / 2.0
-
-    def seg(ax: float, ay: float, bx: float, by: float) -> tuple[np.ndarray, np.ndarray]:
-        return np.array([ax, ay], dtype=float), np.array([bx, by], dtype=float)
-
-    return {
-        # Touchlines + halfway line.
-        "Side line top": seg(-hl, -hw, hl, -hw),
-        "Side line bottom": seg(-hl, hw, hl, hw),
-        "Side line left": seg(-hl, -hw, -hl, hw),
-        "Side line right": seg(hl, -hw, hl, hw),
-        "Middle line": seg(0.0, -hw, 0.0, hw),
-        # Penalty ("big rect") boxes.
-        "Big rect. left top": seg(-hl, -pa_hw, pa_x, -pa_hw),
-        "Big rect. left bottom": seg(-hl, pa_hw, pa_x, pa_hw),
-        "Big rect. left main": seg(pa_x, -pa_hw, pa_x, pa_hw),
-        "Big rect. right top": seg(-pa_x, -pa_hw, hl, -pa_hw),
-        "Big rect. right bottom": seg(-pa_x, pa_hw, hl, pa_hw),
-        "Big rect. right main": seg(-pa_x, -pa_hw, -pa_x, pa_hw),
-        # Goal ("small rect") boxes.
-        "Small rect. left top": seg(-hl, -ga_hw, ga_x, -ga_hw),
-        "Small rect. left bottom": seg(-hl, ga_hw, ga_x, ga_hw),
-        "Small rect. left main": seg(ga_x, -ga_hw, ga_x, ga_hw),
-        "Small rect. right top": seg(-ga_x, -ga_hw, hl, -ga_hw),
-        "Small rect. right bottom": seg(-ga_x, ga_hw, hl, ga_hw),
-        "Small rect. right main": seg(-ga_x, -ga_hw, -ga_x, ga_hw),
-    }
+    return pitch_plane_line_segments(FieldDimensions(length=length, width=width))
 
 
 @dataclass
