@@ -66,9 +66,9 @@ Immutable dataclasses in `core/scene/`. Shapes below are the **real ones measure
 | `Scene` | `id, episode_id, source_id, world_frame, field, camera, subjects[], teams, ball, corrections[], confidence(ConfidenceMap), render_assets, synth_views, run_log` | `scene.py:69-100` |
 | `Subject` | `track_id, proposal(SubjectMotion), role, team_id, jersey_number` | `subject.py:32-48` |
 | `SmplxShape` | `betas` — `(10,)` or `(16,)` float | `motion.py:32-44` |
-| `PoseSequence` | `frames (60,) int64`, `global_orient (60,3) f64` axis-angle, `body_pose (60,21,3) f64` axis-angle (J=21), `transl (60,3) f64` world metres Z-up, optional `left/right_hand_pose (T,15,3)`, `jaw_pose (T,1,3)` | `motion.py:48-100` |
+| `PoseSequence` | `frames (60,) int64`, `global_orient (60,3) f64` axis-angle, `body_pose (60,21,3) f64` axis-angle (J=21), `transl (60,3) f64` world metres Z-up, optional `left/right_hand_pose (T,15,3)`, `jaw_pose (T,1,3)`, `provenance (T,) <U12` (`measured`/`interpolated`/`imputed`) | `motion.py:48-100` |
 | `SubjectMotion` | `shape + pose` | `motion.py:116-127` |
-| `BallTrack` | `positions_3d (T,3), height_confidence (T,), on_ground (T,)` | `motion.py:130-168` |
+| `BallTrack` | `positions_3d (T,3), height_confidence (T,), mode (T,) <U10` (`on_ground`/`ballistic`/`unmeasured`; `.on_ground` is a derived bool property) | `motion.py:130-168` |
 | `ConfidenceMap` | `subject_frame_conf: dict[track_id → (T,) float]` | `scene/layers.py` |
 | `Correction` | target (`ROOT_TRANSLATION`/`ROOT_ORIENTATION`/…), mode (`KEYFRAME_INTERP`/`TEMPORAL_SMOOTHING`/`REFIT`/`OFFSET`), frame range, keyframes/values | `scene/layers.py` |
 
@@ -234,8 +234,11 @@ per segment:
 3. **Airborne** — fit a **ballistic parabola** `Z(t) = v0·t − ½·g·t²` between ground contacts (the only
    place height is recovered for a mono camera).
 4. **Fallback** — hold/interpolate when 2D is missing.
-   Speed capped at `max_speed_mps=35`. Output: `BallTrack(positions_3d, height_confidence, on_ground)`
+   Speed capped at `max_speed_mps=35`. Output: `BallTrack(positions_3d, height_confidence, mode)`
    — note the ball carries its own per-frame confidence, same R-6 discipline as the bodies.
+   Since R4 (#96) `mode` is a 3-state `BallMode`, not a bool: the lead/trail frames that have no
+   bracketing contact are `unmeasured` (height is a *hold*, not an estimate) rather than sharing
+   `on_ground=False` with a properly fitted `ballistic` arc.
 
 ---
 

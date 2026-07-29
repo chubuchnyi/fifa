@@ -27,6 +27,7 @@ import numpy as np
 
 from ..config.gates import PoseMotionSyncConfig
 from ..scene.layers import ConfidenceMap, Correction, CorrectionTarget, TargetKind
+from ..scene.motion import Provenance
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
 
@@ -60,7 +61,10 @@ def _mark_low_conf(
     scene: Scene, track_id: int, frames: np.ndarray,
     row_indices: np.ndarray, conf: float,
 ) -> None:
-    """Stamp confidence map — mutates ``scene.confidence`` in place."""
+    """Stamp confidence map + pose provenance — mutates ``scene`` in place."""
+    for s in scene.subjects:
+        if s.track_id == track_id and s.proposal.pose.n_frames == len(frames):
+            s.proposal.pose.mark(row_indices, Provenance.INTERPOLATED)
     if scene.confidence is None:
         scene.confidence = ConfidenceMap()
     frame_conf = dict(scene.confidence.subject_frame_conf)

@@ -18,6 +18,7 @@ def _write_subject(dirpath, track_id=3, extra=()):
         color=np.zeros(3, np.float32),
         frames=np.arange(2, dtype=np.int64),
         alpha=np.ones(2, np.float32),
+        provenance=np.array(["measured", "imputed"]),
     )
     for name in extra:
         keys[name] = np.zeros(2, np.float32)
@@ -78,8 +79,8 @@ def test_writer_rejects_unknown_artifacts(tmp_path):
 
 def test_manifest_without_subjects_is_an_empty_export(tmp_path):
     np.savez(tmp_path / "ball.npz", frames=np.arange(2), positions_3d=np.zeros((2, 3)),
-             height_confidence=np.ones(2))
-    keys = ["frames", "positions_3d", "height_confidence"]
+             height_confidence=np.ones(2), mode=np.array(["on_ground", "ballistic"]))
+    keys = ["frames", "positions_3d", "height_confidence", "mode"]
     contract.write_manifest(str(tmp_path), {"ball.npz": keys})
     with pytest.raises(contract.ContractError, match="no anim_subject"):
         contract.load_manifest(str(tmp_path))

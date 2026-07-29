@@ -322,8 +322,16 @@ def _mark_low_conf(
     Mutates the scene's confidence map in place. If no map exists yet, one is
     created. Missing per-track entries are seeded with 1.0 (measured) so only
     the interpolated rows get the low value — the rest stay honest.
+
+    Also stamps the matching pose rows ``INTERPOLATED``. The gate emits its result as a
+    *correction* rather than rewriting the proposal, but the frame is fabricated either way
+    once the stack resolves, and provenance describes the frame, not which array holds it.
     """
     from ..scene.layers import ConfidenceMap
+    from ..scene.motion import Provenance
+    for s in scene.subjects:
+        if s.track_id == track_id and s.proposal.pose.n_frames == len(frames):
+            s.proposal.pose.mark(row_indices, Provenance.INTERPOLATED)
     if scene.confidence is None:
         scene.confidence = ConfidenceMap()
     frame_conf = dict(scene.confidence.subject_frame_conf)

@@ -86,8 +86,20 @@ targeting a subject (or the ball/global when `track_id is None`).
   | `body_pose` | `(T, J, 3)` | body joint rotations, axis-angle (`J=21` for SMPL-X body) |
   | `transl` | `(T, 3)` | root translation, world meters (anchored by homography, FR-8) |
   | `left_hand_pose`, `right_hand_pose`, `jaw_pose` | optional | SMPL-X extras; `None` for SMPL/SMPL-H |
+  | `provenance` | `(T,)` `<U12` | per-row `Provenance` (R4/#96); defaults to all `measured` |
 
-  Helpers: `n_frames`, `n_joints`, `frame_pos(i)`, `copy()`, and `PoseSequence.rest(frames, n_joints)`.
+  Helpers: `n_frames`, `n_joints`, `frame_pos(i)`, `copy()`, `mark(rows, Provenance)`,
+  `measured_mask`, and `PoseSequence.rest(frames, n_joints)`.
+
+### `Provenance` (R-6 as a type, R4/#96)
+`measured` · `interpolated` · `imputed`. Which rows a detector produced vs. which the pipeline
+invented, and — between the last two — whether the invention was *bridged between two measured
+anchors* (`fill_pose_gaps`, `kinematics`' teleport policy) or *coasted off a clip edge with no
+far-side measurement at all* (`extend_pose_to_span`). Before R4 this was encoded as sentinel
+`subject_frame_conf` values (1.0 / 0.3 / 0.2 / 0.15), so a 0.2 could equally mean "measured,
+detector unsure" — a photoreal renderer had no way to tell an observed body from an invented one.
+Deliberately **not** folded into render `alpha`: a coasted player is still physically on the
+pitch, so fading it out would be erasing rather than marking.
 
 ### `BallTrack` (FR-9, R-4)
 | field | shape | meaning |
@@ -96,7 +108,15 @@ targeting a subject (or the ball/global when `track_id is None`).
 | `positions_3d` | `(T, 3)` | world positions (m) |
 | `height_confidence` | `(T,)` | confidence in the **Z** component, `[0,1]` (mono height is uncertain) |
 | `track_2d` | `(T, 2)` opt | image-space track (px) |
-| `on_ground` | `(T,)` bool opt | ground-contact flag (drives the ballistic segmentation) |
+| `mode` | `(T,)` `<U10` | per-frame `BallMode`; defaults to all `unmeasured` |
+
+`BallMode` is `on_ground` (Z pinned by a measured contact) · `ballistic` (Z from a gravity
+parabola fitted between two contacts) · `unmeasured` (no bracketing contact — height genuinely
+unknown). `on_ground` survives as a **derived** bool property (`mode == "on_ground"`), not a
+stored field. The pre-R4 bare bool was lossy: `False` meant *both* "we fitted a parabola through
+it" and "we have no idea", which is exactly what `ball_lift`'s held lead/trail tails are. Saves
+written before R4 migrate `False → unmeasured` (the weaker reading — the two facts are not
+separable after the fact); re-running the lift recovers the real `ballistic` frames.
 
 Related raw input: **`Ball2DTrack`** (`frames`, `positions_2d (T,2)`, `confidence (T,)`) — the
 output of a `BallTracker` adapter *before* the core 3D lift. **`VectorCurve`** (`frames`,

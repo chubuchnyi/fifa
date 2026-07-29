@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 
 from ..scene.layers import ConfidenceMap, Correction, CorrectionTarget, TargetKind
-from ..scene.motion import PoseSequence, SubjectMotion
+from ..scene.motion import PoseSequence, Provenance, SubjectMotion
 from ..scene.scene import Scene
 from .engine import interp_rotation, interp_vector, make_smoothing
 from .kinematics import HUMAN_MAX_SPEED
@@ -120,6 +120,10 @@ def fill_pose_gaps(pose: PoseSequence, max_gap: int) -> tuple[PoseSequence, np.n
             out[fpos, j, :] = interp_rotation(ff, ef, values[:, j, :])
         return out
 
+    prov = np.empty(t_new, dtype=pose.provenance.dtype)
+    prov[epos] = pose.provenance
+    prov[fpos] = Provenance.INTERPOLATED.value
+
     new_pose = PoseSequence(
         frames=nf,
         global_orient=_rot(pose.global_orient),
@@ -128,6 +132,7 @@ def fill_pose_gaps(pose: PoseSequence, max_gap: int) -> tuple[PoseSequence, np.n
         left_hand_pose=None if pose.left_hand_pose is None else _rot_joints(pose.left_hand_pose),
         right_hand_pose=None if pose.right_hand_pose is None else _rot_joints(pose.right_hand_pose),
         jaw_pose=None if pose.jaw_pose is None else _rot(pose.jaw_pose),
+        provenance=prov,
     )
     return new_pose, ff
 
@@ -220,6 +225,14 @@ def extend_pose_to_span(
     tr_tail = pose.transl[-1][None, :] + v_trail[None, :] * _geom_steps(trail - fn, decay)[:, None]
     transl = np.concatenate([tr_head, pose.transl, tr_tail], axis=0)
 
+    # Coasted edges are IMPUTED, not INTERPOLATED: there is no measurement on the far side to
+    # bridge to, so the position is inference all the way down.
+    prov = np.concatenate([
+        np.full(ln, Provenance.IMPUTED.value, dtype=pose.provenance.dtype),
+        pose.provenance,
+        np.full(tn, Provenance.IMPUTED.value, dtype=pose.provenance.dtype),
+    ])
+
     new_pose = PoseSequence(
         frames=nf,
         global_orient=_hold(pose.global_orient),
@@ -228,6 +241,7 @@ def extend_pose_to_span(
         left_hand_pose=None if pose.left_hand_pose is None else _hold(pose.left_hand_pose),
         right_hand_pose=None if pose.right_hand_pose is None else _hold(pose.right_hand_pose),
         jaw_pose=None if pose.jaw_pose is None else _hold(pose.jaw_pose),
+        provenance=prov,
     )
     return new_pose, added
 

@@ -421,6 +421,7 @@ def _export_subjects(
                 color=color,
                 vcolor=vcolor,
                 measured=measured,
+                provenance=np.asarray(motion.pose.provenance),
                 joints=joints,
                 transl=transl,
             )
@@ -493,6 +494,10 @@ def _export_subjects(
             color=color,
             frames=frames.astype(np.int64),
             alpha=alpha.astype(np.float32),
+            # Per-frame Provenance (R4). Deliberately NOT folded into alpha: a coasted player is
+            # still physically on the pitch, so fading it out would be erasing, not marking. The
+            # photoreal pass reads this to avoid presenting an inferred body as observed.
+            provenance=d["provenance"],
             # Team id ("A"/"B", "" when untracked) — lets the renderer draw per-team AOV masks
             # (--team-mask) that downstream hue re-pinning keys on after generative finishing.
             team=str(subj.team_id or ""),
@@ -500,7 +505,8 @@ def _export_subjects(
             **tex_extra,
         )
         entries[fname] = sorted(
-            ["verts", "faces", "color", "frames", "alpha", "team", *num_extra, *tex_extra]
+            ["verts", "faces", "color", "frames", "alpha", "provenance", "team",
+             *num_extra, *tex_extra]
         )
         tracks.append((frames.astype(np.int64), transl.astype(np.float64)))
 
@@ -528,8 +534,9 @@ def _export_ball(scene, out_dir: str, entries: dict[str, list[str]]):
         frames=np.asarray(ball.frames, dtype=np.int64),
         positions_3d=np.asarray(ball.positions_3d, dtype=np.float32),
         height_confidence=np.asarray(ball.height_confidence, dtype=np.float32),
+        mode=np.asarray(ball.mode),
     )
-    entries["ball.npz"] = ["frames", "height_confidence", "positions_3d"]
+    entries["ball.npz"] = ["frames", "height_confidence", "mode", "positions_3d"]
     print(f"ball: {int(np.asarray(ball.frames).shape[0])} frames -> ball.npz")
     return ball
 

@@ -68,6 +68,7 @@ Distinct from Tier 2: these are things the briefs *recommend*, not things they r
 | **Their accuracy envelope** (Global 0.35–0.45 m; "do not spec below") | **Reject as our bar** | Correct for a pitch-control analytics product, wrong for a video judged by eye. A large *common-mode* camera error is nearly free at a novel viewpoint — it is a rigid re-render. Superseded by R7 | Pivoting the product toward analytics |
 | **Shot segmentation** (§3.1) | **Defer** | We reconstruct one continuous clip | Becomes P0 the moment we ingest a full match |
 | **Off-screen imputation B2/B4** (§3.6) | **Defer, and note the conflict** | For analytics an imputed ghost is a useful estimate. In a photoreal video, rendering an imputed player is **fabrication**, which R-6 forbids | Only behind R4's `Provenance` type (#96), gated **at the renderer** — not at the analytics boundary. Note this sits in deliberate tension with our own rule that near-certain tracker-lost subjects must be interpolated rather than blinked out; the dividing line is confidence, and `Provenance` is what makes it checkable |
+| **Frozen per-frame `PlayerState` / `BallState` dataclasses** (brief §3) | **Adopt the *types*, decline the *shape*** | R4 (#96) shipped `Provenance` and `BallMode` — that part was right, and better-motivated than the brief argued (see below). But the brief hangs them off a per-frame state object, and our motion is already `(T, …)` arrays in `PoseSequence`/`BallTrack`. A parallel per-frame representation would have to be kept in sync with the arrays that every gate actually writes, so the labels ride the arrays instead | A move to a genuinely per-frame scene graph (e.g. USD time-samples as the in-memory model, not just the export target) |
 | **Brief §0 / §10 repo layout** (split into `CLAUDE.md` + `docs/spec/`; `src/core/`, `src/adapters/`) | **Ignore** | Written greenfield. We already have `src/pitch3d/{core,adapters}`, 12 ADRs and `STATUS.md` as SSOT; following it literally forks both the tree and the tracking | Nothing |
 
 ### One inherited caveat, already ours
@@ -91,11 +92,17 @@ mistaken for a rejection.
 - A rejection log ages. Tier 2 entries inherited from the briefs are *argued*, not measured by us —
   they carry the briefs' evidence, not ours, and should be treated as weaker.
 - There is a real risk of over-trusting this file. The briefs' **diagnoses** have been far better than
-  their **prescriptions**: **four** of their items have now been measured (R1, R10, R3-edges,
-  R3-salvage) and **three premises were false** — while every one of those investigations turned up
-  something real next door (a 206 → 18 mm foot-placement bug; why our world-metre RANSAC threshold is
-  load-bearing; an entire discarded line-detection head, which then shipped). Read them, measure them,
-  do not implement them. R5 and R7 remain unmeasured hypotheses, not work orders.
+  their **prescriptions**: **five** of their items have now been measured (R1, R10, R3-edges,
+  R3-salvage, R4) and **three premises were false** — while every one of those investigations turned
+  up something real next door (a 206 → 18 mm foot-placement bug; why our world-metre RANSAC threshold
+  is load-bearing; an entire discarded line-detection head, which then shipped; a ball `on_ground`
+  bool that was lossy for 46 of 48 frames). Read them, measure them, do not implement them. R5 and R7
+  remain unmeasured hypotheses, not work orders.
+- R4 sharpens that pattern rather than breaking it. It is the first item adopted roughly as written —
+  but the brief's *stated* motivation (typed state is good hygiene) is not why it was worth doing.
+  The reason is that we were already encoding provenance, badly, in sentinel confidence values, and
+  the ball's bool was silently conflating "fitted arc" with "no idea". The brief pointed at the right
+  place for the wrong reason; the value came from measuring what was actually there.
 - The one that survived is also a warning about *our own* measurement. R3's salvage first benchmarked
   at −43 % and landed at −9 % once the noise model stopped flattering it. A benchmark we wrote to
   justify a change will find what we ask it to find unless we attack its assumptions first.

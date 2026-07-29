@@ -27,14 +27,14 @@ import os
 
 import numpy as np
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: per-frame provenance / ball mode (R4)
 MANIFEST_NAME = "manifest.json"
 
 #: Minimum npz keys per artifact (glob pattern → required keys). Optional keys (vcolor,
 #: jersey_number, ...) ride on top and are listed per-file in the manifest itself.
 REQUIRED_KEYS: dict[str, tuple[str, ...]] = {
-    "anim_subject_*.npz": ("verts", "faces", "color", "frames", "alpha"),
-    "ball.npz": ("frames", "positions_3d", "height_confidence"),
+    "anim_subject_*.npz": ("verts", "faces", "color", "frames", "alpha", "provenance"),
+    "ball.npz": ("frames", "positions_3d", "height_confidence", "mode"),
     "pitch.npz": ("pitch_verts", "pitch_faces", "goal_verts", "goal_faces"),
     "stadium.npz": ("verts", "faces", "colors", "uv", "tile"),
     "boards.npz": ("verts", "faces", "colors"),

@@ -32,7 +32,7 @@ from collections.abc import Mapping
 import numpy as np
 
 from ..scene.field import FieldCalibration
-from ..scene.motion import Ball2DTrack, BallTrack, SubjectMotion
+from ..scene.motion import Ball2DTrack, BallMode, BallTrack, SubjectMotion
 from ..scene.units import GRAVITY
 
 # Defaults tuned for ~1080p broadcast. ``CONTACT_PX`` is the image-space radius (px) within
@@ -194,7 +194,9 @@ def _lift_from_contacts(
     n = frames.shape[0]
     pos = np.zeros((n, 3))
     geo_conf = np.full(n, airborne_confidence * 0.5)  # lead/trail: unknown ⇒ low
-    on_ground = np.zeros(n, dtype=bool)
+    # The held lead/trail tails stay UNMEASURED: they have no bracketing contact, so their
+    # height is not a ballistic estimate — it is a hold. Only a fitted arc earns BALLISTIC.
+    mode = np.full(n, BallMode.UNMEASURED.value, dtype=object)
 
     aks = [a[0] for a in anchors]
     axy = {a[0]: a[1] for a in anchors}
@@ -203,12 +205,13 @@ def _lift_from_contacts(
     for a in aks:
         pos[a, :2] = axy[a]
         geo_conf[a] = 1.0
-        on_ground[a] = True
+        mode[a] = BallMode.ON_GROUND.value
 
     for a, b in zip(aks[:-1], aks[1:], strict=False):
         if b <= a + 1:
             continue  # adjacent contacts: nothing airborne between
         seg = np.arange(a + 1, b)
+        mode[seg] = BallMode.BALLISTIC.value
         f0, f1 = float(frames[a]), float(frames[b])
         u = (frames[seg].astype(float) - f0) / (f1 - f0)  # 0..1 across the arc
         pos[seg, :2] = (1.0 - u)[:, None] * axy[a] + u[:, None] * axy[b]
@@ -222,7 +225,7 @@ def _lift_from_contacts(
         positions_3d=pos,
         height_confidence=conf,
         track_2d=ball2d.positions_2d,
-        on_ground=on_ground,
+        mode=mode,
     )
 
 
@@ -259,8 +262,9 @@ def lift_ball_to_3d(
 
     Returns:
         A :class:`BallTrack` with ``positions_3d``, per-frame ``height_confidence``
-        (detection confidence × geometric confidence), the original 2D track, and the
-        resolved ``on_ground`` mask.
+        (detection confidence × geometric confidence), the original 2D track, and a
+        per-frame :class:`~pitch3d.core.scene.motion.BallMode`. Frames with no bracketing
+        contact stay ``UNMEASURED`` — their Z is a hold, not an estimate.
     """
     if motions:
         anchors = detect_ball_contacts(
@@ -292,6 +296,7 @@ def lift_ball_to_3d(
     pos = np.zeros((n, 3))
     pos[:, :2] = xy  # ground projection is the XY default everywhere
     geo_conf = np.where(og, 1.0, airborne_confidence)
+    mode = np.where(og, BallMode.ON_GROUND.value, BallMode.UNMEASURED.value).astype(object)
 
     contacts = np.nonzero(og)[0]
     if contacts.size >= 2:
@@ -299,6 +304,7 @@ def lift_ball_to_3d(
             if b <= a + 1:
                 continue  # adjacent contacts: no airborne frames between
             seg = np.arange(a + 1, b)
+            mode[seg] = BallMode.BALLISTIC.value
             f0, f1 = float(frames[a]), float(frames[b])
             u = (frames[seg].astype(float) - f0) / (f1 - f0)  # 0..1 across the arc
             pos[seg, :2] = (1.0 - u)[:, None] * xy[a] + u[:, None] * xy[b]
@@ -321,5 +327,5 @@ def lift_ball_to_3d(
         positions_3d=pos,
         height_confidence=conf,
         track_2d=ball2d.positions_2d,
-        on_ground=og,
+        mode=mode,
     )

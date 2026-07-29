@@ -12,6 +12,9 @@ Tag scheme (reserved keys):
     ``__type__``    dataclass {type, fields}
     ``__tuple__``   tuple
     ``__dict__``    dict with arbitrary (incl. non-string) keys
+
+Older saves are migrated on decode via :data:`_MIGRATIONS` — the tree is untagged by version,
+so a migration keys off the dataclass name and rewrites its field dict before construction.
 """
 
 from __future__ import annotations
@@ -37,6 +40,7 @@ _CLASSES: list[type] = [
     # motion
     motion.SmplxShape, motion.PoseSequence, motion.SubjectMotion, motion.BallTrack,
     motion.Ball2DTrack, motion.VectorCurve, motion.BodyModel,
+    motion.Provenance, motion.BallMode,
     # subject
     subject.Team, subject.Subject, subject.Role,
     # layers
@@ -51,6 +55,26 @@ _CLASSES: list[type] = [
     scene.SourceKind, scene.EpisodeSource,
 ]
 _REGISTRY: dict[str, type] = {c.__name__: c for c in _CLASSES}
+
+
+def _migrate_ball_track(fields: dict[str, Any]) -> dict[str, Any]:
+    """Scenes saved before :class:`~.motion.BallMode` stored a bare ``on_ground`` bool.
+
+    ``False`` there meant *either* "airborne, height from a fitted parabola" *or* "no bracketing
+    contact, height unknown" — the two are not separable after the fact, so it migrates to
+    ``UNMEASURED``. Re-running the ball lift recovers the ``BALLISTIC`` frames properly.
+    """
+    on_ground = fields.pop("on_ground", None)
+    if on_ground is not None and fields.get("mode") is None:
+        grounded = np.asarray(on_ground, dtype=bool)
+        fields["mode"] = np.where(
+            grounded, motion.BallMode.ON_GROUND.value, motion.BallMode.UNMEASURED.value
+        )
+    return fields
+
+
+#: Field rewrites applied on decode, keyed by dataclass name — the save format's migration path.
+_MIGRATIONS = {"BallTrack": _migrate_ball_track}
 
 
 def encode(obj: Any) -> Any:
@@ -91,9 +115,11 @@ def decode(data: Any) -> Any:
             spec = data["__enum__"]
             return _REGISTRY[spec["type"]](spec["value"])
         if "__type__" in data:
-            cls = _REGISTRY[data["__type__"]]
+            name = data["__type__"]
+            cls = _REGISTRY[name]
             kwargs = {k: decode(v) for k, v in data["fields"].items()}
-            return cls(**kwargs)
+            migrate = _MIGRATIONS.get(name)
+            return cls(**(migrate(kwargs) if migrate else kwargs))
         if "__tuple__" in data:
             return tuple(decode(x) for x in data["__tuple__"])
         if "__dict__" in data:

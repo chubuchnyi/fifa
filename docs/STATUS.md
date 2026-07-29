@@ -365,6 +365,55 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R4 / #96 — `Provenance` + `BallMode`: R-6 made checkable by types, and it exposed a
+  real information loss)** — Fifth brief item measured. Adopted, and unlike R1/R3-edges/R10 it did
+  not need falsifying — but the *reason* it was worth doing turned out to be stronger than the
+  brief's argument for it.
+  **The defect.** State provenance was already in the pipeline, encoded as **sentinel confidence
+  values**: 1.0 measured, 0.3 bridged (`coherence.filled_confidence`), 0.2 coasted
+  (`extrapolated_confidence`), 0.15 teleport-interpolated, 0.20 pose-patched. So a `0.2` meant
+  *either* "we invented this row" *or* "we measured it and the detector was unsure" — and those two
+  are not the same fact. A photoreal renderer cannot separate an observed body from an invented one
+  by thresholding a float, which is precisely what v2 needs to do.
+  **The worse one, on the ball.** `BallTrack.on_ground=False` conflated "Z came from a gravity
+  parabola fitted between two contacts" with "there is no bracketing contact at all, so Z is a
+  *hold*". `ball_lift.py`'s own comment already called those lead/trail tails "genuinely unknown"
+  while the type reported them identically to a real arc. On the target clip that is **46 of 48
+  frames** — the bool was lossy for 96% of the trajectory.
+  **What was built.** `Provenance{measured,interpolated,imputed}` and
+  `BallMode{on_ground,ballistic,unmeasured}` in `core/scene/motion.py`, as `(T,)` label arrays
+  riding the existing pose/ball arrays — *not* the brief's parallel per-frame `PlayerState`
+  dataclass, because our representation is already `(T,…)` and a second one would have to be kept
+  in sync. `interpolated` vs `imputed` is a real distinction, not a synonym pair: bridging between
+  two measured anchors (`fill_pose_gaps`) is a stronger claim than coasting off a clip edge where
+  there is no far-side measurement to bridge *to* (`extend_pose_to_span`).
+  * Stamped by every gate that fabricates rows: `coherence` (rewrites rows), `kinematics` and
+    `pose_motion_sync` (emit corrections but change a frame's epistemic status, so they stamp the
+    proposal pose). Corrections that only change *values* leave provenance alone — verified by test.
+  * `on_ground` survives as a **derived** property (`mode == "on_ground"`), so the poseannot GUI and
+    the three checked-in clips keep working; there is no duplicated field to drift.
+  * Carried through JSON, the anim export, and into the Blender npz — `anim_contract`
+    `SCHEMA_VERSION` **1 → 2**, with `provenance` and `mode` now *required* keys, so a stale export
+    fails loudly instead of rendering a scene that silently lost the channel.
+  * Deliberately **not** folded into render `alpha`. A coasted player is still physically on the
+    pitch; fading it out would be erasing, not marking — the opposite of R-6.
+  **Migration, and its honest limit.** Pre-R4 saves migrate `on_ground=False → unmeasured` (named
+  migration in `serialization.py`, keyed off the dataclass name): the weaker of the two readings,
+  because the facts it conflated are not separable after the fact. Verified against the checked-in
+  clips: `A_smplestx` → `{unmeasured: 46, on_ground: 2}`, matching the 2/48 recorded at
+  `docs/v0-geometry-defects.md:134`. **Pose rows in legacy saves read all-`measured`** even where
+  they were coasted, because the fact was never recorded. That could have been back-inferred from
+  the sentinel confidences — but `0.20` is *both* `extrapolated_confidence` and `PATCHED_CONF`, i.e.
+  exactly the ambiguity R4 removes, so guessing it back would be fabricating provenance while
+  shipping a feature whose point is not to. Re-running the coherence gate restores it properly.
+  **E2E (real clip, whole path).** `A_smplestx` → coherence gate reports `filled=19 / extended=137`
+  → save → `anim_export` → npz → contract load: `{measured: 852, interpolated: 19, imputed: 137}`.
+  The gate's report and the provenance channel are computed independently and agree exactly; a unit
+  test asserts that equality so a future edit cannot stamp one without the other.
+  **Tests.** `tests/unit/test_state_provenance.py` (12). Suite **1024 passed / 14 skipped**. No new
+  lint debt (the `UP042` hits follow the repo-wide `class X(str, Enum)` convention that the JSON
+  codec relies on).
+
 - **2026-07-29 (R3 / #95 — the salvage SHIPS: point-on-line constraints in the DLT. First brief item
   to survive measurement)** — Four research-brief items have now been measured (R1, R10, R3-edges,
   R3-salvage). The first three were falsified. **This one holds** — but the honest headline is
