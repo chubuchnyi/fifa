@@ -365,6 +365,71 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (RESEARCH INTAKE — `football-3d-*` briefs analysed; adopted as tasks #93–#102)** —
+  Two external docs landed in `docs/research/`: `football-3d-pipeline-v2.md` (the *why* — benchmarks,
+  rejected alternatives) and `football-3d-implementation-brief.md` (the derived *what/how*). Both
+  untracked at intake. Quality is high — the `[meas.]/[claimed]/[est.]` convention is honest, and the
+  two arithmetic chains I checked are self-consistent (§7.1: 250×7+2 = 1752 camera vars, 38×250 = 9500
+  per player, ×14 + ball 830 ≈ **136k** ✓; §13.2: ViT-H/14 @512×384 → ~1000 tokens → 2×632M×1000 =
+  1.26 TFLOP → A10G at 40% of 125 TFLOPS → 25 ms unbatched / 12.5 ms batched → 350 crops/s ≈ 4.4
+  GPU-s/s ≈ **5×A10G** for 25 fps ✓).
+  **CENTRAL FINDING — they spec a DIFFERENT PRODUCT.** Their purpose is *coaching analytics* (parquet
+  of distances/sprints/pitch control); brief §1 lists "photorealistic rendering" under **explicit
+  non-goals**. That non-goal is our deliverable (§1 of this file). The shared core overlaps ~70%; the
+  *bars* do not. Consequence: their envelope ("Global MPJPE 0.35–0.45 m, do not spec below") is
+  rejected as ours. Their own decomposition supplies the replacement — global error is ~55%
+  camera-driven `[meas.]`, and camera error is **common-mode**, a rigid transform of the whole scene
+  that at a novel viewpoint re-renders as a slightly different camera and is nearly free. What shows
+  in our deliverable is **inter-player residual spread** → task #99 (R7).
+  **LIVE DEFECT FOUND via brief §2.1** ("do not hardcode the S→W rotation from memory; pin it with a
+  golden test"): the SMPL-X→world constant is hardcoded in **four** places and one is the *transpose*
+  of the other three — `eval/bodymodel.py:178` = `[[1,0,0],[0,0,-1],[0,1,0]]` (world_z = **+**y_smplx,
+  R_x+90°) vs `correction/orient_verticality.py:65`, `adapters/models/smplx_foot_pos.py:92` and
+  `app/anim_export.py:140` = `[[1,0,0],[0,0,1],[0,-1,0]]` (world_z = **−**y_smplx, R_x−90°). Both
+  comment blocks claim z=up and y_smplx=up, so at most one is right unless eval's "ours" is a
+  legitimately different frame — undocumented either way. This is the exact "silent, plausible, wrong"
+  class, and it is adjacent to real time already spent on 180°-roll bugs (#50, #64). → task #93 (R1).
+  **Verified-absent gaps** (grep, not impression): no VPoser / joint limits (#97), no factor graph /
+  theseus / bundle adjustment, no RAFT / optical flow of any kind (#94), no shot segmentation, no
+  `Provenance` on state — `RunLog` is provenance of the *model*, and the ball carries a bare
+  `on_ground: bool` + `height_confidence` (`core/scene/motion.py:142,149`) rather than a 3-state mode
+  (#96).
+  **ADOPTED → #93 R1** unify S→W constant + golden test · **#94 R2** RAFT-small + MAD 3σ + RANSAC
+  propagation between PnLCalib anchors (0.041°/frame `[meas.]`; direct treatment for **#61**, the
+  project's open defect #1) · **#95 R3** fit line **edges** (IFAB ≤0.12 m ⇒ two parallel lines at known
+  separation) not centrelines · **#96 R4** typed `Provenance`/`BallMode` · **#97 R5** joint-limit
+  residual · **#98 R6** golden tests for projection round-trip + homography **sign** · **#99 R7** our
+  own metric · **#100 R8** ADR-0012 rejected-approaches log · **#101 R9** OpenCV 5 migration ·
+  **#102 R10** USAC/MAGSAC++.
+  **OPENCV 5 (#101/#102) — sized against actual usage, cheaper than the docs imply.** Inventoried the
+  cv2 surface across 23 importing files: **`cv2.dnn` used nowhere** (all inference is torch/rfdetr/
+  ultralytics), so §12.12's "new DNN engine is CPU-only" is a non-issue for us; **G-API used nowhere**
+  (§12.11 non-issue); `calib3d` exposure is exactly **two** calls (`findHomography` ×1,
+  `decomposeHomographyMat` ×2) which move under the `geometry`/`calib`/`stereo`/`ptcloud` split; the
+  rest is imgproc/videoio/remap, stable across the major. The payoff is **#102**: we run a *hand-rolled*
+  RANSAC at `adapters/models/calibration.py:196` + confidence-weighted DLT at `:266` — uniform-sampling
+  RANSAC is exactly what **MAGSAC++** (marginalises over the inlier threshold, no magic 1 px) and
+  **PROSAC** (quality-ordered sampling — we already carry per-keypoint confidences) beat, and v2 §3.3
+  claims that on player-contaminated grass this "matters more than changing the feature detector".
+  Gate: no regression vs **B1 = 0.236 m** on `scripts/run_calib_eval.py`. **Sequenced R9 → R10 → R2**
+  (#94 and #102 both marked blocked-by #101) so the propagation stage is built on USAC once, not twice.
+  **DEFERRED/REJECTED with reasons** (roadmap "Research intake" section, so they are not re-argued):
+  factor graph §7/§4 — entirely `[est.]` by the doc's own admission, buys *accuracy* while our binding
+  constraint is appearance fidelity; our correction stack (ADR-0002) + human/LLM edit loop is the
+  cheaper path to the same visible result. Shot segmentation — deferred, we reconstruct one continuous
+  clip. **Off-screen imputation — deferred WITH a noted conflict:** for analytics an imputed ghost is a
+  useful estimate; in a photoreal video, rendering an imputed player is **fabrication**, which R-6
+  forbids — if ever adopted it must be gated by #96's `Provenance` at the *renderer*, not at the
+  analytics boundary. Audio TDOA — their own §9 rejects it for broadcast (mixed stereo, not a
+  multichannel field feed). Brief §0/§10 (split into `CLAUDE.md`+`docs/spec/`, build `src/core/`) —
+  ignored, written greenfield; we already have `src/pitch3d/{core,adapters}`, 11 ADRs, and this file as
+  SSOT.
+  **INHERITED CAVEAT:** §12.6 warns TrackNet/TOTNet-class ball trackers are validated on racket sports
+  and table tennis, untested on football (deforming ball, ~20× scene scale, occlusion by 22 legs). Our
+  `adapters/models/wasb_backend.py` is from that same lineage — so the warning lands on a choice we
+  have **already made**, not on their recommendation.
+  **Reply drafted for the authoring model:** `docs/research/football-3d-response.md`.
+
 - **2026-07-10 (PIPELINE STUDIO Increment 4 — generalized OUTPUT editing: whole-subject root orient/move nudges; tasks #89–#92)** —
   Widened the shipping pose-edit path (which only exposed per-joint `POSE_BODY_JOINT` axis-angle) to the two
   root targets the correction engine **already resolves but the UI never surfaced**: `ROOT_ORIENTATION`

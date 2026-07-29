@@ -56,6 +56,85 @@ not about result quality.
 
 ---
 
+## ⚑ Research intake — `football-3d-*` briefs (2026-07-29)
+
+Two external research docs landed in [`research/`](research/): `football-3d-pipeline-v2.md` (the *why*
+— benchmark numbers, rejected alternatives) and `football-3d-implementation-brief.md` (the derived
+*what/how* — domain model, ports, invariants, milestones). Well-built: the `[meas.]/[claimed]/[est.]`
+confidence convention is honest, and the two arithmetic chains I could check (§7.1 variable count →
+136k, §13.2 ViT-H latency → ~5×A10G for real time) are self-consistent.
+
+**They spec a different product.** Their stated purpose is *coaching analytics* (parquet of distances,
+sprints, pitch control); their §1 lists "photorealistic rendering" under **explicit non-goals**. That
+non-goal is our deliverable. The shared core (calibration, detect/track, lifter, physics) overlaps
+heavily — the *bars* do not. Do not import their accuracy envelope or their milestone ladder.
+
+**Adopted** (tasks #93–#102; ranked by value to the novel-view deliverable):
+
+| ID | Item | Source | Why it lands here | GPU? |
+|---|---|---|---|---|
+| **R1** #93 | Unify the SMPL-X→world constant + golden test | brief §2.1, §9.2.1 | **Found a live inconsistency:** the constant is hardcoded in 4 places and `eval/bodymodel.py:178` is the *transpose* (R_x+90°) of the three pipeline sites (R_x−90°). Exactly the "silent, plausible, wrong" class. | no |
+| **R2** #94 | RAFT-small + MAD 3σ + RANSAC propagation between PnLCalib anchors | v2 §3.3 | Camera is ~55% of global error `[meas.]`; we have **no** temporal propagation at all. Direct treatment for #61. 0.041°/frame `[meas.]`. | yes |
+| **R3** #95 | Fit line **edges** (IFAB ≤0.12 m) not centrelines | v2 §3.3 | Free second constraint per painted line, better conditioned in close views. Feeds R2's anchor side. | no |
+| **R4** #96 | `Provenance{measured,imputed,interpolated}` + `BallMode{on_ground,ballistic,unmeasured}` | brief §3 | Our R-6 ("mark, don't erase") made checkable by types. We have `RunLog` (model provenance) but nothing on *state*; ball is a bare `on_ground: bool`. | no |
+| **R5** #97 | Joint-limit residual: VPoser-norm prior + one-sided knee/elbow hinges | brief §7.3 | SMPL has **no** joint limits — hyperextension is representable *and reachable*. Verified absent here. Judged-by-eye product ⇒ directly visible. | no |
+| **R6** #98 | Golden tests: projection round-trip + homography **sign** | brief §9.2.2/9.2.4 | The sign test catches world→camera inversion, which yields a mirrored but self-consistent scene. We have burned real time on this class (#50, #64, the 180°-roll finding). | no |
+| **R7** #99 | Our own metric: per-player residual after removing common-mode camera bias; local MPJPE stratified by joint speed (top decile) | brief §1 + §9.4, inverted | Their own 55%-camera decomposition implies common-mode error is nearly **free** at a novel viewpoint — a rigid re-render. What shows is inter-player spread. Mean-only metrics hide fast phases (we confirmed this independently on the yaw low-pass). | no |
+| **R8** #100 | Port §9 "rejected and why" → ADR-0012 | v2 §9 | Stops re-opening settled questions. Mark which rejections are conditional on *our* goal. | no |
+| **R9** #101 | **Migrate to OpenCV 5** (next iteration) | v2 §3.3, brief §13.1/§12.11/§12.12 | Unblocks R10; the two scare-items in the docs turn out not to apply to us (see below). | no |
+| **R10** #102 | Replace our hand-rolled RANSAC with **USAC / MAGSAC++** | v2 §3.3 | "On grass contaminated by player motion this matters **more than changing the feature detector**" — aimed at our exact situation, and we have a homegrown estimator to replace. | no |
+
+### R9/R10 — the OpenCV 5 step, sized against our actual usage
+
+Pinned today: `opencv-python==4.11.0.86`. I inventoried the real cv2 surface (23 importing files)
+before scheduling this, and **the migration is much cheaper than the briefs imply**:
+
+| Doc warning | Our exposure | Verdict |
+|---|---|---|
+| §12.12 "the new DNN engine is CPU-only, GPU lands in later releases" | **`cv2.dnn` is used nowhere.** All inference is torch / rfdetr / ultralytics. | Non-issue |
+| §12.11 "G-API moved to `opencv_contrib`" | **G-API is used nowhere.** | Non-issue |
+| "`calib3d` is split into `geometry` / `calib` / `stereo` / `ptcloud`" | Exactly **two** calls: `cv2.findHomography` (1 site) and `cv2.decomposeHomographyMat` (2 sites). | The only real import work |
+| — | Everything else is `imgproc` (cvtColor, resize, GaussianBlur, morphology, drawing), `videoio` (VideoCapture/VideoWriter), `remap`/`warpAffine` — stable across the major. | No change expected |
+
+So the cost is a pin bump, two import paths, and a regression run — and the payoff is concentrated in
+the one subsystem we are about to rework anyway.
+
+**The payoff is R10.** `adapters/models/calibration.py:196` is a hand-written *"Robust image→world
+homography by RANSAC"* with its own `ransac_iters`/`seed`, refined by a confidence-weighted DLT
+(`:266`). Uniform-sampling RANSAC is exactly what the modern estimators beat: **MAGSAC++** marginalises
+over the inlier threshold (no magic 1 px to tune), and **PROSAC** samples in quality order — and we
+already carry per-keypoint confidences to order by. On a pitch where a third of the frame is moving
+players, that is the difference the doc is pointing at. Keep the DLT as refinement, keep the seed for
+reproducibility, make the estimator selectable (auto + manual override), and measure against the
+current **B1 = 0.236 m** on `scripts/run_calib_eval.py`.
+
+**Sequencing:** R9 → R10 → R2. R2 builds a RANSAC homography stage for the RAFT propagation; on
+OpenCV 5 that stage should be USAC from the start rather than written twice. `#94` and `#102` are both
+marked blocked by `#101`.
+
+**Also available after R9, deliberately not adopted:** the `Features` module ships ALIKED/LightGlue.
+v2 §9 rejects them as the *primary* pitch matcher — uniform periodic grass, a near-mirror-symmetric
+pitch (half-aliasing), a third of the frame moving — and semantic line detection against a known model
+wins. Recorded in ADR-0012 (R8) so it is not re-opened; they remain fair game as a *secondary* cue.
+
+**Rejected / deferred, with reasons** (so they are not re-argued):
+
+| Item | Verdict | Reason |
+|---|---|---|
+| Factor graph §7 / §4 (136k vars, Theseus, staged A/B/C) | **Defer, not adopt** | Entirely `[est.]` — the doc says so itself — and it is the largest, most expensive section. It buys *accuracy*, and our binding constraint is appearance fidelity, not the last 10 cm. Our correction stack (ADR-0002) + the human/LLM edit loop is the cheaper path to the same visible result. Revisit only if R7's metric says inter-player residual is what's breaking the render. |
+| Their accuracy envelope (Global 0.35–0.45 m; "do not spec below") | **Reject as our bar** | Correct for pitch control, wrong for a video judged by eye. Superseded by R7. |
+| Shot segmentation (§3.1) | **Defer** | We reconstruct one continuous clip. Becomes P0 the moment we ingest a full match. |
+| Off-screen imputation B2/B4 (§3.6) | **Defer, and note the conflict** | For analytics an imputed ghost is a useful estimate. In a photoreal video, rendering an imputed player is **fabrication** — R-6 forbids it. If ever adopted, it must be gated by R4's `Provenance` at the renderer, not at the analytics boundary. |
+| Audio TDOA (§5.1) | **Not applicable** | Their own §9 rejects it for broadcast: mixed stereo, not a multichannel field feed. We have a broadcast clip. |
+| Brief §0 ("split into `CLAUDE.md` + `docs/spec/`") and §10 (`src/core/`, `src/adapters/`) | **Ignore** | Written greenfield. We already have `src/pitch3d/{core,adapters}`, 11 ADRs and `STATUS.md` as SSOT; following it literally would fork the tree and the tracking. |
+
+**One inherited caveat, already ours:** their §12.6 warns that TrackNet/TOTNet-class ball trackers are
+validated on racket sports and table tennis, and that football (deforming ball, ~20× scene scale,
+occlusion by 22 legs) is unproven transfer. Our `adapters/models/wasb_backend.py` comes from the same
+lineage — so the warning applies to a choice we have **already made**, not to their recommendation.
+
+---
+
 ## M0 — Skeleton (this scaffold)
 
 **Goal:** the hexagonal skeleton compiles, the scene model round-trips, a dry-run runs end-to-end
