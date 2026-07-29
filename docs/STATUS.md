@@ -277,6 +277,7 @@ ACHIEVED.** Validation also surfaced **#206** (ball off-pitch); diagnosed + fixe
 PYTHONPATH=src .venv/bin/python scripts/bench_ransac_usac.py       # R10 rejection
 PYTHONPATH=src .venv/bin/python scripts/bench_line_constraints.py  # R3 point-on-line gain
 PYTHONPATH=src .venv/bin/python scripts/bench_novel_view_metric.py # R7: why 0.35-0.45 m is not a bar
+PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py      # R5: is hyperextension ever reached?
 
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
@@ -371,6 +372,47 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R5 / #97 — joint limits: measured, rejected, and the last brief item closed)** —
+  Eighth and final measurable brief item. ADR-0012's standing rule for it was "read them, measure
+  them, do not implement them", so this is a measurement, not a feature: `scripts/bench_joint_limits.py`.
+  **The finding — the premise is half right, and the half that fails is the one that decides the
+  work.** SMPL-X really has no joint limits, so hyperextension is *representable*. The brief then
+  assumes it is *reachable*. It is not: across all **1008** subject-frames of the production variant
+  (A, SMPLest-X), **0.0 % of knees and elbows go past straight** — knee min **+11.6°**, median 33.7°;
+  elbow min +23.9°, median 62.5°. Nothing anywhere near the 15° implausibility line. The pose nets
+  regress into the manifold of the humans they were trained on, so the constraint is already supplied
+  by the training distribution.
+  **The half worth chasing: a net is not our only author of poses.** A gate that *invents* 137 frames
+  by coasting is a far more plausible source of an impossible knee than a network trained on real
+  humans, so R4's provenance labels (#96) are used to score them apart rather than average them into
+  one reassuring number. The invented frames come out **safer**: imputed knee min **+24.6°** vs
+  measured +11.6°, because `extend_pose_to_span` **holds** the last articulation instead of
+  extrapolating it. That is a property of the gate worth knowing independently of R5 — R4 paid for
+  itself here, one day after shipping. Variant B (SAM 3D Body) is looser — 7.8 % of frames a few
+  degrees past straight, worst **−11.1°** — but that is normal genu recurvatum, not a broken rig.
+  **Verdict.** A joint-limit residual would buy a VPoser dependency and a term that can only pull a
+  plausible pose *away* from the observations, to enforce what is already enforced. Limits would bite
+  an optimiser that fits pose to observations with **no data prior** — which is precisely the factor
+  graph the briefs propose alongside them, already deferred in ADR-0012. **R5 and the factor graph
+  re-open together, not separately**, and both ADR rows now say so.
+  **Two sign errors in my own script, both of the exact class R6 exists for** — self-consistent,
+  plausible, and each one inverting the finding. (1) The elbow convention was derived by probing the
+  X axis only; in the canonical T-pose an X rotation at the elbow is a **twist along the forearm**,
+  moving the wrist ~1 cm, so left and right got opposite signs and the table read 100 % elbow
+  hyperextension. (2) "Forward" was taken from the toes-ankle vector, which normalises to
+  `[0.338, −0.415, 0.845]` — the toes splay outward and downward, so it is not an axis; projecting a
+  laterally-swinging limb onto it flipped signs and produced knee min −97.5°. Fixed by building an
+  orthogonal body frame (`cross(hip axis, spine)` → `[0.032, 0.081, 0.996]`) and by replacing the
+  axis guess with a **self-check that cannot be fooled by a convention**: a bent limb is shorter end
+  to end, so probe all six (axis, sign) rotations, take the one that most shortens
+  distal-to-grandparent — that is flexion by definition, no axis needs naming — and `SystemExit` if
+  the metric does not score it positive. All four chains now print `[OK]` before any number is
+  reported.
+  **Closes the brief backlog.** All eight measurable items are measured (R1, R10, R3-edges,
+  R3-salvage, R4, R5, R6, R7); four premises were false or half false; every investigation found
+  something real next door. What remains from the briefs is deferred on cost or on missing ground
+  truth, and each ADR row names which. Suite unchanged at **1042 passed / 14 skipped**.
+
 - **2026-07-29 (R7 / #99 — our own accuracy metric; the briefs' envelope retired with a number)** —
   Seventh brief item, adopted only after inverting its premise, and the first one that changes how we
   are allowed to *report* progress. New module `src/pitch3d/eval/novel_view.py` (10 tests) +
@@ -424,8 +466,8 @@ fabricate or silently hide.
   **Consequence for ADR-0012.** The factor-graph deferral was conditioned on "R7's metric showing
   inter-player residual is what breaks the render". The metric now exists, so that blocker moved from
   *missing tooling* to *missing ground truth*, and the ADR row says so. Seven brief items measured
-  (R1, R10, R3-edges, R3-salvage, R4, R6, R7); **R5 is now the only unmeasured hypothesis left**.
-  Suite **1042 passed / 14 skipped**.
+  at the time of writing (R1, R10, R3-edges, R3-salvage, R4, R6, R7); R5 followed the same day and
+  closed the set. Suite **1042 passed / 14 skipped**.
 
 - **2026-07-29 (R6 / #98 — golden tests for projection + sign, verified by mutation rather than by
   assertion count)** — Sixth brief item. Adopted, but the brief's framing had to be inverted first.
