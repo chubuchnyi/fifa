@@ -365,6 +365,36 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R3 / #95 — edge form REJECTED on measurement; salvaged into something better)** —
+  ADR-0012 said to treat the remaining adopted brief items as hypotheses to measure. First one measured,
+  first one falsified. **The premise:** IFAB caps pitch-line width at 0.12 m, so each painted line
+  should yield *two* parallel edges at a known separation — a free second constraint. **It requires the
+  two edges to be separately resolvable.** They are not.
+  **Measured on the target clip** (`scripts/measure_pitch_line_width.py`, frame 60, 1920×1080), three
+  independent ways so a mask threshold can't invent the answer: (1) distance transform over a
+  grass-restricted thin-blob paint mask — thickness median **2.00 px**, p90 2.80 px, and even in the
+  nearest row band (750–900) median 2.0 / p90 4.0; (2) **raw greyscale FWHM with no mask at all**,
+  across the nearest lines — **1–2 px**, profile `114 118 152 196 145 116`, i.e. a single-pixel peak
+  with one transition pixel each side; (3) eyeballed at 8× nearest-neighbour — a hairline.
+  That is a **point spread function, not a band**. Two independent edge positions cannot be recovered
+  from a single-lobe PSF. Same failure mode v2 §9 used to reject the ball-shadow idea (3–4 px ellipse),
+  applied to their own surviving reformulation. The thickness-as-range-cue variant dies with it: 2.0 →
+  2.8 px median across the *entire* visible pitch is ~1 px of dynamic range, and v2 §9 had already
+  rejected that form on chicken-and-egg grounds anyway.
+  **What the investigation found instead, which is worth more than R3 was.** PnLCalib runs **two**
+  HRNet heads — keypoints *and* lines — and `adapters/models/pnlcalib_backend.py:115` **throws the line
+  detections away** on the DLT path (`kp_dict, _lines, w_orig, h_orig = self._infer_frame(...)`). Its
+  own docstring admits it: *"`lines_dict` is discarded by the DLT path but is the camera module's key
+  extra constraint"*. So the `--solver camera` path uses them and the keypoint/DLT path — the one that
+  gave us **10–11 keypoints/frame at conf 0.61** on the Colombia clip — solves a homography from ~10
+  points while discarding every line pixel in the frame. **That is free evidence we are already paying
+  the GPU for.** Feeding it back as point-on-line residuals needs no edge resolution at all, and it
+  aims straight at **#61**, the project's open defect #1. #95 re-scoped to this.
+  **R-6 tally:** three of the brief's items measured so far (R1, R10, R3), three premises falsified —
+  and in *all three* the investigation found something real next door (R1 → the 206→18 mm foot bug;
+  R10 → why our world-metre threshold + confidence-weighted DLT are load-bearing; R3 → the discarded
+  line head). The briefs are worth reading and not worth implementing. ADR-0012 updated.
+
 - **2026-07-29 (R8 / #100 DONE — ADR-0012, the rejected-approaches log)** —
   `docs/adr/0012-rejected-approaches-log.md`. Not a verbatim port of v2 §9: porting it verbatim would
   have imported *their* goal (analytics accuracy) along with their verdicts. Organised by **strength of
