@@ -35,6 +35,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from ..config.gates import OrientVerticalityConfig
+from ..scene.frames import R_SMPLX_CAMERA_TO_WORLD
 from ..scene.layers import Correction, CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .engine import make_keyframes, resolve_subject_motion
@@ -61,20 +62,16 @@ class OrientVerticalityReport:
     subjects: list[SubjectVerticalityReport] = field(default_factory=list)
 
 
-#: Vertex remap: verts_ours = verts_smplx @ R_SMPLX_TO_OURS.T where
-#:     R_SMPLX_TO_OURS = [[1,0,0],[0,0,1],[0,-1,0]]  (world_z = −smplx_y).
-#: A body direction v_body gets transformed by the SMPL-X global rotation R_g to
-#: R_g @ v_body in smplx frame, then remapped to (x_s, z_s, -y_s) in ours.
-
 def _body_up_world_z(rotvec: np.ndarray) -> np.ndarray:
     """World-Z component of the body-up axis, one per frame.
 
-    ``rotvec`` shape ``(T, 3)`` — axis-angle in SMPL-X native frame.
-    Body-up in body local = +Y_smplx. After R_g, in smplx frame it's R_g[:,1].
-    After remap, its world_z is −(R_g[:,1])_y = −R_g[1,1].
+    ``rotvec`` shape ``(T, 3)`` — axis-angle in the SMPL-X **camera** frame, which is what real
+    HMR output carries (see :mod:`pitch3d.core.scene.frames`). Body-up in body local is
+    ``+Y_smplx``, so after ``R_g`` it is ``R_g[:, 1]``; its world Z is that dotted with the
+    remap's Z row.
     """
     R = Rotation.from_rotvec(rotvec).as_matrix()   # (T, 3, 3)
-    return -R[:, 1, 1]
+    return R[:, :, 1] @ R_SMPLX_CAMERA_TO_WORLD[2]
 
 
 def _world_yaw_from_rotvec(rotvec: np.ndarray) -> np.ndarray:

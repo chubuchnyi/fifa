@@ -44,6 +44,7 @@ from pitch3d.adapters.io.frames import resolve_source_path
 from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
 from pitch3d.core.scene.cameras import plan_virtual_cameras
+from pitch3d.core.scene.frames import rotation_for
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.core.scene.stadium import (
@@ -130,14 +131,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _rotation(canonical_up: bool) -> np.ndarray:
-    """SMPL-X output frame → our z-up world.
-
-    Same orientation gotcha as smplx_export_meshes.py: real SMPLest-X output is camera-frame
-    (y-down) → new = [x, z, -y]; a fake/canonical export needs the plain y-up → z-up map.
-    """
-    if canonical_up:
-        return np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.float32)
-    return np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
+    """SMPL-X output frame → our z-up world; see :mod:`pitch3d.core.scene.frames`."""
+    frame = "canonical" if canonical_up else "camera"
+    return rotation_for(frame).astype(np.float32)
 
 
 def _purge_stale(out_dir: str) -> None:

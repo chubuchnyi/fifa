@@ -20,6 +20,7 @@ import smplx
 import torch
 
 from pitch3d.core.correction.engine import resolve_subject_motion
+from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD
 from pitch3d.core.scene.layers import Correction, TargetKind
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
@@ -35,7 +36,7 @@ from .edits import (
 )
 
 # SMPLest-X → z-up world remap (see scripts/render_smplx_mesh.py comment).
-R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
+R_SMPLX_TO_OURS = R_SMPLX_CAMERA_TO_WORLD.astype(np.float32)  # real HMR output
 
 #: SMPL-X body joint index → human name.  Body has 22 joints (pelvis + 21).
 BODY_JOINT_NAMES = [

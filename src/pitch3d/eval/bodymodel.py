@@ -25,6 +25,8 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 
+from ..core.scene.frames import R_SMPLX_CANONICAL_TO_WORLD
+
 JOINT_NAMES: tuple[str, ...] = (
     "pelvis", "spine", "neck", "head",
     "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
@@ -173,11 +175,10 @@ _SMPLX_DEFAULT_DIR = "SMPL-X/models"
 #: SMPL-X joint index for each of the 16 canonical :data:`JOINT_NAMES`, in order (rest-pose probe).
 SMPLX_TO_CANONICAL: tuple[int, ...] = (0, 6, 12, 15, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8)
 
-#: SMPL-X native axes (x=anatomical-left, y=up, z=front) → ours (x=right, y=forward, z=up).
-#: This is R_x(+90°), verified empirically (det +1) against a rest-pose forward pass.
-_R_SMPLX_TO_OURS: np.ndarray = np.array(
-    [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
-)
+#: This module runs its own ``global_orient = 0`` forward pass, so its input is always the
+#: SMPL-X *canonical* frame; external orientation is applied afterwards. See
+#: :mod:`pitch3d.core.scene.frames` for why the camera-frame remap is a different matrix.
+_R_SMPLX_TO_OURS: np.ndarray = R_SMPLX_CANONICAL_TO_WORLD
 
 
 def _build_smplx(model_path: str | None, gender: str, num_betas: int) -> Any:

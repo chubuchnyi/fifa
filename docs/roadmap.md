@@ -73,7 +73,7 @@ heavily — the *bars* do not. Do not import their accuracy envelope or their mi
 
 | ID | Item | Source | Why it lands here | GPU? |
 |---|---|---|---|---|
-| **R1** #93 | Unify the SMPL-X→world constant + golden test | brief §2.1, §9.2.1 | **Found a live inconsistency:** the constant is hardcoded in 4 places and `eval/bodymodel.py:178` is the *transpose* (R_x+90°) of the three pipeline sites (R_x−90°). Exactly the "silent, plausible, wrong" class. | no |
+| **R1** #93 ✅ | Unify the SMPL-X→world constant + golden test | brief §2.1, §9.2.1 | **Premise falsified, real bug found elsewhere.** The two matrices are *both correct* — they map two different source frames (canonical y-up vs SMPLest-X camera y-down); unifying them would have inverted half the pipeline. The actual defect was in `smplx_foot_pos.py`: a det=−1 *mirror*, `argmin` over native y (which picks the **head**), and no pelvis re-origin. Measured 206 mm → 18 mm ground-plane error. | no |
 | **R2** #94 | RAFT-small + MAD 3σ + RANSAC propagation between PnLCalib anchors | v2 §3.3 | Camera is ~55% of global error `[meas.]`; we have **no** temporal propagation at all. Direct treatment for #61. 0.041°/frame `[meas.]`. | yes |
 | **R3** #95 | Fit line **edges** (IFAB ≤0.12 m) not centrelines | v2 §3.3 | Free second constraint per painted line, better conditioned in close views. Feeds R2's anchor side. | no |
 | **R4** #96 | `Provenance{measured,imputed,interpolated}` + `BallMode{on_ground,ballistic,unmeasured}` | brief §3 | Our R-6 ("mark, don't erase") made checkable by types. We have `RunLog` (model provenance) but nothing on *state*; ball is a bare `on_ground: bool`. | no |

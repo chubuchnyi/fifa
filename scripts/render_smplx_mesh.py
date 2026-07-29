@@ -31,6 +31,7 @@ import smplx  # noqa: E402
 import torch  # noqa: E402
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection  # noqa: E402
 
+from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD  # noqa: E402
 from pitch3d.env import load_env  # noqa: E402
 
 load_env()  # any path below may be overridden by the repo-root .env (pod defaults stand otherwise)
@@ -52,7 +53,7 @@ assert paths, f"no subject_*.npz in {NPZ_DIR}"
 # (head at -y, feet at +y). Rotate it into our z-up world so the head lands on +z, then
 # place it with the z-up world transl (the pelvis position the pipeline solved for).
 # new = [x, z, -y]: lateral stays, depth->y, height (head-up) -> +z.
-R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
+R_SMPLX_TO_OURS = R_SMPLX_CAMERA_TO_WORLD.astype(np.float32)  # real HMR output
 
 
 def forward(npz_path: str, frame: int):

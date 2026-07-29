@@ -39,6 +39,7 @@ import smplx
 import torch
 
 from pitch3d.core.correction.engine import resolve_subject_motion
+from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD
 from pitch3d.core.scene.serialization import load_scene
 from pitch3d.env import load_env
 
@@ -46,7 +47,7 @@ load_env()
 
 # SMPLest-X emits camera-frame verts with y pointing down (head at -y). Rotate
 # into our z-up world (new = [x, z, -y]) before adding transl.
-R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
+R_SMPLX_TO_OURS = R_SMPLX_CAMERA_TO_WORLD.astype(np.float32)  # real HMR output
 
 
 def _team_color(track_id: int, palette: np.ndarray) -> np.ndarray:

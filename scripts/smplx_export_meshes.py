@@ -22,6 +22,10 @@ import numpy as np
 import smplx
 import torch
 
+from pitch3d.core.scene.frames import (
+    R_SMPLX_CAMERA_TO_WORLD,
+    R_SMPLX_CANONICAL_TO_WORLD,
+)
 from pitch3d.env import load_env
 
 load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, never hard-coded
@@ -37,9 +41,9 @@ FRAME = int(os.environ.get("PITCH3D_MESH_FRAME", "0"))
 # y-up, head at +y); for those set PITCH3D_CANONICAL_UP=1 to use the plain y-up -> z-up map
 # (new = [x, -z, y]) so the body still stands. Then add the z-up world transl (pelvis pos).
 if os.environ.get("PITCH3D_CANONICAL_UP", "0") == "1":
-    R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, -1], [0, 1, 0]], dtype=np.float32)
+    R_SMPLX_TO_OURS = R_SMPLX_CANONICAL_TO_WORLD.astype(np.float32)
 else:
-    R_SMPLX_TO_OURS = np.array([[1, 0, 0], [0, 0, 1], [0, -1, 0]], dtype=np.float32)
+    R_SMPLX_TO_OURS = R_SMPLX_CAMERA_TO_WORLD.astype(np.float32)
 
 os.makedirs(OUT, exist_ok=True)
 paths = sorted(glob.glob(os.path.join(NPZ_DIR, "subject_*.npz")))

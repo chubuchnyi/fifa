@@ -365,6 +365,35 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R1 / #93 DONE — SMPL-X→world frames unified; a real foot-placement bug found and fixed)** —
+  The brief's §2.1 premise was that four hardcoded SMPL-X→world constants are an inconsistency to be
+  collapsed into one. **That premise is false, and acting on it would have broken the pipeline.** An
+  empirical rest-pose forward pass plus real exports settled it: SMPL-X reaches us in *two* source
+  frames and they need *different* remaps. `out/cuda` (fake/canonical export) has native
+  head_y − ankle_y = **+1.495** — canonical, +y up. `out/live_real` (real SMPLest-X) has
+  **−1.21 … −1.45** — camera frame, +y DOWN, exactly as `anim_export._rotation`'s docstring already
+  warned. So `eval/bodymodel.py`'s `[[1,0,0],[0,0,−1],[0,1,0]]` and the pipeline's
+  `[[1,0,0],[0,0,1],[0,−1,0]]` are **both right, for different inputs**. Unifying them inverts one path.
+  I also flagged an "x-axis inconsistency" mid-investigation and then **disproved it**: `CANONICAL_SKELETON`
+  puts l_shoulder at x=+0.17 and the SMPL-X map yields +0.161 — they agree. A canonical body under the
+  remap faces −y, and its anatomical left is +x; "x-right/y-forward" are *world* axis labels, not claims
+  about anatomy. No bug there.
+  **The real defect was next door, in `smplx_foot_pos.py`** — the provider feeding `contact_probe`
+  (foot slide + contact detection). Three compounding errors: (1) the remap was `[x, z, y]`, **det = −1**,
+  an improper transform that mirrors the forward axis, so a planted foot's local offset fought the root
+  translation instead of cancelling it; (2) `argmin` ran over *native* y, which on camera-frame data
+  selects the **top of the head**, not a foot; (3) no pelvis re-origin, though `transl` is the world
+  *pelvis* and SMPL-X sits its pelvis ~0.35 m off its own origin. Validated against physics, not
+  convention: **feet must land on the pitch.** Across 6 real subjects, foot z went −0.167 m → −0.004 m;
+  E2E on the Studio scene `A_smplestx` (8 subjects, 96 samples) **206 mm → 18 mm, a 91% reduction.**
+  **Shipped:** `core/scene/frames.py` — both constants named and documented by source frame,
+  `detect_source_frame()` (the far end from the pelvis is always the feet) and a `source_frame` override,
+  per the auto-detect + manual-override rule. All 7 literal copies removed (`eval/bodymodel.py`,
+  `orient_verticality.py`, `anim_export.py`, `poseannot/scene_state.py`, 3 scripts); `anim_export`'s
+  manual `--canonical-up` footgun now resolves through the shared table. 16 new tests
+  (`test_frames.py`, `test_smplx_foot_pos.py`), including one that **fails if someone unifies the two
+  constants** — the trap the brief would have walked us into. Full suite green, no GPU used.
+
 - **2026-07-29 (RESEARCH INTAKE — `football-3d-*` briefs analysed; adopted as tasks #93–#102)** —
   Two external docs landed in `docs/research/`: `football-3d-pipeline-v2.md` (the *why* — benchmarks,
   rejected alternatives) and `football-3d-implementation-brief.md` (the derived *what/how*). Both

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ...core.correction.contact_probe import FootPositionProvider
+from ...core.scene.frames import SourceFrame, detect_source_frame, smplx_to_world
 from ...core.scene.scene import Subject
 from .smplx_lbs import SmplxModel, locate_smplx_model
 
@@ -30,15 +31,8 @@ class SmplxFootPosConfig:
     #: interpolation creates fake stance detections when downsampled
     #: (contact_probe reads constant XY across held rows as a planted foot).
     max_frames_sampled: int = 240
-    # Which axis is "up" in the model's local frame:
-    up_axis: str = "y"            # smplx native = y-up
-    # Which axis to negate when mapping model→world (y-up → z-up):
-    negate_axis: str | None = None
-
-
-def _world_up_from(vert: np.ndarray) -> float:
-    """Take the axis chosen as up; convert to a scalar."""
-    return float(vert)
+    #: Override the SMPL-X source frame; ``None`` detects it per subject.
+    source_frame: SourceFrame | None = None
 
 
 def make_smplx_foot_position_provider(
@@ -59,8 +53,6 @@ def make_smplx_foot_position_provider(
     except (FileNotFoundError, KeyError, OSError, ValueError):
         return None
 
-    axis_idx = {"x": 0, "y": 1, "z": 2}[cfg.up_axis]
-
     def provider(subject: Subject) -> np.ndarray | None:
         motion = subject.proposal
         if motion is None:
@@ -72,6 +64,8 @@ def make_smplx_foot_position_provider(
             return None
         betas = np.asarray(motion.shape.betas, dtype=float).reshape(-1)
         transl = np.asarray(pose.transl, dtype=float)
+        # `transl` is the world pelvis, so re-origin on the pelvis joint before rotating.
+        pelvis = (model.j_regressor @ model.shaped(betas))[0]
         k = min(cfg.max_frames_sampled, n)
         sampled = np.unique(np.linspace(0, n - 1, k).round().astype(int))
         # dense output — hold last known between sampled frames
@@ -84,14 +78,13 @@ def make_smplx_foot_position_provider(
                         betas=betas,
                         global_orient=pose.global_orient[i],
                         body_pose=pose.body_pose[i],
-                        transl=None,   # pelvis-at-origin — add transl below
+                        transl=None,   # world root added after the frame remap
                     )
-                    lowest = int(np.argmin(verts[:, axis_idx]))
-                    lp = verts[lowest]
-                    # remap y-up → z-up so it matches pitch3d world frame:
-                    # (x, y, z)_smplx → (x, z_smplx, -y_smplx) in our frame
-                    # simpler + generic: pass axis choice via config
-                    foot_world = np.array([lp[0], lp[2], lp[1]]) + transl[i]
+                    frame = cfg.source_frame or detect_source_frame(verts, pelvis)
+                    world = smplx_to_world(
+                        verts, pelvis=pelvis, frame=frame, transl=transl[i]
+                    )
+                    foot_world = world[int(np.argmin(world[:, 2]))]
                     out[i] = foot_world
                     last = foot_world
                 except (ValueError, IndexError):
