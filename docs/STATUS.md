@@ -267,10 +267,15 @@ ACHIEVED.** Validation also surfaced **#206** (ball off-pitch); diagnosed + fixe
 
 ```bash
 # tests / lint / types (pure-core work is fully testable locally)
-.venv/bin/python -m pytest                 # full suite (~557 tests baseline)
+.venv/bin/python -m pytest                 # full suite (1032 passed / 14 skipped, 2026-07-29)
 .venv/bin/python -m pytest tests/<path>    # focused
 .venv/bin/ruff check <files>               # lint
 .venv/bin/mypy <files>                     # types
+
+# runnable evidence (cited by ADR-0012 — re-run these instead of trusting the write-up)
+.venv/bin/python scripts/mutate_projection_sign.py   # do the R6 sign guards still catch anything?
+PYTHONPATH=src .venv/bin/python scripts/bench_ransac_usac.py       # R10 rejection
+PYTHONPATH=src .venv/bin/python scripts/bench_line_constraints.py  # R3 point-on-line gain
 
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
@@ -364,6 +369,45 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-29 (R6 / #98 — golden tests for projection + sign, verified by mutation rather than by
+  assertion count)** — Sixth brief item. Adopted, but the brief's framing had to be inverted first.
+  **The brief asked for a round-trip. A round-trip is close to worthless for this bug class**, and
+  one of the eight tests exists purely to prove that:
+  `test_a_mirror_still_round_trips_which_is_why_round_trips_are_not_enough` mirrors the image
+  convention (`u → W-u`, the #50 defect), shows `image_to_world(world_to_image(x))` still closes to
+  **1e-9**, and then shows the same homography placing a known world point **40 m and 66 m** away
+  from where it belongs. A sign error does not produce garbage — it produces a mirrored, perfectly
+  self-consistent scene whose only detector is a human eye on a finished render.
+  **So every test anchors outside itself.** Either to a ground truth built independently of the code
+  under test (`eval/synthetic`'s GT camera, whose geometry comes from an eye/look-at, not from our
+  projection code), or to an invariant a mirror breaks and self-consistency cannot repair:
+  * `image_to_world` is fed pixels from the GT camera's *own* pinhole projection, so storing the
+    homography backwards fails — while both existing round-trip tests keep passing.
+  * The pinhole projector (`projection.py`) and the homography anchor (`field.py`) must place the
+    same world point at the same pixel. Two independent implementations, one geometry.
+  * **Winding**: a triangle counter-clockwise from world +Z projects *clockwise* in pixels (one
+    flip, not two — image v is down, world Z is up).
+  * **Which way is up**: +2 m in world Z must *decrease* pixel v.
+  * The two in-tree quaternion implementations (`projection.quat_to_rotation_matrix`, hand-rolled;
+    `rotations.matrix_to_quat`, Shepperd) plus scipy's `(x,y,z,w)` — three encodings of one
+    convention, previously never checked against each other.
+  **First test on the 180°-roll gate.** `poseannot/camera.py`'s `-R[1,2] < 0` and its
+  `D = diag(-1,-1,1)` correction were untested production code guarding the project's most expensive
+  bug. Two tests now cover it: the gate fires on `D @ R_gt` (which is exactly what the solve hands
+  us) and recovers the true camera *exactly* since D is its own inverse; and, with the gate bypassed,
+  a standing body really does project head-below-feet.
+  **Verified by mutation.** `scripts/mutate_projection_sign.py` injects five defects and reports
+  which test notices — a golden test that survives its own mutation is decorative, and the script
+  says so in as many words. All five caught. Two of the five are **not hypothetical**: MUT-4 (gate
+  comparison inverted) and MUT-5 (the X-only mirror `diag(-1,1,1)` that was validated by eye on
+  2026-07-07 and falsified by `scripts/debug/pose_probe.py` the next day, having left every body
+  vertically inverted at ~22 px — invisible to the eye that approved it). Those are regression tests
+  for our own history.
+  **This also caught a weak test of my own.** Two of the eight originally routed through
+  `eval/synthetic`'s projector rather than production `project_world_points`, so MUT-2 (image v
+  negated) sailed past them. The mutation harness is what surfaced it; without it the file would
+  have shipped with two decorative tests. Suite **1032 passed / 14 skipped**.
 
 - **2026-07-29 (R4 / #96 — `Provenance` + `BallMode`: R-6 made checkable by types, and it exposed a
   real information loss)** — Fifth brief item measured. Adopted, and unlike R1/R3-edges/R10 it did

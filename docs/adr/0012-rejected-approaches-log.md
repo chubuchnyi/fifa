@@ -86,15 +86,18 @@ mistaken for a rejection.
 - The conditionality tags mean a future pivot (analytics, full-match ingest, multi-clip generalisation)
   can find exactly which rejections it invalidates instead of re-arguing all of them.
 - Tier 1 entries are backed by runnable artifacts (`scripts/bench_ransac_usac.py`,
-  `tests/unit/test_frames.py`), so the evidence does not decay into folklore.
+  `scripts/bench_line_constraints.py`, `tests/unit/test_frames.py`), so the evidence does not decay
+  into folklore. R6 (#98) extends that one level: `scripts/mutate_projection_sign.py` checks that the
+  *tests* still catch the defects they were written for, so a guard cannot quietly rot into a
+  green-but-decorative assertion.
 
 **Negative / costs**
 - A rejection log ages. Tier 2 entries inherited from the briefs are *argued*, not measured by us —
   they carry the briefs' evidence, not ours, and should be treated as weaker.
 - There is a real risk of over-trusting this file. The briefs' **diagnoses** have been far better than
-  their **prescriptions**: **five** of their items have now been measured (R1, R10, R3-edges,
-  R3-salvage, R4) and **three premises were false** — while every one of those investigations turned
-  up something real next door (a 206 → 18 mm foot-placement bug; why our world-metre RANSAC threshold
+  their **prescriptions**: **six** of their items have now been measured (R1, R10, R3-edges,
+  R3-salvage, R4, R6) and **three premises were false** — while every one of those investigations
+  turned up something real next door (a 206 → 18 mm foot-placement bug; why our world-metre RANSAC threshold
   is load-bearing; an entire discarded line-detection head, which then shipped; a ball `on_ground`
   bool that was lossy for 46 of 48 frames). Read them, measure them, do not implement them. R5 and R7
   remain unmeasured hypotheses, not work orders.
