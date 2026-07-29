@@ -365,6 +365,33 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R8 / #100 DONE — ADR-0012, the rejected-approaches log)** —
+  `docs/adr/0012-rejected-approaches-log.md`. Not a verbatim port of v2 §9: porting it verbatim would
+  have imported *their* goal (analytics accuracy) along with their verdicts. Organised by **strength of
+  evidence** instead, and every entry records **what would re-open it** — a bare "we rejected X" invites
+  re-litigation, "here is the number and the condition under which it changes" does not.
+  **Tier 1 — rejected on OUR measurement** (do not re-open without new numbers; each backed by a
+  runnable artifact): USAC/MAGSAC++ (0.07–0.12 m vs 28–180 m, `scripts/bench_ransac_usac.py`); the
+  brief's "unify the SMPL-X→world constants" premise (false — two source frames;
+  `tests/unit/test_frames.py`); iterative MA yaw low-pass (kills 100°+ real turns); sparse 30-frame FK
+  sampling for foot position (synthesised fake stances; 240-cap cut foot slide 15.4 m → 0.3 m); GREEN
+  source-kit chroma key (grass collision).
+  **Tier 2 — v2 §9 ported with our own verdict and a conditionality tag.** We agree with all 13, but
+  several for *different* reasons, and that difference is the useful part: ball-shadow-for-height is
+  rejected harder for us (our clip is a **floodlit night match** — the sun geometry they call "free"
+  does not exist at all); ALIKED/LightGlue is rejected only as the *primary pitch* matcher and stays
+  fair game for R2's px→px frame-to-frame propagation; line-thickness we adopted in its reformulated
+  edge-pair form (R3). One we do **not** follow: v2 §9 *accepts* UE5 synthetics for geometry (P1) —
+  we defer, since our constraint is appearance fidelity on one clip, not a learned estimator's
+  cross-match generalisation.
+  **Tier 3 — the briefs' own prescriptions we declined:** factor graph (defer; re-opens only if R7
+  shows inter-player residual is what breaks the render), their 0.35–0.45 m accuracy envelope (rejected
+  as our bar), shot segmentation (defer), off-screen imputation (defer — rendering an imputed player is
+  fabrication under R-6; only ever behind R4's `Provenance`, gated at the *renderer*), the greenfield
+  repo re-layout (ignore).
+  Also recorded the ADR's own risk: the briefs' **diagnoses** have outperformed their **prescriptions**
+  (two headline items falsified), so R3/R5/R7 are logged as hypotheses to measure, not work orders.
+
 - **2026-07-29 (R10 / #102 REJECTED on measurement — MAGSAC++ is ~1000× worse than our estimator here)** —
   The research brief's headline calibration recommendation (v2 §3.3: swapping uniform-sampling RANSAC
   for USAC/MAGSAC++ "matters more than changing the feature detector") **does not survive contact with
