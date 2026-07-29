@@ -40,6 +40,12 @@ from .harness import (
     run_conditions,
 )
 from .metrics import mpjpe_global, mpjpe_local
+from .novel_view import (
+    decompose_global_error,
+    fit_rigid,
+    local_mpjpe_by_speed,
+    per_player_residual_m,
+)
 from .synthetic import CAMERA_VIEWS, CameraView, SyntheticScene, generate_scene
 
 __all__ = [
@@ -55,6 +61,11 @@ __all__ = [
     "generate_scene",
     "mpjpe_global",
     "mpjpe_local",
+    # R7 (#99): what survives a camera re-fit — the number a novel-view viewer actually sees
+    "decompose_global_error",
+    "per_player_residual_m",
+    "local_mpjpe_by_speed",
+    "fit_rigid",
     "evaluate",
     "evaluate_dataset",
     "place_under_gt_camera",

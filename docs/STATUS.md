@@ -276,6 +276,7 @@ ACHIEVED.** Validation also surfaced **#206** (ball off-pitch); diagnosed + fixe
 .venv/bin/python scripts/mutate_projection_sign.py   # do the R6 sign guards still catch anything?
 PYTHONPATH=src .venv/bin/python scripts/bench_ransac_usac.py       # R10 rejection
 PYTHONPATH=src .venv/bin/python scripts/bench_line_constraints.py  # R3 point-on-line gain
+PYTHONPATH=src .venv/bin/python scripts/bench_novel_view_metric.py # R7: why 0.35-0.45 m is not a bar
 
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
@@ -369,6 +370,62 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-29 (R7 / #99 — our own accuracy metric; the briefs' envelope retired with a number)** —
+  Seventh brief item, adopted only after inverting its premise, and the first one that changes how we
+  are allowed to *report* progress. New module `src/pitch3d/eval/novel_view.py` (10 tests) +
+  `scripts/bench_novel_view_metric.py`.
+  **The finding.** Three error fields pinned to Global MPJPE **0.400 m** — dead centre of the briefs'
+  0.35–0.45 m "broadcast envelope" — leave a novel-view viewer with **0.002 m**, **0.000 m** and
+  **0.378 m** of visible error. A 190× spread inside one "acceptable" number. Their envelope is a
+  perfectly good bar for a coaching-analytics product, where a world coordinate *is* the deliverable;
+  for a video judged by eye it cannot rank two candidate reconstructions, so we must not quote it and
+  must not tune against it.
+  **Why.** Camera error is *common-mode* — it moves every player by one rigid transform. Re-render
+  that from a new viewpoint and it **is** a slightly different novel camera; there is no reference
+  frame in the shot to see it against. So the metric scores an error field by how much a camera
+  re-fit can absorb and reports the remainder: `after_static_camera_m` (one rigid re-placement for
+  the clip), `after_perframe_camera_m` (the headline — what no camera choice can fix), and
+  `scene_swim_m` between them.
+  **`scene_swim_m` is the part the briefs' decomposition misses.** A common-mode error that *changes
+  over time* slides the whole scene under a shot that should be still. That is visible, and a single
+  whole-clip fit hides it inside "camera error, therefore free". Measured: the wobbling-camera field
+  is 100 % absorbed by a per-frame fit and carries **0.400 m** of swim — free by the naive reading,
+  ruinous in fact.
+  **Scale is deliberately not absorbed.** A similarity fit would erase #61's ~3× scale defect and
+  report a clean scene. We render players against a true-size pitch, so wrong-scale players are
+  visibly wrong-size. The fit is rigid; the similarity scale is reported beside it as
+  `predicted_scale` (inverted so it reads as the defect — 3.0 means "our scene is 3× too big",
+  not 0.333), purely to tell "our error is a scale error" apart from "our error is scatter".
+  **The instrument's own bias is measured, not assumed** — this is the part I would have skipped.
+  The per-frame fit has 6 DOF, so with few bodies it launders genuine per-player scatter into
+  "camera error". On pure scatter, where an honest metric must absorb 0 %, it absorbs
+  **70.9 % ± 18.9 at 2 subjects**, 30.1 % at 5, 16.3 % at 8, and **6.8 % ± 4.0 at our clip's 21**
+  (worst draw 18.8 %). So `after_perframe_camera_m` is a **lower bound** on what a viewer sees, and
+  is meaningless below ~8 bodies. That caveat is in the module docstring, not just here.
+  **Speed stratification — the yaw-low-pass trade, finally as a number.** Mean local MPJPE cannot see
+  a smoother that buys calm by flattening real motion. Sweeping Gaussian σ over jittered motion
+  *with* a 120°-in-8-frames turn: the mean keeps improving to σ=8 (0.0233), while the top speed
+  decile bottoms out at σ=2 (0.0316) and then **degrades to 0.0339**. Choose σ by the mean and you
+  ship the yaw low-pass again. Control run without the turn shows a flat 1.06 penalty at every σ —
+  i.e. the fixture's own sinusoidal motion cannot demonstrate this, which is why the turn is
+  injected. **Gate: any future temporal smoother must beat the best top-decile row, not the mean.**
+  **Two of my own experiments were wrong on the first run and are documented rather than quietly
+  fixed.** (1) The bias sweep used a single random draw per subject count and produced a
+  non-monotone table; I had already written the conclusion "at 21 subjects the leak is small — the
+  number is usable" underneath numbers that showed 21 leaking *more* than 12. Fixed by averaging 40
+  draws. (2) The smoother sweep originally ran on the fixture's pure sinusoid, where no σ ever hurts
+  the top decile, and claimed to demonstrate an effect it structurally could not.
+  **Not measurable on the target clip.** `after_perframe_camera_m` needs per-joint world GT with ≥8
+  bodies in shot. The Colombia clip has no GT; 3DPW/B2 has GT but not a pitch full of players. The
+  natural instrument is **WorldPose** (video already local; poses/cameras still pending). Until then
+  the metric is validated on synthetic only — recorded so nobody reads the bench output as a
+  statement about our actual reconstruction.
+  **Consequence for ADR-0012.** The factor-graph deferral was conditioned on "R7's metric showing
+  inter-player residual is what breaks the render". The metric now exists, so that blocker moved from
+  *missing tooling* to *missing ground truth*, and the ADR row says so. Seven brief items measured
+  (R1, R10, R3-edges, R3-salvage, R4, R6, R7); **R5 is now the only unmeasured hypothesis left**.
+  Suite **1042 passed / 14 skipped**.
 
 - **2026-07-29 (R6 / #98 — golden tests for projection + sign, verified by mutation rather than by
   assertion count)** — Sixth brief item. Adopted, but the brief's framing had to be inverted first.

@@ -64,8 +64,8 @@ Distinct from Tier 2: these are things the briefs *recommend*, not things they r
 
 | Item | Verdict | Reason | What would re-open it |
 |---|---|---|---|
-| **Factor graph** (§4 / §7 — 136k variables, Theseus, staged A/B/C) | **Defer, not adopt** | Entirely `[est.]` by the doc's own admission, and the largest, most expensive section. It buys *accuracy*; our binding constraint is appearance fidelity, not the last 10 cm. ADR-0002's correction stack + the human/LLM edit loop reach the same visible result more cheaply | R7's metric (#99) showing that **inter-player residual** is what breaks the render. That is the specific number that would justify it |
-| **Their accuracy envelope** (Global 0.35–0.45 m; "do not spec below") | **Reject as our bar** | Correct for a pitch-control analytics product, wrong for a video judged by eye. A large *common-mode* camera error is nearly free at a novel viewpoint — it is a rigid re-render. Superseded by R7 | Pivoting the product toward analytics |
+| **Factor graph** (§4 / §7 — 136k variables, Theseus, staged A/B/C) | **Defer, not adopt** | Entirely `[est.]` by the doc's own admission, and the largest, most expensive section. It buys *accuracy*; our binding constraint is appearance fidelity, not the last 10 cm. ADR-0002's correction stack + the human/LLM edit loop reach the same visible result more cheaply | R7's metric (#99) showing that **inter-player residual** is what breaks the render. **The metric now exists and is runnable — the blocker moved to ground truth.** `after_perframe_camera_m` needs per-joint world GT with ≥8 bodies in shot; our target clip has none, and B2/3DPW does not have a pitch full of players. So the re-opening condition is now concrete: run R7 on WorldPose (video is local; poses/cameras still pending, see #99 notes) and read the residual |
+| **Their accuracy envelope** (Global 0.35–0.45 m; "do not spec below") | **Reject as our bar — now measured, 2026-07-29** | Correct for a pitch-control analytics product, wrong for a video judged by eye. R7 (#99) quantifies it: three error fields pinned to Global MPJPE **0.400 m**, mid-envelope, leave the viewer with **0.002 / 0.000 / 0.378 m**. A 190× spread inside one "acceptable" number is not a bar, it is a coin flip. Superseded by `after_perframe_camera_m` + `scene_swim_m` (`scripts/bench_novel_view_metric.py`) | Pivoting the product toward analytics |
 | **Shot segmentation** (§3.1) | **Defer** | We reconstruct one continuous clip | Becomes P0 the moment we ingest a full match |
 | **Off-screen imputation B2/B4** (§3.6) | **Defer, and note the conflict** | For analytics an imputed ghost is a useful estimate. In a photoreal video, rendering an imputed player is **fabrication**, which R-6 forbids | Only behind R4's `Provenance` type (#96), gated **at the renderer** — not at the analytics boundary. Note this sits in deliberate tension with our own rule that near-certain tracker-lost subjects must be interpolated rather than blinked out; the dividing line is confidence, and `Provenance` is what makes it checkable |
 | **Frozen per-frame `PlayerState` / `BallState` dataclasses** (brief §3) | **Adopt the *types*, decline the *shape*** | R4 (#96) shipped `Provenance` and `BallMode` — that part was right, and better-motivated than the brief argued (see below). But the brief hangs them off a per-frame state object, and our motion is already `(T, …)` arrays in `PoseSequence`/`BallTrack`. A parallel per-frame representation would have to be kept in sync with the arrays that every gate actually writes, so the labels ride the arrays instead | A move to a genuinely per-frame scene graph (e.g. USD time-samples as the in-memory model, not just the export target) |
@@ -86,7 +86,8 @@ mistaken for a rejection.
 - The conditionality tags mean a future pivot (analytics, full-match ingest, multi-clip generalisation)
   can find exactly which rejections it invalidates instead of re-arguing all of them.
 - Tier 1 entries are backed by runnable artifacts (`scripts/bench_ransac_usac.py`,
-  `scripts/bench_line_constraints.py`, `tests/unit/test_frames.py`), so the evidence does not decay
+  `scripts/bench_line_constraints.py`, `scripts/bench_novel_view_metric.py`,
+  `tests/unit/test_frames.py`), so the evidence does not decay
   into folklore. R6 (#98) extends that one level: `scripts/mutate_projection_sign.py` checks that the
   *tests* still catch the defects they were written for, so a guard cannot quietly rot into a
   green-but-decorative assertion.
@@ -95,12 +96,12 @@ mistaken for a rejection.
 - A rejection log ages. Tier 2 entries inherited from the briefs are *argued*, not measured by us —
   they carry the briefs' evidence, not ours, and should be treated as weaker.
 - There is a real risk of over-trusting this file. The briefs' **diagnoses** have been far better than
-  their **prescriptions**: **six** of their items have now been measured (R1, R10, R3-edges,
-  R3-salvage, R4, R6) and **three premises were false** — while every one of those investigations
+  their **prescriptions**: **seven** of their items have now been measured (R1, R10, R3-edges,
+  R3-salvage, R4, R6, R7) and **three premises were false** — while every one of those investigations
   turned up something real next door (a 206 → 18 mm foot-placement bug; why our world-metre RANSAC threshold
   is load-bearing; an entire discarded line-detection head, which then shipped; a ball `on_ground`
-  bool that was lossy for 46 of 48 frames). Read them, measure them, do not implement them. R5 and R7
-  remain unmeasured hypotheses, not work orders.
+  bool that was lossy for 46 of 48 frames). Read them, measure them, do not implement them. **R5 is
+  now the only remaining unmeasured hypothesis** — not a work order.
 - R4 sharpens that pattern rather than breaking it. It is the first item adopted roughly as written —
   but the brief's *stated* motivation (typed state is good hygiene) is not why it was worth doing.
   The reason is that we were already encoding provenance, badly, in sentinel confidence values, and
