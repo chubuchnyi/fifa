@@ -365,6 +365,33 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R9 / #101 DONE — OpenCV 4.11.0.86 → 5.0.0.93; zero code changes, one real behaviour change)** —
+  Migrated the pin. **The whole suite passes unmodified**, and so does mypy (47 errors, byte-identical
+  to HEAD, none cv2-related). The pre-migration sizing held: our surface is 48 distinct `cv2` symbols,
+  all imgproc / videoio / imgcodecs / drawing, with exactly **two** calib3d calls (`findHomography`,
+  `decomposeHomographyMat`) and **no `cv2.dnn`, no G-API** — so the research brief's two loudest
+  warnings (§12.11, §12.12) never applied to us. Checked the specific break candidates:
+  `cv2.VideoWriter_fourcc` still exists (and the new `VideoWriter.fourcc` alongside it), `imread` still
+  returns **BGR**, and `USAC_MAGSAC` / `USAC_ACCURATE` / `USAC_DEFAULT` are all present — which is what
+  **#102 (R10)** needs, so that task is now unblocked.
+  **Calibration is bit-identical.** Seeded (`--seed 7`, 40 frames) synthetic oracle *and* perturb runs
+  of `scripts/run_calib_eval.py` produce byte-identical JSON across 4.11 and 5.0; oracle
+  reproj_rms 1.52e-14 m, i.e. still machine precision. B1 = 0.236 m itself needs the SoccerNet split,
+  which is pod-side — flagged for re-measure, not assumed.
+  **The one real change is the video decode, and it is not cosmetic.** Rendering the same three
+  overlay frames under both versions differed on **92 % of pixels**, which traced to decode, not
+  drawing: the same frame of the target clip comes back with mean |Δ| ≈ 2.97/255, max 32. Per-channel
+  linear fit gives B ×1.008 −2.44, G ×0.940 +1.39, R ×0.995 −0.30 — both versions span full 0–255, so
+  this is **not** a limited/full range change; green moving ~6× more than red/blue is the signature of a
+  **different YUV→RGB matrix (BT.601 vs BT.709)**. For a 1080p broadcast source BT.709 is the correct
+  one, so OpenCV 5 is very likely *more* accurate — which helps v2 photorealism rather than hurting it.
+  **Quantified the downstream risk instead of hand-waving it:** on 165 player-sized crops from three
+  real frames, the 19-dim HSV kit feature (`appearance_hsv`) drifts **0.119 mean L1 (p95 0.276)** between
+  decoders, against a between-crop spread of **1.303 mean (p05 0.070)** — **9.1 % of the clustering
+  signal.** Team clustering is relative and keys on a much larger separation, so it should hold, but the
+  tail overlaps, so **kit split (10/10) and shirt-number reads (4/20) must be re-measured on the next pod
+  run, not carried forward** (R-6: this is a mark, not a claim). Filed as a task.
+
 - **2026-07-29 (R1 / #93 DONE — SMPL-X→world frames unified; a real foot-placement bug found and fixed)** —
   The brief's §2.1 premise was that four hardcoded SMPL-X→world constants are an inconsistency to be
   collapsed into one. **That premise is false, and acting on it would have broken the pipeline.** An
