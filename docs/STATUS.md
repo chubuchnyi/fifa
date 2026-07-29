@@ -365,6 +365,46 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R10 / #102 REJECTED on measurement — MAGSAC++ is ~1000× worse than our estimator here)** —
+  The research brief's headline calibration recommendation (v2 §3.3: swapping uniform-sampling RANSAC
+  for USAC/MAGSAC++ "matters more than changing the feature detector") **does not survive contact with
+  our geometry**. I wrote the swap, then benchmarked it before trusting it — and reverted. `calibration.py`
+  is byte-identical to HEAD; the measurement is committed as `scripts/bench_ransac_usac.py`.
+  **Numbers** (synthetic pitch correspondences under the real `_H_GT`, 2 px keypoint noise, world-metre
+  RMS on the clean points, 20 trials per cell): ours **0.07–0.12 m** across every n/outlier combination;
+  USAC **28–180 m**. Worse, USAC returns a *degenerate 4-point set* — inlier recall **0.05–0.42** — and
+  with **zero outliers it fails outright, 0/20**, at n = 8, 12, 20 and 40 alike. Threshold-independent:
+  identical collapse from 1 px to 50 px, at zero noise, in both the image→world and world→image
+  direction, and Hartley pre-conditioning makes it *worse* (recall 0.06–0.29).
+  **Not a wrapper bug** — the control rules that out: the same `cv2.findHomography(..., USAC_MAGSAC)`
+  call on textbook px→px correspondences is perfect (16/16 inliers, 20/20 success) at every point count
+  from 8 to 200. Also checked and eliminated: point count, coordinate scale and centring, source-vs-
+  destination outlier side, outlier magnitude (50→5000 px), perspective strength (last-row term
+  0 → 5e-4), and input dtype/shape.
+  **Root cause — the assumption nobody checked.** MAGSAC++ marginalises over *one global* inlier noise
+  scale. A broadcast pitch homography is strongly **heteroscedastic**: a uniform 2 px image error lands
+  as 0.027 m at the near touchline and 0.227 m at the far one — **8.4× p95/p5**, 10.9× p99/p5. There is
+  no single σ to marginalise over, so MAGSAC's scale estimate collapses onto a minimal sample. The
+  control reproduces the mechanism in miniature: it starts shedding true inliers (16.0 → 12.7 → 9.2) as
+  soon as σ approaches the threshold.
+  **What this says about our code.** `solve_homography_ransac` is *not* the naive estimator the brief
+  assumed. Two properties are load-bearing and neither is replaceable by a black-box: (1) it thresholds
+  in **world metres**, the units our error budget is actually written in, which is the right invariant
+  precisely *because* the pixel↔metre ratio varies 8× across the frame; (2) it refits a
+  **confidence-weighted** DLT, and the robust estimator has no channel to receive PnLCalib's
+  per-landmark confidence (measured 0.61 mean on the Colombia clip). Kept as-is.
+  **Knock-on for #94 (R2), which was sequenced to inherit this.** The roadmap said "build the RAFT
+  propagation stage on USAC from the start rather than write it twice" — **that instruction is now
+  withdrawn** in `docs/roadmap.md`. R2 must reuse `solve_homography_ransac` for anything image→world.
+  USAC stays defensible for frame-to-frame *optical-flow* matching, which is px→px and genuinely
+  homoscedastic — but that must be measured before adoption, not assumed.
+  **R-6:** this is the second of the two research-brief calibration/geometry recommendations to be
+  falsified by measurement (after R1 #93, where "unify the SMPL-X→world constant" would have inverted
+  half the pipeline). Both were headline items. The brief's *diagnoses* have been better than its
+  *prescriptions* — R1's premise was wrong but pointed at a real 206→18 mm bug next door. Treat the
+  remaining adopted items (R3, R5, R7) as hypotheses to measure, not work orders. Suite 1002 passed /
+  14 skipped, ruff clean.
+
 - **2026-07-29 (R9 / #101 DONE — OpenCV 4.11.0.86 → 5.0.0.93; zero code changes, one real behaviour change)** —
   Migrated the pin. **The whole suite passes unmodified**, and so does mypy (47 errors, byte-identical
   to HEAD, none cv2-related). The pre-migration sizing held: our surface is 48 distinct `cv2` symbols,

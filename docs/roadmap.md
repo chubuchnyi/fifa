@@ -82,7 +82,7 @@ heavily — the *bars* do not. Do not import their accuracy envelope or their mi
 | **R7** #99 | Our own metric: per-player residual after removing common-mode camera bias; local MPJPE stratified by joint speed (top decile) | brief §1 + §9.4, inverted | Their own 55%-camera decomposition implies common-mode error is nearly **free** at a novel viewpoint — a rigid re-render. What shows is inter-player spread. Mean-only metrics hide fast phases (we confirmed this independently on the yaw low-pass). | no |
 | **R8** #100 | Port §9 "rejected and why" → ADR-0012 | v2 §9 | Stops re-opening settled questions. Mark which rejections are conditional on *our* goal. | no |
 | **R9** #101 ✅ | **Migrate to OpenCV 5** (next iteration) | v2 §3.3, brief §13.1/§12.11/§12.12 | **Done 2026-07-29, 4.11.0.86 → 5.0.0.93, zero code changes.** Suite + mypy unchanged; calibration bit-identical; USAC available so R10 is unblocked. One real behaviour change: the video decode switches YUV→RGB matrix (BT.601→BT.709), shifting pixels on 92 % of the frame — kit/OCR numbers need re-measuring (#103). | no |
-| **R10** #102 | Replace our hand-rolled RANSAC with **USAC / MAGSAC++** | v2 §3.3 | "On grass contaminated by player motion this matters **more than changing the feature detector**" — aimed at our exact situation, and we have a homegrown estimator to replace. | no |
+| **R10** #102 ❌ | Replace our hand-rolled RANSAC with **USAC / MAGSAC++** | v2 §3.3 | **Rejected 2026-07-29 on measurement — MAGSAC++ is 3 orders of magnitude worse here.** On synthetic pitch correspondences our estimator holds 0.07–0.12 m while USAC returns 28–180 m; it keeps a degenerate 4-point set (inlier recall 0.05–0.42) and with *zero* outliers fails outright, 0/20. Reproduce: `scripts/bench_ransac_usac.py`. | no |
 
 ### R9/R10 — the OpenCV 5 step, sized against our actual usage
 
@@ -99,18 +99,36 @@ before scheduling this, and **the migration is much cheaper than the briefs impl
 So the cost is a pin bump, two import paths, and a regression run — and the payoff is concentrated in
 the one subsystem we are about to rework anyway.
 
-**The payoff is R10.** `adapters/models/calibration.py:196` is a hand-written *"Robust image→world
-homography by RANSAC"* with its own `ransac_iters`/`seed`, refined by a confidence-weighted DLT
-(`:266`). Uniform-sampling RANSAC is exactly what the modern estimators beat: **MAGSAC++** marginalises
-over the inlier threshold (no magic 1 px to tune), and **PROSAC** samples in quality order — and we
-already carry per-keypoint confidences to order by. On a pitch where a third of the frame is moving
-players, that is the difference the doc is pointing at. Keep the DLT as refinement, keep the seed for
-reproducibility, make the estimator selectable (auto + manual override), and measure against the
-current **B1 = 0.236 m** on `scripts/run_calib_eval.py`.
+**The payoff was supposed to be R10 — it is not.** The prediction below was wrong and is kept for the
+record. It read: uniform-sampling RANSAC is what the modern estimators beat, **MAGSAC++** marginalises
+over the inlier threshold (no magic 1 px to tune) and **PROSAC** samples in quality order, so on a
+pitch where a third of the frame is moving players that is the difference v2 §3.3 is pointing at.
 
-**Sequencing:** R9 → R10 → R2. R2 builds a RANSAC homography stage for the RAFT propagation; on
-OpenCV 5 that stage should be USAC from the start rather than written twice. `#94` and `#102` are both
-marked blocked by `#101`.
+Measured on 2026-07-29 (`scripts/bench_ransac_usac.py`), MAGSAC++ loses by ~1000×:
+
+| n / outliers | ours (world m) | USAC (world m) | USAC returns | inlier recall |
+|---|---|---|---|---|
+| 20 / 0 | 0.106 | — | **0/20** | — |
+| 20 / 2 | 0.106 | 180.5 | 9/20 | 0.12 |
+| 40 / 4 | 0.115 | 142.5 | 13/20 | 0.05 |
+
+USAC keeps a **degenerate 4-point set** regardless of threshold (tested 1 px → 50 px, and at zero
+noise), and with no outliers at all it returns nothing. It is not a tuning failure: the same call on
+textbook px→px correspondences is perfect at every point count, which is what rules out a wrapper bug.
+
+**Root cause — the assumption the brief did not check.** MAGSAC++ marginalises over *one global* noise
+scale. A broadcast pitch homography is strongly **heteroscedastic**: a uniform 2 px image error becomes
+0.027 m at the near touchline and 0.227 m at the far one, a **8.4× p95/p5 spread**. There is no single
+σ to marginalise over. Our estimator is not the naive thing the doc assumed — it thresholds in *world
+metres*, which is the units the error budget is actually specified in, and then refits a
+**confidence-weighted** DLT that a black-box robust estimator structurally cannot do (it has no channel
+for the detector's per-landmark confidence). Both properties are load-bearing. Kept as-is; no code
+changed. Full reasoning in ADR-0012.
+
+**Sequencing:** R9 → ~~R10~~ → R2. **R2 must NOT build on USAC** — it inherits the same heteroscedastic
+geometry. Reuse `solve_homography_ransac` for the RAFT propagation stage. (Frame-to-frame optical-flow
+matching is px→px and *is* homoscedastic, so USAC is defensible there specifically; measure before
+adopting, and do not let it near the image→world solve.)
 
 **Also available after R9, deliberately not adopted:** the `Features` module ships ALIKED/LightGlue.
 v2 §9 rejects them as the *primary* pitch matcher — uniform periodic grass, a near-mirror-symmetric
