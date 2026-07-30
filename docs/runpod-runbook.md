@@ -49,6 +49,11 @@ the one lesson that kept biting us: we keep **several identical pods** (`pitch3d
 **different host machines**, and the *"not enough free GPUs on the host"* failure is **host-specific**.
 So when one pod won't resume, the fix is just to try the next identical pod — `up` does that for you.
 
+On **2026-07-30 all four were starved at once** and stayed that way across retries. Creating a
+**fifth** pod (§2) placed on the first attempt, in seconds. So the pool is a numbers game against
+host churn: when `up` exhausts it, **add a host** rather than sitting in a retry loop — a stopped
+pod costs nothing, and each one is another independent chance at placement.
+
 ```bash
 scripts/pod.sh status      # every pod: id / state / name / ssh endpoint + balance & spend/hr
 scripts/pod.sh up          # ensure ONE pod is RUNNING (reuse a live one, else resume each
@@ -150,6 +155,29 @@ are kept). The crash-looping pod **bills the whole time**, so fix or stop it pro
    form uses `--gpu-id`/`--cloud-type`/`--env <json>` and has **no** `--secureCloud` (errors
    `unknown flag`). Verified placement: auto (no `--dataCenterId`) landed in EU-RO-1 at $0.740/hr;
    pinning a DC that lacked 4500 stock failed with `no instances available`.
+
+   ⚠️ **`--volumePath` defaults to `/runpod`, not `/workspace`** (2026-07-30). Everything in this
+   repo — the venv's shebangs, `PITCH3D_PY`, `PITCH3D_REPO`, `pod_*.sh` — hardcodes `/workspace`,
+   so a pod created without `--volumePath /workspace` boots with an **empty** `/workspace` and the
+   real volume at `/runpod`. Pass it at creation:
+
+   ```bash
+   runpodctl create pod --name pitch3d-pro4500-<n> \
+     --gpuType "NVIDIA RTX PRO 4500 Blackwell" --gpuCount 1 --secureCloud \
+     --imageName runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404 \
+     --networkVolumeId nnqs4k4vy5 --volumePath /workspace \
+     --containerDiskSize 40 --ports "22/tcp,8888/http" --startSSH \
+     --env "PUBLIC_KEY=$(cat ~/.ssh/id_ed25519_runpod.pub)"
+   ```
+
+   To rescue a pod already created the wrong way **without re-renting the GPU**: `mount --bind`
+   is refused (`permission denied` — the container is unprivileged), so **symlink** instead, then
+   re-`ssh` so the shell picks it up. It lives in the container's overlay, so redo it after any
+   container restart:
+
+   ```bash
+   mv /workspace /workspace.img && ln -s /runpod /workspace
+   ```
 2. **On-box env.** [`cloud_setup.sh`](../scripts/cloud_setup.sh) defaults to **cu124 / torch 2.6**,
    which would clobber the working cu128 torch — so on Blackwell run it in **reuse mode**
    (`PITCH3D_REUSE_SYSTEM_TORCH=1`): it makes a `--system-site-packages` venv (inheriting the
