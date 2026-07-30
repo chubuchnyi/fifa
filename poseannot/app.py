@@ -49,9 +49,15 @@ from . import clips as clips_mod
 from . import rerun as rerun_mod
 from . import studio as studio_mod
 from .auth import authenticate, current_user, issue_token
-from .camera import CameraAdjust, frame_projector, project_points
+from .camera import (
+    CameraAdjust,
+    frame_projector,
+    project_ground,
+    project_points,
+    world_to_image,
+)
 from .config import load as load_config
-from pitch3d.core.scene.pitch import pitch_line_world_points
+from pitch3d.core.scene.pitch import pitch_line_world_points, pitch_polylines
 from .scene_state import (
     BODY_JOINT_NAMES,
     apply_and_persist_edit,
@@ -335,6 +341,61 @@ def api_pitch(
     uv = project_points(world, proj)
     pts = [[float(u), float(v)] for u, v in uv if np.isfinite(u) and np.isfinite(v)]
     return {"pts": pts, "frame_flipped": bool(proj.frame_flipped)}
+
+
+@app.get("/api/pitch/calibrated/{frame}")
+def api_pitch_calibrated(frame: int, user: str = Depends(current_user)) -> dict:
+    """The pitch markings drawn through the SOLVED per-frame calibration.
+
+    The sibling ``/api/pitch`` projects through ``scene.camera``, which #107 showed is a
+    synthetic frozen pose rather than this clip's camera — the two disagree by a median
+    ~1300 px on a 1920x1080 frame, which is why hand-aligning the overlay never converged.
+    This one uses ``field.calibration.homographies``, an exact map of the pitch plane that
+    tracks the pan frame by frame and needs no focal (#61's unsolved part).
+
+    Returned as POLYLINES, not a point cloud: connectivity is what makes a misalignment
+    legible — a line that should be straight and isn't tells you more than scattered dots.
+    Runs break wherever the marking passes behind the camera, so segments never wrap around
+    the horizon.
+    """
+    del user
+    st = get_state()
+    field = getattr(st.scene, "field", None)
+    cal = getattr(field, "calibration", None) if field is not None else None
+    if cal is None:
+        raise HTTPException(400, "scene has no field calibration — nothing to draw")
+    if frame < 0 or frame >= st.n_frames:
+        raise HTTPException(404, f"frame {frame} out of range")
+    try:
+        w2i = world_to_image(cal, frame)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    polylines: list[list[list[float]]] = []
+    for poly in pitch_polylines(field.dimensions, spacing=0.5):
+        uv = project_ground(poly, w2i)
+        # A marking is only drawable where it is in front of the camera AND not so far
+        # outside the frame that it would blow up the SVG path.
+        good = np.isfinite(uv).all(axis=1) & (np.abs(uv) < 20000).all(axis=1)
+        if not good.any():
+            continue
+        cut = np.nonzero(np.diff(good.astype(int)) != 0)[0] + 1
+        for run in np.split(np.arange(len(uv)), cut):
+            if len(run) and good[run[0]]:
+                seg = uv[run]
+                polylines.append([[float(u), float(v)] for u, v in seg])
+
+    frames = np.asarray(cal.frames, dtype=int)
+    idx = int(np.nonzero(frames == int(frame))[0][0])
+    conf = float(np.asarray(cal.confidence, dtype=float)[idx])
+    cfg = load_config()
+    vw, vh = frame_size(str(cfg.source_video))
+    return {
+        "polylines": polylines,
+        "confidence": conf,
+        "frame": int(frame),
+        "video_size": [int(vw), int(vh)],
+    }
 
 
 @app.get("/api/frame/{n}/poses3d")

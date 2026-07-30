@@ -379,6 +379,36 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (#110 — the poseannot pitch overlay now draws through the SOLVED calibration)** —
+  The user asked for "convenient camera auto-calibration with manual fine-tuning": the system
+  calibrates per frame, then the user validates it by dragging the pitch layout and individual
+  players over the real video frames. Before building the manual half, measurement showed the
+  *automatic* half was already good and simply was not on screen.
+  - poseannot projected the pitch overlay (and everything else) through `scene.camera`, which #107
+    showed is a **synthetic frozen** `standard_viewpoints(BROADCAST)` pose. The real per-frame solve
+    lives in `field.calibration.homographies` and was never drawn.
+  - The two disagree by a **median ~1200–1500 px** on a 1920×1080 frame (p95 up to 5876 px). This is
+    the root cause of a long-standing frustration: **hand-aligning the overlay could never converge**,
+    because the sliders were fitting a frozen wide-overview pose to a panning broadcast frame.
+  - The homography needs **no focal length** — it maps the pitch plane ↔ image directly, round-trips
+    at 1.066e-14 m, and scores 1.1–1.7 px against the painted lines. So the pitch markings and every
+    player's *ground contact* can be drawn exactly, sidestepping the focal degeneracy that killed
+    `scripts/recalibrate_camera.py` (#61).
+  - Shipped: `pitch_polylines()` made public (`core/scene/pitch.py`); `world_to_image` /
+    `project_ground` / `image_to_ground` in `poseannot/camera.py`; `GET /api/pitch/calibrated/{frame}`
+    returning **polylines** (connectivity is what makes a misalignment legible); SVG polyline
+    rendering + a `calib`/`cam` toggle and a per-frame confidence badge in the toolbar.
+  - **Verified by eye in-browser**, not just by endpoint: on frames 1 and 45 the green markings land
+    on the painted touchline, penalty box, goal area and D, and they **track the pan**. Flipping to
+    `cam` puts the same markings through the crowd and the advertising boards. The toggle is kept so
+    that difference stays visible rather than asserted.
+  - `image_to_ground()` is the hinge for the next increment: wherever the user drops a player on the
+    frame is a point on the pitch, and the homography says exactly which one.
+  - **Not done yet:** dragging the pitch layout to correct the homography (needs a calibration
+    correction kind — none exists today) and dragging individual players onto the existing
+    `ROOT_TRANSLATION` rails. The confidence badge is shown with a warning tooltip because #106
+    measured that number to be **anti-predictive** (r = +0.688).
+
 - **2026-07-30 (#94/#60 — R2's 92 % swim removal does NOT reach the picture; measured on the A/B)** —
   #107 established that the render's camera is synthetic, so calibration can only reach the image
   through **subject placement**. So the A/B was scored on exactly that, comparing the two exports'

@@ -132,7 +132,7 @@ LINE_WIDTH = 0.12
 _LINE_LIFT = 0.01
 
 
-def _pitch_polylines(
+def pitch_polylines(
     dimensions: FieldDimensions | None = None, *, spacing: float = 0.5
 ) -> list[np.ndarray]:
     """The standard markings as a list of ``(n, 2)`` polylines (a one-point array = a spot).
@@ -176,7 +176,7 @@ def pitch_line_xy(dimensions: FieldDimensions | None = None, *, spacing: float =
     boxes, both goal areas, both penalty spots and both penalty arcs (the "D", only the portion
     outside its box). ``spacing`` controls sample density along every line.
     """
-    return np.vstack(_pitch_polylines(dimensions, spacing=spacing))
+    return np.vstack(pitch_polylines(dimensions, spacing=spacing))
 
 
 def pitch_line_world_points(
@@ -213,7 +213,7 @@ def pitch_line_ribbons(
         faces.append([base, base + 1, base + 2])
         faces.append([base, base + 2, base + 3])
 
-    for poly in _pitch_polylines(dimensions, spacing=spacing):
+    for poly in pitch_polylines(dimensions, spacing=spacing):
         pts = np.asarray(poly, dtype=float)
         if pts.shape[0] == 1:
             x, y = float(pts[0, 0]), float(pts[0, 1])

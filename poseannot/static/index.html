@@ -65,6 +65,17 @@
             x-text="overlayMode === '3d' ? 'overlay: 3D' : 'overlay: 2D'"></button>
     <button @click="togglePitch()" :class="{ active: showPitch }"
             title="overlay the measured pitch markings (P)">pitch</button>
+    <button @click="togglePitchSource()" x-show="showPitch"
+            :class="{ active: pitchSource === 'calib' }"
+            :title="pitchSource === 'calib'
+              ? 'pitch drawn through the SOLVED per-frame homography (exact on the pitch plane) — click for the old scene.camera path'
+              : 'pitch drawn through scene.camera, a synthetic frozen pose (#107) — click for the solved calibration'"
+            x-text="pitchSource === 'calib' ? 'calib' : 'cam'"></button>
+    <span x-show="showPitch && pitchSource === 'calib' && pitchConf !== null" class="sep"
+          :title="'calibration confidence for this frame. NOTE (#106): this number is '
+                + 'anti-predictive on the target clip (r=+0.69 against measured error) — '
+                + 'do not trust it as a quality signal.'"
+          x-text="'conf ' + (pitchConf === null ? '' : pitchConf.toFixed(2))"></span>
     <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
             title="overlay orientation: rotate/move/flip about the pitch centre (C)">orient</button>
     <span class="user">
@@ -719,6 +730,14 @@ Alpine.data("poseAnnot", () => ({
     showPitch: true,          // draw the measured pitch markings under the poses
     pitch2d: [],              // [[u,v],...] projected pitch points (current cam)
     pitchColor: "#39d353",    // green, like the painted lines
+    // WHICH camera draws the pitch. "calib" = the solved per-frame homography
+    // (field.calibration) — exact on the pitch plane and it tracks the pan.
+    // "cam" = scene.camera, which #107 showed is a synthetic frozen pose: the two
+    // disagree by a median ~1300 px, so hand-aligning "cam" could never converge.
+    // Kept switchable so the difference stays visible rather than asserted.
+    pitchSource: "calib",
+    pitchLines: [],           // [[[u,v],...],...] polylines from the calibrated path
+    pitchConf: null,          // this frame's calibration confidence (see #106: anti-predictive)
     showCamAdjust: false,     // overlay-orient panel visible?
     // Overlay orientation: a rigid transform of the whole overlay (pitch +
     // skeletons + mesh) about the pitch-markings centre, applied in the browser.
@@ -958,6 +977,23 @@ Alpine.data("poseAnnot", () => ({
       }
       this._ov3d = await r.json();
       this.projectOverlay();
+      this.refreshCalibratedPitch();
+    },
+
+    // The pitch as the SOLVED calibration sees it. Server-side because the homography
+    // is per-frame and the projection is a 3x3 multiply — no reason to ship a matrix
+    // per frame to the client. Independent of the orient sliders on purpose: those
+    // nudge scene.camera, and this path deliberately does not go through it.
+    async refreshCalibratedPitch() {
+      if (this.pitchSource !== "calib" || !this.showPitch) { this.pitchLines = []; return; }
+      const want = this.frame;
+      const r = await fetch(`/api/pitch/calibrated/${want}`);
+      if (!r.ok) { this.pitchLines = []; this.pitchConf = null; this.rebuildOverlay(); return; }
+      const d = await r.json();
+      if (this.frame !== want) return;   // user scrubbed on; a later fetch owns the state
+      this.pitchLines = d.polylines;
+      this.pitchConf = d.confidence;
+      this.rebuildOverlay();
     },
 
     // Apply the overlay-orientation transform + camera projection entirely in the
@@ -1062,6 +1098,13 @@ Alpine.data("poseAnnot", () => ({
     togglePitch() {
       this.showPitch = !this.showPitch;
       this.projectOverlay();
+      this.refreshCalibratedPitch();
+    },
+
+    togglePitchSource() {
+      this.pitchSource = this.pitchSource === "calib" ? "cam" : "calib";
+      this.projectOverlay();
+      this.refreshCalibratedPitch();
     },
 
     toggleOverlayMode() {
@@ -1253,7 +1296,20 @@ Alpine.data("poseAnnot", () => ({
         (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
       const out = [];
       // Bottom layer: measured pitch markings (green), the alignment reference.
-      if (this.showPitch && this.pitch2d.length) {
+      // Drawn as connected polylines on the calibrated path — a line that should be
+      // straight and isn't says more about a bad solve than scattered dots ever could.
+      if (this.showPitch && this.pitchSource === "calib") {
+        for (const poly of this.pitchLines) {
+          if (poly.length === 1) {
+            out.push(`<circle cx="${poly[0][0]}" cy="${poly[0][1]}" r="3"`
+              + ` fill="${this.pitchColor}" opacity="0.9"/>`);
+          } else if (poly.length > 1) {
+            const pts = poly.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+            out.push(`<polyline points="${pts}" fill="none" stroke="${this.pitchColor}"`
+              + ` stroke-width="2.5" opacity="0.85"/>`);
+          }
+        }
+      } else if (this.showPitch && this.pitch2d.length) {
         for (const p of this.pitch2d) {
           out.push(`<circle cx="${p[0]}" cy="${p[1]}" r="1.4"`
             + ` fill="${this.pitchColor}" opacity="0.75"/>`);

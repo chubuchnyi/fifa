@@ -145,3 +145,58 @@ def project_points(pts_world: np.ndarray, proj: ProjectedFrame) -> np.ndarray:
     u = proj.fx * x + proj.cx
     v = proj.fy * y + proj.cy
     return np.stack([u, v], axis=-1)
+
+
+# ── the ground-plane path: project through the SOLVED calibration, not scene.camera ──
+# Everything above projects through ``scene.camera``. That is a *synthetic* frozen pose
+# (#107: AppController overwrites the solved CameraTrack with a tiled BROADCAST viewpoint
+# before export), so it does not describe the clip at all — measured 2026-07-30, the pitch
+# markings projected through it land a median ~1300 px away from the same markings projected
+# through the per-frame homography, on a 1920x1080 frame. That is the whole reason
+# hand-aligning the overlay never converged: the user was being asked to hand-fit the wrong
+# view with global sliders, frame after frame.
+#
+# ``field.calibration.homographies`` is the real thing and it is accurate — it lands within
+# 1.1-1.7 px of the painted lines it is scored against. It is only a PLANE map, so it cannot
+# project a 3D body; but it is EXACT for anything on the pitch surface, which covers the
+# markings and every player's ground contact, and it needs no focal (#61's open problem).
+
+
+def world_to_image(calibration, frame_index: int) -> np.ndarray:
+    """The solved image→world homography for ``frame_index``, inverted for drawing.
+
+    ``FieldCalibration.frames`` need not be 0..T-1, so look the frame up rather than
+    indexing positionally.
+    """
+    frames = np.asarray(calibration.frames, dtype=int)
+    hit = np.nonzero(frames == int(frame_index))[0]
+    if hit.size == 0:
+        raise KeyError(f"frame {frame_index} is not in the calibration ({frames.size} frames)")
+    return np.linalg.inv(np.asarray(calibration.homographies[int(hit[0])], dtype=float))
+
+
+def project_ground(xy: np.ndarray, w2i: np.ndarray) -> np.ndarray:
+    """Project ``(N, 2)`` pitch-plane world XY to ``(N, 2)`` pixels; NaN where behind camera."""
+    xy = np.asarray(xy, dtype=float).reshape(-1, 2)
+    p = np.column_stack([xy, np.ones(len(xy))]) @ w2i.T
+    w = p[:, 2]
+    ok = w > 1e-9
+    uv = np.full((len(xy), 2), np.nan)
+    uv[ok] = p[ok, :2] / w[ok, None]
+    return uv
+
+
+def image_to_ground(uv: np.ndarray, calibration, frame_index: int) -> np.ndarray:
+    """Inverse of :func:`project_ground` — pixels back to pitch-plane world XY.
+
+    This is what turns a user's drag into a correction: wherever they drop a player on the
+    frame is a point on the pitch, and the homography says exactly which one.
+    """
+    uv = np.asarray(uv, dtype=float).reshape(-1, 2)
+    frames = np.asarray(calibration.frames, dtype=int)
+    hit = np.nonzero(frames == int(frame_index))[0]
+    if hit.size == 0:
+        raise KeyError(f"frame {frame_index} is not in the calibration ({frames.size} frames)")
+    h = np.asarray(calibration.homographies[int(hit[0])], dtype=float)
+    p = np.column_stack([uv, np.ones(len(uv))]) @ h.T
+    return p[:, :2] / p[:, 2:3]
