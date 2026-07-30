@@ -379,6 +379,31 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (#107 — the measured camera never reaches the render; found while staging the R2 A/B)** —
+  the pipeline solves a real per-frame camera and then **throws it away one line before export**.
+  `AppController` line ~294 does an unconditional `scene.camera = self._static_camera(scene)`, and
+  `_static_camera` is a *synthetic* `standard_viewpoints(BROADCAST)` pose **tiled across every frame**.
+  Measured, not inferred: in `out/anim_A/export/scene.json` — the reference artifact both benches read
+  — the exported `CameraTrack` translation spread over 60 frames is exactly **[0, 0, 0] m**, while the
+  `field.calibration.homographies` in the same file vary per frame. Two camera representations coexist
+  and only the synthetic one is rendered. `git log -L` says this is **not a regression**: the line has
+  been there since the controller was first written (`31ee6b3`).
+  **Why the R2 numbers are still true.** `bench_camera_swim.py` reads `field.calibration.homographies`,
+  never `scene.camera`, so every swim/paint figure in the entry below measures the real solve. Confirmed
+  on the fresh 4-frame smoke: per-frame homography spread **21.08 → 1.04** with carry on (~20×), while
+  the exported `CameraTrack` spread stayed `[0,0,0]` on both sides.
+  **What it changes is what the A/B LOOKS like.** Swim will *not* appear as a drifting camera — the
+  render's camera is nailed down. It reaches the picture through subject placement: world positions come
+  from the per-frame homography, so the failure reads as **players sliding/jittering against a static
+  pitch**, not as the pitch sliding under a moving camera. Anywhere the docs say "scene swim", read
+  "subject placement instability" for anything judged in a *render*.
+  **Open question, not yet a verdict (#107).** Rendering a synthetic camera may well be deliberate —
+  feeding a solve with a known scale/offset defect (#61) straight into the render would be worse. But it
+  means our "broadcast" output is an *approximation* of the broadcast view rather than the measured one,
+  so it cannot be compared pixel-to-pixel against the source clip — which is exactly what #60/#61 want
+  to do. Decide before v2 photoreal: fix #61 and render the measured camera, or keep the synthetic one
+  and drop pixel-comparison as an acceptance test.
+
 - **2026-07-30 (#94 / R2 — camera propagation SHIPPED as a trade, not as a win)** —
   the calibration swims: **median 0.119 m / p95 0.468 m** of frame-to-frame scene slide on a camera
   whose true pan is a smooth 9.26 px/frame (#104). What ships is a two-part fix along the existing

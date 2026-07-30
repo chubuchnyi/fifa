@@ -11,6 +11,13 @@
 # circular (a 10 m-displaced anchor carried the same way scores 0.0000 m) and the paint metric
 # is blind to temporal consistency. So both videos get rendered and a human picks.
 #
+# WHAT TO ACTUALLY LOOK FOR (#107): NOT a drifting camera. The render's camera is synthetic and
+# frozen — AppController replaces the solved CameraTrack with a tiled standard_viewpoints(BROADCAST)
+# pose just before export, so the exported camera is bit-identical on every frame of BOTH sides.
+# The calibration reaches the picture through SUBJECT PLACEMENT (world positions are projected
+# through the per-frame homography). So the defect reads as players sliding/jittering against a
+# pitch that never moves, and the question for the eye is which side's players sit more steadily.
+#
 # Everything downstream of these two runs is measured LOCALLY and costs no GPU time: #106 reads
 # the carry_off scene.json (per-frame confidences describe the per-frame solve, so the control
 # side is the one whose confidence-vs-error correlation is meaningful), and #103 reads team_id
