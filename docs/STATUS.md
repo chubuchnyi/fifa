@@ -379,6 +379,30 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (#94/#60 — R2's 92 % swim removal does NOT reach the picture; measured on the A/B)** —
+  #107 established that the render's camera is synthetic, so calibration can only reach the image
+  through **subject placement**. So the A/B was scored on exactly that, comparing the two exports'
+  SMPL-X root translations over the 23 shared tracks / 1380 subject-frames:
+  - **OFF → ON placement shift:** median **0.137 m**, p95 0.459 m, max 0.870 m. The sides really are
+    different, and by a lot — this is not a no-op render.
+  - **Frame-to-frame subject step** (the sliding an eye can actually see): OFF median **0.0516 m**
+    / p95 0.1433 → ON median **0.0532 m** / p95 0.1400. ON is **3 % worse** at the median and 2 %
+    better at p95. Within noise, in both directions.
+  So the knob moves *where* players stand by 0.137 m without making them **any steadier**. The
+  bench's headline — homography swim 0.119 → 0.011 m, −92 % — is true of the homography and does
+  not survive the trip to subject positions. Note the arithmetic that gives it away: swim is
+  0.119 m/frame but subjects only step 0.0516 m/frame, so subject placement cannot be a
+  straight-through projection of the swimming homography — something downstream is already
+  absorbing most of it. **Hypothesis, not yet measured:** the coherence/physics gates
+  (`COHERENCE=1 PHYSICS=1` in `pod_ab_video.sh`) smooth trajectories and were already doing R2's
+  job. Testing it needs one pod run with those gates off.
+  **What this does to the #60 eye test.** The question is no longer "which side is steadier" —
+  measured answer: neither. It is "which side's players sit more correctly on the pitch", which is
+  the one thing no metric here can settle, so it still goes to the user's eyes.
+  **Pattern worth naming.** #107 (solved camera discarded), #108 (R3 self-disabled), and this make
+  three calibration improvements in a row whose measured gain does not reach the render. Before any
+  further calibration work — including #61 — establish what the render is actually sensitive to.
+
 - **2026-07-30 (pod session: the R2 A/B rendered — and it falsified two things we believed)** —
   one pod session, `$0.38` of GPU, produced the four A/B videos plus two findings that matter more
   than the A/B itself. Artifacts: `out/carry_{on,off}/video/{broadcast,sideline}.mp4` (1280×720, 60
