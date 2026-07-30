@@ -379,6 +379,36 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (pod session: the R2 A/B rendered — and it falsified two things we believed)** —
+  one pod session, `$0.38` of GPU, produced the four A/B videos plus two findings that matter more
+  than the A/B itself. Artifacts: `out/carry_{on,off}/video/{broadcast,sideline}.mp4` (1280×720, 60
+  frames each) and `out/carry_{on,off}/export/scene.json`. Pod stopped at `13:55Z`.
+  **#106 — the anti-predictive confidence is LIVE, not a stale artifact.** #105 concluded the
+  `r = +0.699` came from a scene.json written 2026-07-09 and therefore indicted a configuration that
+  no longer ships. Re-measured on the fresh post-R3 export (`carry_off`): **r = +0.688**. The defect
+  is essentially unchanged and it is real. Nothing may weight by `calibration.confidence`.
+  **#108 (new) — R3 is a NO-OP on the target clip, and #106 is how we found out.** The fresh
+  `carry_off` homographies are **byte-identical** to the 2026-07-09 export — `max|dH| = 0.0` raw,
+  over 60 frames — even though R3 changed the DLT solver on 2026-07-29. This is not a wiring
+  mistake: `wiring.py:218` wires `KeypointFieldCalibrator`, which *is* R3's path, and `bf120b2` is
+  an ancestor of the pod's checkout `a6da744`. So the line-constraint path **self-disabled**, as it
+  is designed to (`_lines_agree`, `_LINE_FRAME_TOL_M = 3.0` — PnLCalib's line-class world frame vs
+  our pitch template). Only `confidence` moved (`max|dconf| = 0.026`), which is #105's DOF-
+  normalisation fix. R3's committed "0.201 → 0.182 m" therefore describes a path that **does not
+  execute on the clip we actually ship**. Not yet measured: *which* branch of the guard tripped —
+  the `[pnlcalib] line-constraint frame check:` line is in `/workspace/carry_ab_full.log` on the
+  (now stopped) pod, and there are no PnLCalib weights locally to reproduce it on CPU.
+  **#103 — kit split re-measured, shirt numbers still unread (and now we know why).** Kit split
+  from `carry_off`: **10 team A / 13 team B** across 23 subjects (was 10/10). Shirt numbers stay
+  `None` on all 23 — R-6 forbids pinning a number nobody read, and the contact sheets produced
+  **0/23**. Root-caused, not guessed: nothing is offscreen — all 230 sampled subject-frames project
+  *inside* the frame — they are **18 px tall (median, max 22)** against the tool's 45 px readability
+  floor. `jersey_numbers.py` projects through `scene.camera`, which #107 makes synthetic *and* which
+  carries **render** intrinsics (1280×720), so the 1920×1080 source is downscaled 1.5× before the
+  crop, discarding the only pixels a digit could live in. `anim_A` reproduces the same 18 px, so the
+  older "4/20" read came from a differently-configured generation. Fixing it needs the real
+  per-frame calibration at native resolution — the exported scene carries no 2D tracker boxes.
+
 - **2026-07-30 (#107 — the measured camera never reaches the render; found while staging the R2 A/B)** —
   the pipeline solves a real per-frame camera and then **throws it away one line before export**.
   `AppController` line ~294 does an unconditional `scene.camera = self._static_camera(scene)`, and
