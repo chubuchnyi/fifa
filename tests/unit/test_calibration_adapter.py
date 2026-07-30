@@ -263,6 +263,33 @@ def test_calibrator_confidence_is_scored_on_the_lines_that_made_it_solvable():
     assert bad.confidence[0] < good.confidence[0]
 
 
+def test_confidence_is_zero_when_the_fit_has_no_redundancy_to_verify_it():
+    """A 4-point fit reproduces its own points exactly, so a residual cannot judge it (#105).
+
+    The frame is admitted (2·4 rows == the evidence floor) and its residual is *identically* zero
+    however wrong the homography is, so scoring by mean residual made the least-supported frames
+    the most confident ones. Normalising by residual degrees of freedom — ``rows − 8`` for a
+    homography's 8 DOF — makes that frame report the honest answer: unverifiable, confidence 0.
+    """
+    skew = np.array([[18.0, -11.0], [-14.0, 16.0], [21.0, 13.0], [-9.0, -19.0]])
+    bad_uv = _IMAGE[:4] + skew
+    result = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({0: (bad_uv, _WORLD[:4])})
+    ).calibrate(_clip(frames=(0,)))
+
+    # The fit really is wrong — the true image points now land metres from their world points …
+    off = np.linalg.norm(result.image_to_world(0, _IMAGE[:4]) - _WORLD[:4], axis=1)
+    assert off.max() > 1.0
+    # … yet its own residual is exactly zero, which is why a count-normalised score read ~1.0.
+    assert reprojection_error(result.homographies[0], bad_uv, _WORLD[:4]) == pytest.approx(0.0)
+    assert result.confidence[0] == 0.0
+
+    # The correction must not punish frames that *are* over-determined: 7 clean landmarks give
+    # 14 rows against 8 DOF, and still score ~1.
+    ok = _keypoints_calibrator(frames=(0,)).calibrate(_clip(frames=(0,)))
+    assert ok.confidence[0] > 0.99
+
+
 def test_confidence_decreases_with_error():
     assert _confidence_from_error(0.0, 0.5) == 1.0
     assert _confidence_from_error(0.5, 0.5) == pytest.approx(0.5)

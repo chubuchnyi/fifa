@@ -279,6 +279,7 @@ PYTHONPATH=src .venv/bin/python scripts/bench_line_constraints.py  # R3 point-on
 PYTHONPATH=src .venv/bin/python scripts/bench_novel_view_metric.py # R7: why 0.35-0.45 m is not a bar
 PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py      # R5: is hyperextension ever reached?
 PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py       # R2: does the camera swim, and is it removable on CPU?
+PYTHONPATH=src .venv/bin/python scripts/bench_calib_confidence.py  # #105: is calibration confidence predictive?
 
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
@@ -373,6 +374,42 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (#105 — the confidence defect was mostly a STALE MEASUREMENT; one real line remained)** —
+  #104 filed this as "our calibration confidence is anti-predictive, r = +0.699 vs measured paint
+  error, do not weight by it". The first thing #105 found is that **the evidence was stale, and that
+  is the transferable lesson**: `out/anim_A/export/scene.json` was written **2026-07-09**, and R3
+  wired PnLCalib's line detections into the DLT on **2026-07-29** (`bf120b2`). The r = +0.699 indicts
+  a **points-only** configuration that no longer ships. Re-measured over both configurations on a
+  synthetic bench built from the clip's own 60 GT homographies (`scripts/bench_calib_confidence.py`,
+  CPU, ~20 s, 480 fits), the *same* formula reads Spearman **−0.06 on points alone** — no signal, and
+  its residual term **wrong-signed** — against **−0.53 with lines**, every term correctly signed. An
+  unrelated change had already fixed most of the complaint. **Rule: a measurement carries a date and
+  an artifact carries a configuration — before acting on a measurement, check the artifact came from
+  the code that ships now**, or you fix something nobody runs.
+  **What was left is real, structural, and one line.** `err = sqrt(mean(resid²))` normalises by
+  observation *count*. A homography has 8 DOF and the admission gate is `2k + m >= 8`, so a frame
+  with exactly 8 rows is admitted, its DLT reproduces its own agreeing observations **exactly**, the
+  residual is identically 0, and confidence saturates. Measured on the old code: a 4-point fit whose
+  image points land **1.9 m** from their world points scored **0.9999999999999791**. Confidence was
+  maximal exactly where evidence was minimal. The fix normalises by residual **degrees of freedom**
+  (`rows − 8`); `dof ≤ 0 → inf → confidence 0`, because unverifiable is not certain (R-6), and at
+  `dof ≫ 0` it converges to the old value so over-determined frames are untouched. Spearman
+  points-only **−0.059 → −0.358**, with lines **−0.529 → −0.550**, and on a held-out harder condition
+  nothing was tuned for (3.5 px noise, 15 % outliers) **−0.722 → −0.727**. The minimal-evidence frame
+  goes **0.704 → 0.000**. Pinned by `test_confidence_is_zero_when_the_fit_has_no_redundancy_to_verify_it`,
+  which was **run against the reverted code and observed to fail** (`0.9999999999999791 != 0.0`) —
+  otherwise the test would be unverified.
+  **The replacement I designed lost to the one-liner and is recorded as rejected, not built.** k-fold
+  holdout error, probe support (Mahalanobis distance of the probe pixels from the inlier cloud), and
+  their products: **−0.445…−0.528** with lines vs the shipped −0.529, and −0.389…−0.677 vs −0.722 held
+  out. ADR-0012 Tier 1 row added.
+  **One failure mode still not scored, kept visible rather than closed over (R-6):** spatial
+  distribution. A clustered-landmark frame is **2.5× worse** than a wide one (0.781 m vs 0.311 m) and
+  scores the same (0.447 vs 0.461). Probe support is the right shape of answer and loses only on
+  aggregate, so it re-opens if clustered — rather than thin — frames become what the weighting must
+  reject. **R2's confidence-weighted form is un-blocked**, but any real-clip number must be
+  **re-measured on a post-R3 run** before it is quoted; filed as a pod-queued task.
+
 - **2026-07-29 (R2-pre / #104 — the camera does swim, it is removable, and it does not need the GPU)** —
   Measurement before implementation, per ADR-0012's standing rule: `scripts/bench_camera_swim.py`,
   CPU only, ~1 min. R2 books a GPU for RAFT-small optical flow to propagate the camera between
@@ -437,20 +474,21 @@ fabricate or silently hide.
   77 % of the swim. And MAD-reject alone, the brief's own outlier form, is **too timid** to be the
   whole answer (k=3 touches 4 frames, −14 %); it is a guard on top of carrying, not a substitute.
   **A separate defect, found on the way, worth more than R2 itself: our reported calibration
-  confidence is ANTI-predictive.** Pearson **r = +0.699** against measured paint error over 60
-  frames — the frames the pipeline trusts most are the ones that are worst (highest-confidence third
+  confidence looked ANTI-predictive.** Pearson **r = +0.699** against measured paint error over 60
+  frames — the frames the pipeline trusts most were the ones that are worst (highest-confidence third
   **1.69 px**, lowest-confidence third **1.11 px**). Both artifact explanations are ruled out by
   control: if the later frames were simply easier to score, a **frozen** camera would improve across
   them too — it degrades **2.11 → 15.13 → 34.40 px** — and if more paint were visible, distance-to-
   nearest-segment would shrink for free, but segment count is flat (24/23/28, r = −0.26). That value
   is exported in `scene.json` and consumed downstream, so anything weighting by it is steered
   backwards — including the confidence-weighted propagation this benchmark was about to recommend.
-  Tracked as **#105**, which now blocks that variant of R2.
+  Tracked as **#105** — which then found this evidence **stale** (see the #105 entry above): the
+  scored `scene.json` predates R3's line constraints, and the number must not be re-quoted as-is.
   **Verdict.** R2's premise holds, its prescription is oversized, and its benefit is a **trade** and
   must be reported as one. RAFT-small exists only to supply the motion the carry rides on, and
   `goodFeaturesToTrack` + LK + RANSAC supplied it at **4000/4000 corners, 3790 inliers** on CPU.
-  **R2 is re-scoped to the CPU path and un-blocked from the pod** (but now blocked on #105 for the
-  confidence-weighted form). #61's scale/offset defect is untouched by any of this. Roadmap row and
+  **R2 is re-scoped to the CPU path and un-blocked from the pod** (the confidence-weighted form was
+  blocked on #105 and is now un-blocked). #61's scale/offset defect is untouched by any of this. Roadmap row and
   ADR-0012 updated, including a new Tier 1 row for the GPU/RAFT stage and the general rule this
   session produced twice over: *a metric that shares a model with the thing it scores measures the
   sharing, not the thing* — every benchmark should carry a candidate it is supposed to fail.

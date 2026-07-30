@@ -146,13 +146,17 @@ it is not the no-op the first draft of this note called it, it removes 77 % of t
 **MAD-reject alone is too timid** to be the whole answer (k=3 touches 4 frames, −14 % swim); it is a
 guard on top of carrying, not a substitute.
 
-**Blocker for the confidence-weighted version: do not build it.** Weighting the vote by each frame's
-reported confidence is the obvious refinement and it would be steered backwards — our confidence is
-**anti-predictive**, Pearson **r = +0.699** against measured error (highest-confidence third 1.69 px,
-lowest-confidence third 1.11 px). Controlled against both artifacts that could fake it: a frozen
-camera over the same frames degrades 2.11 → 34.40 px (so the metric is getting *harder*, not easier),
-and detected-segment count is flat (r = −0.26). Tracked separately as **#105**, which gates any
-confidence-weighted propagation.
+**The confidence-weighted version is un-blocked (#105 closed).** Weighting the vote by each frame's
+reported confidence is the obvious refinement, and R2-pre found it would be steered backwards: our
+confidence read Pearson **r = +0.699** against measured error (highest-confidence third 1.69 px,
+lowest-confidence third 1.11 px), controlled against both artifacts that could fake it (a frozen
+camera over the same frames degrades 2.11 → 34.40 px, so the metric is getting *harder*; segment
+count flat at r = −0.26). #105 then found that evidence **stale**: `out/anim_A` is 2026-07-09, R3
+wired line constraints on 2026-07-29, and lines alone move the score from *no signal* to a correctly
+signed −0.53 (`scripts/bench_calib_confidence.py`). The residual normalisation was fixed on top
+(count → degrees of freedom), so R2 may weight by confidence — but **re-measure on a post-R3 clip
+before quoting any number**, and see #105 for the one failure mode still not scored (clustered
+landmarks).
 
 **Also available after R9, deliberately not adopted:** the `Features` module ships ALIKED/LightGlue.
 v2 §9 rejects them as the *primary* pitch matcher — uniform periodic grass, a near-mirror-symmetric

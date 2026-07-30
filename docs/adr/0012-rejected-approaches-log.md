@@ -37,6 +37,7 @@ The evidence is in this repo and re-runnable. These are the most expensive to re
 | **Iterative moving-average low-pass on HMR yaw** | **Rejected** | Removes 90 % of angular acceleration but flattens **100°+ real turns** — it attenuates exactly the signal we measure. Replaced by `facing_align` (structural yaw discipline from velocity direction, not statistical smoothing) | A filter whose stopband is defined by *implausibility* rather than frequency. Same objection as v2 §9's own "MPC/iLQR for smoothing" entry — we arrived at it independently |
 | **Sparse SMPL-X FK sampling for foot position** (30-frame cap) | **Rejected** | Held-between-samples interpolation *synthesised fake stances* — `contact_probe` read constant XY across held rows as a planted foot. Raising the cap to 240 cut aggregate foot slide **15.4 m → 0.3 m (98 %)** | Nothing at current clip lengths; revisit only if FK cost dominates on full-match ingest |
 | **GREEN source-kit chroma keying** for grass/player separation | **Rejected** | Grass collision — the pitch *is* green. Built the AOV-mask design instead | Nothing |
+| **Replacing the calibration confidence formula** with a k-fold-holdout / probe-support score (the fix #105 was opened to build) | **Rejected — one line of the old formula was the whole defect** | Every replacement scored **equal or worse**: Spearman vs true probe error −0.445…−0.528 against the shipped −0.529 once lines are present, and clearly worse on a held-out harder condition nothing was tuned for (−0.389…−0.677 vs −0.722). What shipped instead is a one-line change to the *normalisation*: `err` divided by residual **degrees of freedom** (`rows − 8`, a homography's 8 DOF) instead of by observation count. That alone takes points-only from **−0.059 → −0.358**, lines from −0.529 → **−0.550**, held-out −0.722 → **−0.727**. The defect it removes is structural, not statistical: at zero redundancy the DLT reproduces its own agreeing observations *exactly*, so a count-normalised RMS reads 0 however wrong the homography is — the old code scored a metres-wrong 4-point fit at **0.9999999999999791**, i.e. confidence peaked exactly where evidence vanished. Now `dof ≤ 0 → inf → 0.0` (unverifiable is not certain, R-6), while over-determined frames are untouched. Repro: `scripts/bench_calib_confidence.py`; pinned by `test_confidence_is_zero_when_the_fit_has_no_redundancy_to_verify_it`, verified to fail on the pre-fix code | **Spatial distribution**, which nothing here scores. A frame whose landmarks are clustered is **2.5× worse** (0.781 m vs 0.311 m) and still scores the same (0.447 vs 0.461). Probe support *is* the right shape of answer for that and loses only on aggregate — so it re-opens the moment clustered frames, rather than thin frames, are what the weighting has to reject |
 
 ### Tier 2 — v2 §9's own rejections, ported with our verdict
 
@@ -138,8 +139,16 @@ mistaken for a rejection.
   found that `FieldCalibration.confidence` is *anti*-predictive of real error (r = **+0.699**), with
   both artifact controls ruled out. It is exported in `scene.json`. Anything that weights by a
   self-reported quality signal should measure that signal against an independent one first — the
-  confidence-weighted propagation R2 was about to adopt would have been steered backwards. Tracked
-  as **#105**, blocking that variant.
+  confidence-weighted propagation R2 was about to adopt would have been steered backwards.
+- **…and #105 then found that warning's evidence was stale, which is its own lesson: a measurement
+  carries a date, and an artifact carries a configuration.** The scored `scene.json` is 2026-07-09;
+  R3 wired PnLCalib's line constraints into the DLT on 2026-07-29 (`bf120b2`). Re-measured over both
+  configurations (`scripts/bench_calib_confidence.py`), the same formula reads Spearman **−0.06 on
+  points alone** (no signal, its residual term *wrong-signed*) and **−0.53 with lines** (correctly
+  signed throughout). Most of the complaint had already been fixed by an unrelated change. **Before
+  acting on a measurement, check that the artifact it was taken from was produced by the code that
+  ships now** — otherwise you fix something nobody runs. See the table entry for the replacement
+  that this then correctly rejected.
 
 ## Alternatives considered
 

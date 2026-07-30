@@ -465,6 +465,7 @@ class KeypointFieldCalibrator(FieldCalibrator):
                     _apply_homography(h, fk.image_uv[inliers]) - fk.world_xy[inliers], axis=1
                 )
                 agree, mean_conf = inliers.astype(float), conf_kp[inliers]
+                rows = 2 * int(inliers.sum())
                 if m:
                     assert fk.line_confidence is not None
                     line_resid = point_line_residual(h, fk.line_uv, fk.line_abc)
@@ -475,7 +476,15 @@ class KeypointFieldCalibrator(FieldCalibrator):
                     resid = np.concatenate([resid, line_resid[line_in]])
                     agree = np.concatenate([agree, line_in.astype(float)])
                     mean_conf = np.concatenate([mean_conf, fk.line_confidence[line_in]])
-                err = float(np.sqrt((resid ** 2).mean())) if resid.size else float("inf")
+                    rows += int(line_in.sum())
+                # Normalise by residual *degrees of freedom*, not by observation count: a
+                # homography has 8, so only `rows - 8` of the residual is free to be non-zero.
+                # At zero redundancy the fit reproduces its own agreeing observations exactly and
+                # a count-normalised score reads a perfect 0 error however wrong the homography
+                # is — which is why the frames with the least evidence used to score *highest*
+                # (#105). Undefined redundancy means unverifiable, which is confidence 0, not 1.
+                dof = rows - 8
+                err = float(np.sqrt((resid ** 2).sum() / dof)) if dof > 0 else float("inf")
                 conf = (
                     _confidence_from_error(err, self.conf_scale_m)
                     * float(mean_conf.mean() if mean_conf.size else 0.0)
