@@ -49,6 +49,14 @@ if [ -n "${PNLCALIB_REPO}" ] && [ -d "${PNLCALIB_REPO}" ]; then
 else
   echo "== calibration: PROXY fake — #203 depth COLLAPSE expected (PnLCalib repo absent: '${PNLCALIB_REPO:-unset}')"
 fi
+# R2 camera propagation (#104): each frame's homography is re-estimated from its +-N neighbours,
+# carried on Lucas-Kanade inter-frame motion. CPU, no weights. This is a TRADE, not a free win —
+# it removes 92% of the scene swim (0.119 -> 0.011 m) for ~0.004 m of paint accuracy. Set 0 for
+# the A/B control run that scores every frame independently, as today's pipeline does.
+if [ -n "${CAMERA_CARRY:-}" ] && [ ${#CALIB_ARGS[@]} -gt 0 ]; then
+  CALIB_ARGS+=(--camera-carry "$CAMERA_CARRY")
+  echo "== camera carry: +-${CAMERA_CARRY} frames (0 = per-frame, no propagation)"
+fi
 
 # Continuity stitching is ON by default (part of correct reconstruction): re-link fragmented
 # tracklets before POSE so an occluded player keeps ONE identity instead of re-entering as a new

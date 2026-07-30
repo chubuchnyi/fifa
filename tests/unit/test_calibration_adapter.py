@@ -28,8 +28,10 @@ from pitch3d.adapters.models.calibration import (
     _apply_homography,
     _confidence_from_error,
     _temporal_smooth,
+    carry_on_motion,
     image_to_world_from_cam_params,
     point_line_residual,
+    probe_pixels,
     reprojection_error,
     solve_homography,
     solve_homography_ransac,
@@ -302,6 +304,95 @@ def test_temporal_smoothing_box_averages_window():
     sm = _temporal_smooth(np.stack([a, b, c]), 3)
     assert sm[1][0, 2] == pytest.approx(1.0)   # mean(0, 3, 0)
     assert sm[0][0, 2] == pytest.approx(1.5)   # endpoint clamps to mean(0, 3)
+
+
+# --- camera propagation (R2 / #94) ---------------------------------------------
+#: A smoothly panning tripod camera: one constant inter-frame pixel homography.
+_PAN = np.array([[1.0, 0.0, 9.0], [0.0, 1.0, 1.5], [0.0, 0.0, 1.0]])
+
+
+def _swimming_track(n=25, sigma=0.3, seed=0):
+    """A true panning camera + the independently noisy per-frame solve of it.
+
+    Frame ``k``'s pixels reach frame 0 through ``_PAN**-k``, so the true image→world homography is
+    ``_H_GT @ _PAN**-k``. Each frame's *measured* homography is then re-fitted from probe world
+    points corrupted independently — which is what the real per-frame calibration does (#104).
+    """
+    probe = probe_pixels(1920, 1080)
+    rng = np.random.default_rng(seed)
+    motion = np.stack([_PAN] * (n - 1))
+    truth, noisy = [], []
+    step = np.linalg.inv(_PAN)
+    back = np.eye(3)
+    for _ in range(n):
+        h = _H_GT @ back
+        truth.append(h)
+        seen = _apply_homography(h, probe) + rng.normal(0, sigma, (5, 2))
+        noisy.append(solve_homography(probe, seen))
+        back = back @ step
+    return np.stack(truth), np.stack(noisy), motion, probe
+
+
+def _truth_error(track, truth, probe):
+    """Median metres between where a track and the truth put the probe pixels on the pitch."""
+    return float(np.median([
+        np.median(np.linalg.norm(_apply_homography(t, probe) - _apply_homography(g, probe), axis=1))
+        for t, g in zip(track, truth, strict=True)
+    ]))
+
+
+def test_carrying_on_measured_motion_moves_the_track_toward_the_truth():
+    """Carrying must improve ACCURACY, not merely smoothness (#94).
+
+    The swim metric R2 was designed against is circular — a frozen camera scores a perfect 0.0 m of
+    frame-to-frame disagreement while being metres wrong (#104). So this scores against the known
+    true homography instead, and carries the frozen candidate along as the control it must beat.
+    """
+    truth, noisy, motion, probe = _swimming_track()
+    carried = carry_on_motion(noisy, motion, window=8, probe_uv=probe)
+
+    per_frame = _truth_error(noisy, truth, probe)
+    assert _truth_error(carried, truth, probe) < 0.5 * per_frame
+
+    # The control: a frozen track is perfectly steady and badly wrong. If the assertion above were
+    # really rewarding smoothness, this would pass it too — it must not.
+    frozen = np.stack([noisy[0]] * len(noisy))
+    assert _truth_error(frozen, truth, probe) > per_frame
+
+
+def test_carrying_is_off_by_default_and_declines_impossible_input():
+    truth, noisy, motion, probe = _swimming_track(n=4)
+    assert carry_on_motion(noisy, motion, window=0, probe_uv=probe) is noisy
+    with pytest.raises(ValueError, match="need 3 inter-frame motions"):
+        carry_on_motion(noisy, motion[:1], window=2, probe_uv=probe)
+
+
+def test_probe_points_track_the_frame_size():
+    assert probe_pixels(1920, 1080).shape == (5, 2)
+    assert probe_pixels(1280, 720) * 1.5 == pytest.approx(probe_pixels(1920, 1080))
+    # Players' feet: the probe sits in the lower half of the frame, never at the horizon.
+    assert (probe_pixels(1920, 1080)[:, 1] > 540).all()
+
+
+def test_calibrator_carries_only_when_a_motion_source_is_injected():
+    class _StubMotion:
+        def frame_motion(self, clip):
+            return np.stack([_PAN] * (clip.n_frames - 1))
+
+    frames = tuple(range(6))
+    plain = _keypoints_calibrator(frames=frames).calibrate(_clip(frames=frames))
+    assert plain.homographies.shape == (6, 3, 3)
+    assert KeypointFieldCalibrator(motion=None).info().params["carry_window"] == 0
+
+    carried = KeypointFieldCalibrator(
+        backend=_StubKeypointBackend({f: (_IMAGE, _WORLD) for f in frames}),
+        motion=_StubMotion(),
+        carry_window=2,
+    ).calibrate(_clip(frames=frames))
+    assert carried.homographies.shape == (6, 3, 3)
+    # Every frame saw identical clean landmarks, so each frame's own solve is already _H_GT and the
+    # carry has nothing to correct — but it must have run, and must not have damaged the track.
+    assert _apply_homography(carried.homographies[3], _IMAGE) == pytest.approx(_WORLD, abs=1e-6)
 
 
 # --- adapter behaviour ---------------------------------------------------------

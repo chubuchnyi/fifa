@@ -281,6 +281,11 @@ PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py      # R5: is hype
 PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py       # R2: does the camera swim, and is it removable on CPU?
 PYTHONPATH=src .venv/bin/python scripts/bench_calib_confidence.py  # #105: is calibration confidence predictive?
 
+# R2 camera propagation (#94): default 8, `0` = per-frame (the pre-R2 control side of the A/B).
+# On the pod chain the same knob is the CAMERA_CARRY env var, read by demo_video.sh.
+python -m pitch3d.app.cli --calibrator keypoints --camera-carry 8 ...   # carry ON  (shipped default)
+python -m pitch3d.app.cli --calibrator keypoints --camera-carry 0 ...   # carry OFF (control)
+
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
 ```
@@ -373,6 +378,37 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-30 (#94 / R2 — camera propagation SHIPPED as a trade, not as a win)** —
+  the calibration swims: **median 0.119 m / p95 0.468 m** of frame-to-frame scene slide on a camera
+  whose true pan is a smooth 9.26 px/frame (#104). What ships is a two-part fix along the existing
+  pure/heavy split. **`LucasKanadeMotion`** (cv2, CPU, no weights) recovers the inter-frame camera
+  motion — a broadcast main camera is on a tripod, so consecutive frames are related by **one**
+  homography whatever the scene depth, which is why RAFT-small was dropped. **`carry_on_motion`**
+  (pure numpy, no cv2) then re-fits every frame from its ±N neighbours. It votes in the **physical**
+  domain — each neighbour predicts where five probe pixels land on the pitch, per-coordinate median,
+  re-solve — because homography *coefficients* are defined only up to scale and averaging them means
+  nothing. The probes sit at players' feet (lower half of the frame), never at the horizon, where
+  error is both enormous and invisible.
+  **Honest headline: this is a TRADE.** It gives up **~0.004 m** of paint accuracy to remove
+  **0.108 m** of scene slide — 25–31× favourable, worth taking, but *not* free, and the knob
+  (`--camera-carry N`, default 8) exists so it can be turned off at `0`. The swim metric that
+  motivated R2 is **circular** — an anchor displaced 10 m and carried the same way scores 0.0000 m —
+  so it can never justify this alone; the independent paint check is what makes it a decision.
+  **Verified E2E, not just in unit tests.** The shipped motion backend reproduces the bench's own
+  tracking to **0.0000 px** over 59 inter-frame fits (a prototype that agrees with a write-up but not
+  with the code in the tree is worth nothing). A full CLI run on the target clip — decode → calibrate
+  → … → export — removes **91.3 %** of the exported `scene.json` track's swim vs the `--camera-carry 0`
+  control, matching the bench's 92 %. Frozen-camera and 2 m-displaced controls both fail as they must.
+  **What deliberately did NOT ship: MAD 3σ rejection.** The bench scored "carry" and "MAD" separately
+  and never "MAD-then-carry", so combining them would have shipped an unmeasured component — the exact
+  thing ADR-0012 exists to prevent. MAD alone is dominated (0.102 m vs 0.011 m). Carrying is also
+  **not** confidence-weighted; that form stays gated on #106. Still-image eval (`run_calib_eval.py`)
+  is uncarried by construction — unrelated images have no motion to carry between them.
+  Wired through `default_ports(camera_carry=…)` → `--camera-carry`, and down the pod chain as
+  `CAMERA_CARRY` (`video_defaults.sh` → `demo_video.sh` → `pod_make_video.sh` → `pod_real_e2e.sh`) so
+  the A/B render can be driven from one env var. **#60 still owes the verdict: no metric can settle
+  "stable-but-slightly-offset vs accurate-but-jittery" — the user's eyes decide.**
 
 - **2026-07-30 (#105 — the confidence defect was mostly a STALE MEASUREMENT; one real line remained)** —
   #104 filed this as "our calibration confidence is anti-predictive, r = +0.699 vs measured paint

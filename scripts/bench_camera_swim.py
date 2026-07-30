@@ -38,6 +38,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import numpy as np  # noqa: E402
 
+from pitch3d.adapters.models.calibration import (  # noqa: E402
+    carry_on_motion,
+    probe_pixels,
+)
 from pitch3d.core.scene.serialization import from_json  # noqa: E402
 
 SCENE = "out/anim_A/export/scene.json"
@@ -185,6 +189,46 @@ def fuse(h: np.ndarray, mats: list[np.ndarray], window: int) -> np.ndarray:
     return out
 
 
+def shipped_motion(n: int, mats: list[np.ndarray]) -> list[np.ndarray]:
+    """Re-measure the motion with the SHIPPED backend and check it against the bench's own LK.
+
+    ``true_motion`` is the benchmark's private implementation. What R2 ships is
+    ``LucasKanadeMotion``, reading frames through the pipeline's own decoder rather than a bare
+    ``VideoCapture`` loop. Those two could diverge — a different decode path, a dropped frame, a
+    silently-identity fit — and the whole result below rides on them agreeing, so it is measured.
+    """
+    from pitch3d.adapters.models.calibration import LucasKanadeMotion
+    from pitch3d.core.ports.io import ClipRef
+
+    print("== does the SHIPPED motion backend reproduce the bench's own tracking? ==")
+    clip = ClipRef(
+        source_id="s", uri=VIDEO, frames=np.arange(n), width=1920, height=1080, fps=29.97
+    )
+    got = LucasKanadeMotion().frame_motion(clip)
+    # Compare where it matters — how far the two disagree about a probe pixel, in pixels.
+    probe = probe_pixels(1920, 1080)
+    d = [
+        float(np.median(np.linalg.norm(_apply(g, probe) - _apply(m, probe), axis=1)))
+        for g, m in zip(got, mats, strict=True)
+    ]
+    print(
+        f"  {len(got)} inter-frame fits: median disagreement {np.median(d):.4f} px, "
+        f"max {max(d):.4f} px"
+    )
+    print("  (RANSAC is randomised, so exact equality is not expected; sub-pixel agreement is.)\n")
+    return list(got)
+
+
+def shipped(h: np.ndarray, mats: list[np.ndarray], window: int = 8) -> np.ndarray:
+    """The SHIPPED implementation (`calibration.carry_on_motion`), scored beside the prototype.
+
+    ``fuse`` above is the prototype this benchmark was written around. What R2 actually ships is
+    the adapter function, and a prototype that agrees with a write-up but not with the code in the
+    tree is worth nothing — so the shipped path is scored here under the same controls.
+    """
+    return carry_on_motion(h, np.stack(mats), window, probe_pixels(1920, 1080))
+
+
 def mad_reject(h: np.ndarray, mats: list[np.ndarray], k_sigma: float = 3.0):
     """The brief's *actual* prescription: keep every frame's own solve, replace only the outliers.
 
@@ -247,6 +291,7 @@ def removable(mats: list[np.ndarray]) -> None:
         row(f"carried on measured motion, +-{w}", s)
         if best is None or np.median(s) < np.median(best[1]):
             best = (w, s)
+    row("SHIPPED carry_on_motion, +-8", _swim(shipped(h, mats, 8), mats, False, 1920, 1080))
 
     # The smoother already in the tree (`calibration._temporal_smooth`, default OFF), scored on the
     # same axis as the alternatives that would replace it.
@@ -386,6 +431,7 @@ def accuracy(mats: list[np.ndarray], n_frames: int = 60) -> None:
     cand = {
         "per-frame (shipped)": h,
         "carried, +-8": fuse(h, mats, 8),
+        "SHIPPED carry, +-8": shipped(h, mats, 8),
         "coefficient average, w=17": coeff_average(h, 17),
         "MAD reject k=3": mad_reject(h, mats, 3.0)[0],
         "MAD reject k=1": mad_reject(h, mats, 1.0)[0],
@@ -429,7 +475,10 @@ def accuracy(mats: list[np.ndarray], n_frames: int = 60) -> None:
     # scored on the SAME frames against the SAME detected segments, so the honest test is paired:
     # frame by frame, which one sits closer to the paint than the shipped calibration does.
     base = np.array(scores["per-frame (shipped)"])
-    for name in ("carried, +-8", "coefficient average, w=17", "MAD reject k=3", "MAD reject k=1"):
+    for name in (
+        "carried, +-8", "SHIPPED carry, +-8", "coefficient average, w=17",
+        "MAD reject k=3", "MAD reject k=1",
+    ):
         delta = base - np.array(scores[name])
         print(
             f"  vs per-frame, paired over {len(delta)} frames: {name:<26} closer on "
@@ -561,6 +610,7 @@ def verdict() -> None:
 if __name__ == "__main__":
     _h, _f = _calibration()
     _mats, _moved = true_motion(len(_f))
+    shipped_motion(len(_f), _mats)
     consistency(_mats, _moved)
     removable(_mats)
     circularity(_mats)

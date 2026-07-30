@@ -24,6 +24,8 @@
 #   --keep-pod      do NOT stop the pod at the end (debugging)
 #   OUT_LOCAL       local output dir (default out/anim)
 #   STITCH/COHERENCE  forward-continuity + temporal-coherence into reconstruction (default 1; =0 to disable)
+#   CAMERA_CARRY      R2 camera propagation half-window in frames (default 8; =0 = per-frame, the
+#                     pre-R2 behaviour — that is the control side of the A/B)
 #   PITCH3D_FADE_FRAMES  entry/exit mesh-opacity ramp length in frames (default 4; 0 = hard pop)
 #
 # Machine paths/keys come from the repo-root .env (see .env.example). The pod is ALWAYS stopped on
@@ -54,6 +56,7 @@ OUT_LOCAL="${OUT_LOCAL:-out/anim}"; KEEP_POD=0; REUSE_SCENE="${REUSE_SCENE:-0}";
 # bodies don't pop in/out, and a 4-frame mesh-opacity ramp at genuine entries/exits. Override with =0.
 STITCH="${STITCH:-$VIDEO_STITCH_DEFAULT}"; COHERENCE="${COHERENCE:-$VIDEO_COHERENCE_DEFAULT}"
 PHYSICS="${PHYSICS:-$VIDEO_PHYSICS_DEFAULT}"
+CAMERA_CARRY="${CAMERA_CARRY:-$VIDEO_CAMERA_CARRY_DEFAULT}"
 FADE_FRAMES="${PITCH3D_FADE_FRAMES:-4}"
 while [ $# -gt 0 ]; do case "$1" in
   --clip)     CLIP_LOCAL="$2"; shift;;
@@ -148,6 +151,7 @@ info "Blender installs on first use (pip bpy, cached on the volume); Cycles rend
   export PITCH3D_STADIUM_VIDEO='$CLIP_POD'
   FRAMES='$FRAMES' OUT='$OUT_POD' REUSE_SCENE='$REUSE_SCENE' \
   STITCH='$STITCH' COHERENCE='$COHERENCE' PHYSICS='$PHYSICS' DEMO_EDITS='${DEMO_EDITS:-0}' \
+  CAMERA_CARRY='$CAMERA_CARRY' \
   ANIM_DEVICE='$DEVICE' ANIM_RES_X='$RES_X' ANIM_RES_Y='$RES_Y' ANIM_SAMPLES='$SAMPLES' \
   ANIM_CAMERAS='$CAMERAS' bash scripts/pod_make_video.sh
 " || die "pod video generation failed (see output above)"

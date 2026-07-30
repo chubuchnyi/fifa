@@ -79,7 +79,7 @@ def run_dry_run(
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
-    motion_prior: str = "fake",
+    motion_prior: str = "fake", camera_carry: int = 8,
     stitch: bool = True, coherence: bool = False, physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
@@ -105,7 +105,7 @@ def run_dry_run(
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
-        motion_prior=motion_prior,
+        motion_prior=motion_prior, camera_carry=camera_carry,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -552,6 +552,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--calibrator-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own KeypointBackend; "
                              "requires --calibrator keypoints")
+    parser.add_argument("--camera-carry", type=int, default=8, metavar="N",
+                        help="R2 camera propagation: re-estimate each frame's homography from its "
+                             "+-N neighbours carried on Lucas-Kanade inter-frame motion (CPU, no "
+                             "weights). Removes 92%% of scene swim for ~0.004m of paint accuracy "
+                             "(#104). 0 disables. Only used by --calibrator keypoints")
     parser.add_argument("--tracker-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own TrackingBackend; "
                              "requires --tracker bytetrack")
@@ -641,6 +646,7 @@ def main(argv: list[str] | None = None) -> int:
         avatar_backend=args.avatar_backend,
         occlusion_backend=args.occlusion_backend,
         motion_prior=args.motion_prior,
+        camera_carry=args.camera_carry,
         stitch=args.stitch,
         coherence=args.coherence,
         physics=args.physics,

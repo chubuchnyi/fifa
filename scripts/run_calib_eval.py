@@ -200,6 +200,9 @@ def _resolve_calibrator(spec: str, device: str, solver: str = "dlt"):
     from pitch3d.adapters.models import KeypointFieldCalibrator
     from pitch3d.adapters.models.calibration import KeypointBackend
 
+    # No `motion=` here on purpose: SoccerNet is unrelated still images, so there is no inter-frame
+    # camera motion to carry a neighbour's homography along (R2/#104). Scoring each image alone is
+    # what this benchmark means.
     return KeypointFieldCalibrator(
         backend=_resolve_backend(spec, KeypointBackend), smooth_window=1, device=device
     )

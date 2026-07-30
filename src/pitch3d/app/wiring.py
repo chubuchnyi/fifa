@@ -86,7 +86,7 @@ def default_ports(
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
-    motion_prior: str = "fake",
+    motion_prior: str = "fake", camera_carry: int = 8,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -135,6 +135,10 @@ def default_ports(
     ``"sports"`` (the fine-tuned Roboflow checkpoint passed via ``detector_weights``, which splits
     players/goalkeepers/referees). Same adapter-vs-root split as ``device``: the adapter dataclass
     defaults to the sports map (production intent), the root to ``"coco"`` (what runs for free).
+
+    ``camera_carry`` is the half-window (frames) over which ``calibrator="keypoints"`` re-estimates
+    each frame's homography from its neighbours, carried on Lucas-Kanade inter-frame motion (R2,
+    #104). CPU only. ``0`` disables it, which is what independent still images require.
 
     ``pose_backend`` / ``ball_backend`` / ``calibrator_backend`` / ``tracker_backend`` /
     ``avatar_backend`` inject a bring-your-own heavy backend by dotted path
@@ -212,12 +216,18 @@ def default_ports(
         cal: FieldCalibrator = FakeFieldCalibrator()
     elif calibrator == "keypoints":
         from ..adapters.models import KeypointFieldCalibrator
-        from ..adapters.models.calibration import KeypointBackend
+        from ..adapters.models.calibration import KeypointBackend, LucasKanadeMotion
 
         cal = KeypointFieldCalibrator(
             device=device,
             backend=_resolve_backend(calibrator_backend, KeypointBackend)
             if calibrator_backend else None,
+            # The per-frame solve swims by median 0.119 m between neighbouring frames while the
+            # camera pans smoothly; carrying it on the measured inter-frame motion removes 92 %
+            # (#104). CPU only. Set 0 to score each frame independently, as still-image evaluation
+            # must — there is no motion to carry between unrelated frames.
+            motion=LucasKanadeMotion() if camera_carry > 0 else None,
+            carry_window=camera_carry,
         )
     else:
         raise ValueError(f"unknown calibrator {calibrator!r}; expected 'fake' or 'keypoints'")

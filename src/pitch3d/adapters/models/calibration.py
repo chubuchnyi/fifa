@@ -156,6 +156,20 @@ class HomographyBackend(Protocol):
         ...
 
 
+@runtime_checkable
+class FrameMotionBackend(Protocol):
+    """The heavy half for camera propagation: how the image itself moved between frames.
+
+    A broadcast main camera is on a tripod, so consecutive frames are related by **one**
+    homography whatever the scene depth — no dense flow is needed, and no GPU (#104). Kept behind
+    this protocol so :func:`carry_on_motion` stays testable with a stub returning canned matrices.
+    """
+
+    def frame_motion(self, clip: ClipRef) -> np.ndarray:
+        """Return ``(T-1, 3, 3)`` pixel homographies mapping frame ``k``'s pixels onto ``k+1``'s."""
+        ...
+
+
 def _normalization_matrix(pts: np.ndarray) -> np.ndarray:
     """Hartley normalisation: translate centroid to origin, scale mean distance to ``sqrt(2)``."""
     centroid = pts.mean(axis=0)
@@ -377,7 +391,13 @@ def _confidence_from_error(err: float, scale_m: float) -> float:
 
 
 def _temporal_smooth(homographies: np.ndarray, window: int) -> np.ndarray:
-    """Box-average homographies over a centred frame window, renormalising each ``H[2,2]``."""
+    """Box-average homographies over a centred frame window, renormalising each ``H[2,2]``.
+
+    Superseded by :func:`carry_on_motion` wherever inter-frame motion is available: averaging
+    homography *coefficients* has no geometric meaning (a homography is defined only up to scale
+    and its entries are not commensurate), and carrying measurably dominates it on both axes
+    (#104). Kept for :class:`CameraModuleFieldCalibrator`, which has no motion source.
+    """
     t = homographies.shape[0]
     if window <= 1 or t <= 2:
         return homographies
@@ -386,6 +406,66 @@ def _temporal_smooth(homographies: np.ndarray, window: int) -> np.ndarray:
     for i in range(t):
         m = homographies[max(0, i - half):min(t, i + half + 1)].mean(axis=0)
         out[i] = m / m[2, 2] if abs(m[2, 2]) > 1e-12 else m
+    return out
+
+
+#: Probe pixels as (width, height) fractions — where players' feet actually are. The camera track
+#: is scored and fused here rather than over the whole frame because error at the horizon is both
+#: enormous and invisible: nobody is standing there (#104).
+_PROBE_FRAC = np.array(
+    [[1 / 3, 0.741], [1 / 2, 0.741], [2 / 3, 0.741], [0.396, 0.880], [0.604, 0.880]]
+)
+
+
+def probe_pixels(width: int, height: int) -> np.ndarray:
+    """The ``(5, 2)`` probe points for a frame of this size (see :data:`_PROBE_FRAC`)."""
+    return _PROBE_FRAC * np.array([[float(width), float(height)]])
+
+
+def _chain_motion(motion: np.ndarray, k: int, j: int) -> np.ndarray:
+    """Map frame ``k``'s pixels onto frame ``j``'s, composed from the measured inter-frame fits."""
+    g = np.eye(3)
+    if j > k:
+        for i in range(k, j):
+            g = motion[i] @ g
+    else:
+        for i in range(j, k):
+            g = motion[i] @ g
+        g = np.linalg.inv(g)
+    return g
+
+
+def carry_on_motion(
+    homographies: np.ndarray, motion: np.ndarray, window: int, probe_uv: np.ndarray
+) -> np.ndarray:
+    """Re-estimate each frame's homography from its neighbours, carried by the measured motion.
+
+    The per-frame calibration *swims*: consecutive frames disagree by median 0.119 m about where
+    the same physical point sits, while the camera pans smoothly (#104). Each neighbour therefore
+    carries real information about this frame, reachable by composing the inter-frame pixel motion.
+
+    The vote happens where the quantity is **physical**. Homography coefficients cannot be averaged
+    — only defined up to scale, entries not commensurate — so instead every neighbour predicts
+    *where a probe pixel lands on the pitch*, those world points are combined with a per-coordinate
+    median (robust to a neighbour whose own solve failed), and a homography is re-fitted to the
+    result.
+
+    This is a **trade, not a free win**: over the target clip it removes 92 % of the swim while
+    giving up ~0.0035 m of paint accuracy — favourable by 31×, but it must be reported as a trade
+    (#104). ``window=0`` disables it.
+    """
+    n = homographies.shape[0]
+    if window <= 0 or n < 2:
+        return homographies
+    if motion.shape[0] != n - 1:
+        raise ValueError(f"need {n - 1} inter-frame motions for {n} frames, got {motion.shape[0]}")
+    out = np.empty_like(homographies)
+    for k in range(n):
+        preds = []
+        for j in range(max(0, k - window), min(n - 1, k + window) + 1):
+            uv = probe_uv if j == k else _apply_homography(_chain_motion(motion, k, j), probe_uv)
+            preds.append(_apply_homography(homographies[j], uv))
+        out[k] = solve_homography(probe_uv, np.median(np.stack(preds), axis=0))
     return out
 
 
@@ -414,6 +494,8 @@ class KeypointFieldCalibrator(FieldCalibrator):
     """
 
     backend: KeypointBackend | None = None
+    motion: FrameMotionBackend | None = None
+    carry_window: int = 8
     min_keypoints: int = 4
     smooth_window: int = 1
     conf_scale_m: float = 0.5
@@ -428,6 +510,7 @@ class KeypointFieldCalibrator(FieldCalibrator):
             backend=Backend.LOCAL,
             params={
                 "smooth_window": self.smooth_window,
+                "carry_window": self.carry_window if self.motion is not None else 0,
                 "ransac_threshold_m": self.ransac_threshold_m,
                 "device": self.device,
             },
@@ -498,9 +581,18 @@ class KeypointFieldCalibrator(FieldCalibrator):
             confs.append(conf)
             frames.append(int(fk.frame))
 
-        smoothed = _temporal_smooth(np.stack(homs), self.smooth_window)
+        track = np.stack(homs)
+        if self.motion is not None and self.carry_window > 0 and track.shape[0] > 1:
+            track = carry_on_motion(
+                track,
+                self.motion.frame_motion(clip),
+                self.carry_window,
+                probe_pixels(clip.width, clip.height),
+            )
+        else:
+            track = _temporal_smooth(track, self.smooth_window)
         return FieldCalibration(
-            homographies=smoothed,
+            homographies=track,
             frames=np.asarray(frames, dtype=int),
             confidence=np.asarray(confs, dtype=float),
         )
@@ -615,6 +707,71 @@ class CameraModuleFieldCalibrator(FieldCalibrator):
             frames=np.asarray(frames, dtype=int),
             confidence=np.asarray(confs, dtype=float),
         )
+
+
+@dataclass
+class LucasKanadeMotion:
+    """Inter-frame camera motion from corner tracking — CPU, no weights, no GPU.
+
+    R2 originally booked a GPU for RAFT-small dense optical flow. It is not needed: a broadcast
+    main camera is on a tripod, so the whole image is related frame-to-frame by **one** homography
+    whatever the scene depth. ``goodFeaturesToTrack`` + ``calcOpticalFlowPyrLK`` + RANSAC recovers
+    it at 4000/4000 corners in ~1 min for the target clip (#104).
+
+    RANSAC is doing real work here, not tidying: players move independently of the camera, so the
+    correct fit is the *majority* motion — the stadium.
+
+    Attributes:
+        max_corners: Corner budget per frame.
+        quality: ``goodFeaturesToTrack`` quality level.
+        min_distance: Minimum corner separation, px.
+        win_size: Lucas-Kanade search window, px.
+        max_level: Pyramid levels for large inter-frame displacement.
+        ransac_px: Reprojection threshold separating camera motion from independent movers.
+    """
+
+    max_corners: int = 4000
+    quality: float = 0.01
+    min_distance: int = 8
+    win_size: int = 21
+    max_level: int = 4
+    ransac_px: float = 2.0
+
+    def frame_motion(self, clip: ClipRef) -> np.ndarray:  # pragma: no cover - heavy decode path
+        import cv2
+
+        from ..io.frames import iter_clip_frames
+
+        out: list[np.ndarray] = []
+        prev: np.ndarray | None = None
+        for _, bgr in iter_clip_frames(clip.uri, clip.frames.tolist()):
+            gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            if prev is not None:
+                out.append(self._between(cv2, prev, gray))
+            prev = gray
+        if len(out) != clip.n_frames - 1:
+            raise ValueError(f"decoded {len(out) + 1} frames, clip asked for {clip.n_frames}")
+        return np.stack(out) if out else np.empty((0, 3, 3))
+
+    def _between(self, cv2, a: np.ndarray, b: np.ndarray) -> np.ndarray:  # pragma: no cover
+        p0 = cv2.goodFeaturesToTrack(
+            a, maxCorners=self.max_corners, qualityLevel=self.quality,
+            minDistance=self.min_distance,
+        )
+        if p0 is None or len(p0) < 4:
+            return np.eye(3)
+        p1, st, _ = cv2.calcOpticalFlowPyrLK(
+            a, b, p0, None, winSize=(self.win_size, self.win_size), maxLevel=self.max_level
+        )
+        ok = st.ravel().astype(bool)
+        if ok.sum() < 4:
+            return np.eye(3)
+        g, _ = cv2.findHomography(
+            p0[ok].reshape(-1, 2), p1[ok].reshape(-1, 2), cv2.RANSAC, self.ransac_px
+        )
+        # A failed fit must not silently corrupt the chain every later frame is carried through:
+        # identity says "no measured motion", which the window median can outvote (R-6).
+        return np.eye(3) if g is None else np.asarray(g, dtype=float)
 
 
 @dataclass
