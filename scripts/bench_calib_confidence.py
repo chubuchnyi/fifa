@@ -39,6 +39,7 @@ Run (~20 s, CPU only, no weights):
 from __future__ import annotations
 
 import json
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,7 +60,9 @@ from pitch3d.core.scene.pitch import (  # noqa: E402
     world_line_from_segment,
 )
 
-SCENE = Path("out/anim_A/export/scene.json")
+# Overridable: this bench's own headline finding is that a hardcoded artifact path let a 2026-07-09
+# file indict a solver replaced on 2026-07-29. Point it at a fresh run before quoting any number.
+SCENE = Path(os.environ.get("PITCH3D_BENCH_SCENE", "out/anim_A/export/scene.json"))
 W, H = 1920, 1080
 CONF_SCALE_M = 0.5
 RANSAC_THRESHOLD_M = 1.0

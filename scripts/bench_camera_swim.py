@@ -44,8 +44,11 @@ from pitch3d.adapters.models.calibration import (  # noqa: E402
 )
 from pitch3d.core.scene.serialization import from_json  # noqa: E402
 
-SCENE = "out/anim_A/export/scene.json"
-VIDEO = "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
+# Overridable because a hardcoded artifact path is how #105 came to indict code that no longer
+# ships: the default below was written 2026-07-09, R3 changed the solver 2026-07-29, and the bench
+# happily re-measured the stale file. Point these at a fresh run before quoting any number.
+SCENE = os.environ.get("PITCH3D_BENCH_SCENE", "out/anim_A/export/scene.json")
+VIDEO = os.environ.get("PITCH3D_BENCH_VIDEO", "samples/video/Colombia-1-0-Congo-DR1080p.mp4")
 
 #: Where players' feet actually are. Swim is reported here rather than averaged over the whole
 #: frame, because error at the horizon is both huge and invisible — nobody is standing there.
