@@ -200,11 +200,13 @@ def apply_and_persist_root_edit(
     delta,
     user: str,
     cfg: PoseAnnotConfig | None = None,
+    frame_end: int | None = None,
 ) -> tuple[SubjectCache, Correction]:
     """Persist a root (orientation/translation) offset edit, fold it in, rebuild FK."""
     cfg = cfg or load_config()
     corr = build_root_edit(
         track_id=track_id, frame=frame, kind=kind, delta=delta, user=user,
+        frame_end=frame_end,
     )
     _persist_edit(cfg.corrections_out, corr)
     with st.lock:

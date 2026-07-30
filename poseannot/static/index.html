@@ -76,6 +76,10 @@
                 + 'anti-predictive on the target clip (r=+0.69 against measured error) — '
                 + 'do not trust it as a quality signal.'"
           x-text="'conf ' + (pitchConf === null ? '' : pitchConf.toFixed(2))"></span>
+    <button @click="toggleGround()" :class="{ active: showGround }"
+            title="stance handles: where the solved calibration puts each player's feet.
+Drag one onto the player's real feet — the drop pixel becomes a world position and the
+move is applied to the rest of that track.">feet</button>
     <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
             title="overlay orientation: rotate/move/flip about the pitch centre (C)">orient</button>
     <span class="user">
@@ -397,6 +401,10 @@
     <div>pelvis <b x-text="diag.pelvis"></b> · meshV <b x-text="diag.meshN"></b></div>
     <div>track <b x-text="selectedTrackId"></b>/<b x-text="tracks.length"></b>
          · joint <b x-text="selectedJoint"></b></div>
+    <div>feet <b x-text="groundHandles.length"></b>
+         · last move <b x-text="lastPlace ? `t${lastPlace.track_id} `
+             + `${lastPlace.dx.toFixed(2)},${lastPlace.dy.toFixed(2)}m `
+             + `f${lastPlace.from}-${lastPlace.to}` : '—'"></b></div>
   </div>
 
   <!-- Timeline -->
@@ -738,6 +746,13 @@ Alpine.data("poseAnnot", () => ({
     pitchSource: "calib",
     pitchLines: [],           // [[[u,v],...],...] polylines from the calibrated path
     pitchConf: null,          // this frame's calibration confidence (see #106: anti-predictive)
+    // Stance handles — one per subject, at the pixel where the SOLVED calibration puts
+    // their feet. Drag one onto the player's real feet to correct the world position.
+    showGround: true,
+    groundHandles: [],        // [{track_id, uv:[u,v], world:[x,y]}]
+    _dragTrack: null,         // track being dragged, or null
+    _dragUV: null,            // live cursor position in source pixels while dragging
+    lastPlace: null,          // {track_id, dx, dy, from, to} — last applied move, for the diag panel
     showCamAdjust: false,     // overlay-orient panel visible?
     // Overlay orientation: a rigid transform of the whole overlay (pitch +
     // skeletons + mesh) about the pitch-markings centre, applied in the browser.
@@ -978,6 +993,73 @@ Alpine.data("poseAnnot", () => ({
       this._ov3d = await r.json();
       this.projectOverlay();
       this.refreshCalibratedPitch();
+      this.refreshGround();
+    },
+
+    // Where the solved calibration says each player is standing.
+    async refreshGround() {
+      if (!this.showGround) { this.groundHandles = []; return; }
+      const want = this.frame;
+      const r = await fetch(`/api/frame/${want}/ground`);
+      if (!r.ok) { this.groundHandles = []; this.rebuildOverlay(); return; }
+      const d = await r.json();
+      if (this.frame !== want) return;   // user scrubbed on; a later fetch owns the state
+      this.groundHandles = d.subjects;
+      this.rebuildOverlay();
+    },
+
+    toggleGround() {
+      this.showGround = !this.showGround;
+      this.refreshGround();
+      this.rebuildOverlay();
+    },
+
+    // Client (screen) pixel → source-video pixel. getBoundingClientRect already
+    // includes the zoom/pan transform, and preserveAspectRatio="none" makes the
+    // mapping a plain per-axis scale.
+    _clientToSource(e) {
+      const svg = this.$refs.overlaySvg;
+      if (!svg) return null;
+      const r = svg.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      return [(e.clientX - r.left) / r.width * this.srcW,
+              (e.clientY - r.top) / r.height * this.srcH];
+    },
+
+    // Source pixels per screen pixel. The 1920-wide viewBox is shown in ~700px, so
+    // anything sized in source units is ~2.7x smaller than it looks in the code — and
+    // it changes again with zoom. Handles must stay a constant size on screen.
+    _srcPerScreen() {
+      const svg = this.$refs.overlaySvg;
+      if (!svg) return this.srcW / 700;
+      const r = svg.getBoundingClientRect();
+      if (!r.width) return this.srcW / 700;
+      return this.srcW / r.width;
+    },
+
+    // Drop a player: the homography turns the pixel into a point on the pitch, and the
+    // server persists the difference as a ROOT_TRANSLATION offset over the rest of the
+    // track. The client never does geometry — it only ever reports where the cursor was.
+    async placeSubject(trackId, uv) {
+      this.busy = true;
+      try {
+        const r = await fetch("/api/subject/place", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ track_id: trackId, frame: this.frame, uv }),
+        });
+        if (!r.ok) { this.diag.refresh = `place failed ${r.status}`; return; }
+        const d = await r.json();
+        this.lastPlace = {
+          track_id: trackId,
+          dx: d.delta_m[0], dy: d.delta_m[1],
+          from: d.frame_range[0], to: d.frame_range[1],
+        };
+        await this.refreshOverlay3d();
+        await this.refreshThree();
+      } finally {
+        this.busy = false;
+      }
     },
 
     // The pitch as the SOLVED calibration sees it. Server-side because the homography
@@ -1365,6 +1447,32 @@ Alpine.data("poseAnnot", () => ({
             + ` stroke="#000" stroke-width="3">t${sk.track_id}</text>`);
         }
       }
+      // Stance handles: where the SOLVED calibration says each player is standing.
+      // Drawn from the homography, not from scene.camera, so unlike the skeletons above
+      // they are exact on the pitch plane. Drag one onto the player's actual feet and the
+      // drop pixel becomes a world position — that is the whole manual-correction loop.
+      if (this.showGround) {
+        const s = this._srcPerScreen();          // source px per screen px
+        const arm = 10 * s, rx = 11 * s, ry = 4.5 * s, hit = 20 * s, sw = 1.6 * s;
+        for (const g of this.groundHandles) {
+          const live = this._dragTrack === g.track_id && this._dragUV;
+          const u = live ? this._dragUV[0] : g.uv[0];
+          const v = live ? this._dragUV[1] : g.uv[1];
+          const col = g.track_id === this.selectedTrackId ? this.accentBright : trackColorFor(g.track_id);
+          out.push(`<line x1="${u - arm}" y1="${v}" x2="${u + arm}" y2="${v}"`
+            + ` stroke="${col}" stroke-width="${sw}" opacity="0.9" pointer-events="none"/>`);
+          out.push(`<line x1="${u}" y1="${v - arm}" x2="${u}" y2="${v + arm}"`
+            + ` stroke="${col}" stroke-width="${sw}" opacity="0.9" pointer-events="none"/>`);
+          out.push(`<ellipse cx="${u}" cy="${v}" rx="${rx}" ry="${ry}" fill="none" stroke="${col}"`
+            + ` stroke-width="${sw * 1.3}" opacity="${live ? 1 : 0.85}" pointer-events="none"/>`);
+          // Invisible fat hit target, sized in SCREEN pixels: a 26-source-px radius is
+          // only ~9px on screen at default zoom, which is not grabbable. pointer-events
+          // must be re-enabled explicitly — the overlay <svg> is click-through so that
+          // panning works over it.
+          out.push(`<circle class="ground-handle" data-tid="${g.track_id}" cx="${u}" cy="${v}"`
+            + ` r="${hit}" fill="transparent" pointer-events="auto" style="cursor:grab"/>`);
+        }
+      }
       // ball marker (ball2d/ball3d stage layer) — drawn last, above the skeletons
       if (this.ballMarker2d) {
         const b = this.ballMarker2d;
@@ -1649,12 +1757,28 @@ Alpine.data("poseAnnot", () => ({
       // so clicks/drags never reach the controls — the "reset/flip/sliders/
       // re-run gate toggles do nothing" bug.
       if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel, .stage-inspect")) return;
+      // A stance handle takes the gesture instead of the pan. The capture stays on
+      // .main either way, so the move/up handlers below see the whole drag even when
+      // the cursor leaves the small handle.
+      const h = e.target.closest && e.target.closest(".ground-handle");
+      if (h) {
+        this._dragTrack = Number(h.dataset.tid);
+        this._dragUV = this._clientToSource(e);
+        this.selectTrack(this._dragTrack);
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+        return;
+      }
       this._panning = true;
       this._panLast = { x: e.clientX, y: e.clientY };
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
     },
 
     onPanMove(e) {
+      if (this._dragTrack !== null) {
+        this._dragUV = this._clientToSource(e);
+        this.rebuildOverlay();
+        return;
+      }
       if (!this._panning) return;
       const dx = e.clientX - this._panLast.x;
       const dy = e.clientY - this._panLast.y;
@@ -1662,7 +1786,19 @@ Alpine.data("poseAnnot", () => ({
       this.view = { scale: this.view.scale, tx: this.view.tx + dx, ty: this.view.ty + dy };
     },
 
-    onPanEnd() { this._panning = false; },
+    onPanEnd(e) {
+      if (this._dragTrack !== null) {
+        // Only a real pointerup commits. Pointer capture still fires pointerleave when
+        // the cursor crosses out of .main mid-drag, and committing on that would drop
+        // the player wherever the edge happened to be.
+        if (e && e.type !== "pointerup") return;
+        const tid = this._dragTrack, uv = this._dragUV;
+        this._dragTrack = null; this._dragUV = null;
+        if (uv) this.placeSubject(tid, uv);
+        return;
+      }
+      this._panning = false;
+    },
 }));
 Alpine.start();
 </script>

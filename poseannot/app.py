@@ -52,6 +52,7 @@ from .auth import authenticate, current_user, issue_token
 from .camera import (
     CameraAdjust,
     frame_projector,
+    image_to_ground,
     project_ground,
     project_points,
     world_to_image,
@@ -395,6 +396,108 @@ def api_pitch_calibrated(frame: int, user: str = Depends(current_user)) -> dict:
         "confidence": conf,
         "frame": int(frame),
         "video_size": [int(vw), int(vh)],
+    }
+
+
+#: SMPL-X body joints whose midpoint is "where this player is standing".
+_FOOT_JOINTS = (10, 11)  # left_foot, right_foot
+
+
+def _stance_xy(cache, frame: int) -> np.ndarray:
+    """World XY of the subject's stance at ``frame`` — the midpoint between the feet."""
+    return np.asarray(cache.joints[frame][list(_FOOT_JOINTS), :2], dtype=float).mean(axis=0)
+
+
+@app.get("/api/frame/{n}/ground")
+def api_frame_ground(n: int, user: str = Depends(current_user)) -> dict:
+    """Every subject's stance point, projected through the SOLVED calibration.
+
+    This is the handle the user grabs. It is deliberately the feet and not the pelvis:
+    the homography is only exact ON the pitch plane, and the feet are the one part of a
+    player that is actually on it. Pixels here and metres in the reply are two views of
+    the same point, so the client can drag in pixels and never do geometry itself.
+    """
+    del user
+    st = get_state()
+    field = getattr(st.scene, "field", None)
+    cal = getattr(field, "calibration", None) if field is not None else None
+    if cal is None:
+        raise HTTPException(400, "scene has no field calibration — nothing to place against")
+    if n < 0 or n >= st.n_frames:
+        raise HTTPException(404, f"frame {n} out of range")
+    try:
+        w2i = world_to_image(cal, n)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    subjects = []
+    for tid, sub in sorted(st.subjects.items()):
+        if n >= sub.frames.shape[0]:
+            continue
+        xy = _stance_xy(sub, n)
+        uv = project_ground(xy.reshape(1, 2), w2i)[0]
+        if not np.isfinite(uv).all():
+            continue
+        subjects.append({
+            "track_id": int(tid),
+            "uv": [float(uv[0]), float(uv[1])],
+            "world": [float(xy[0]), float(xy[1])],
+        })
+    return {"subjects": subjects, "frame": int(n)}
+
+
+class PlaceRequest(BaseModel):
+    track_id: int
+    frame: int
+    uv: list[float]
+    #: last frame the move applies to; omitted means "the rest of the track".
+    frame_end: int | None = None
+
+
+@app.post("/api/subject/place")
+def api_subject_place(req: PlaceRequest, user: str = Depends(current_user)) -> dict:
+    """Drop a player at a pixel: the homography says which point of the pitch that is.
+
+    The move is applied from ``frame`` to the end of the track, not to the single frame
+    the user was looking at. Placement error inherited from the calibration is systematic
+    along a track, so a one-frame fix would swap a steady offset for a visible pop.
+    """
+    st = get_state()
+    if req.track_id not in st.subjects:
+        raise HTTPException(404, f"no subject {req.track_id}")
+    sub = st.subjects[req.track_id]
+    if req.frame < 0 or req.frame >= sub.frames.shape[0]:
+        raise HTTPException(404, f"frame {req.frame} out of range")
+    field = getattr(st.scene, "field", None)
+    cal = getattr(field, "calibration", None) if field is not None else None
+    if cal is None:
+        raise HTTPException(400, "scene has no field calibration — cannot place")
+
+    try:
+        target = image_to_ground(np.asarray([req.uv], dtype=float), cal, req.frame)[0]
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    delta = target - _stance_xy(sub, req.frame)
+    end = sub.frames.shape[0] - 1 if req.frame_end is None else int(req.frame_end)
+
+    cache, corr = apply_and_persist_root_edit(
+        st,
+        track_id=req.track_id,
+        frame=req.frame,
+        kind="root_translation",
+        delta=[float(delta[0]), float(delta[1]), 0.0],
+        user=user,
+        frame_end=end,
+    )
+    cfg = load_config()
+    vsize = frame_size(str(cfg.source_video))
+    j2d = _joints2d_for(st, cache, req.frame, vsize)
+    return {
+        "ok": True,
+        "delta_m": [float(delta[0]), float(delta[1])],
+        "frame_range": [int(req.frame), int(end)],
+        "correction_id": corr.id,
+        **_serialize_subject_frame(cache, req.frame, j2d),
     }
 
 

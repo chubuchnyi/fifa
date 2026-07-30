@@ -379,6 +379,42 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-30 (#111 — players can be dragged onto their real feet; the drop pixel becomes a world
+  position)** — Second half of the auto-calibration-with-manual-fine-tuning loop the user asked for.
+  #110 put the *pitch* on screen through the solved homography; this puts the *players* there and
+  makes them draggable.
+  - Each subject gets a **stance handle** at the pixel where the solved calibration places the
+    midpoint of their feet (SMPL-X joints 10/11). Deliberately the feet, not the pelvis: the
+    homography is exact only **on** the pitch plane, and the feet are the one part of a player that
+    is actually on it. `GET /api/frame/{n}/ground`.
+  - Dragging a handle onto the player's real feet posts the drop pixel to `POST /api/subject/place`;
+    `image_to_ground()` turns it into a point on the pitch and the difference is persisted as a
+    `ROOT_TRANSLATION` offset. **The client never does geometry** — it only ever reports where the
+    cursor was.
+  - The move is applied **from that frame to the end of the track**, not to the single frame the user
+    was looking at. Placement error inherited from the calibration is systematic along a track, so a
+    one-frame fix would swap a steady offset for a visible pop. `build_root_edit` /
+    `apply_and_persist_root_edit` gained `frame_end` for this.
+  - **Measured in-browser, not asserted:** dropping track 3 at screen (640,520) and again at
+    (420,470) — a −15.74, −8.65 m move — reprojected to the drop pixel with **0.000 px** error both
+    times, and the handle re-rendered exactly under the cursor.
+  - Two bugs found and fixed by measurement rather than by reading the code. (a) The drag panned
+    instead of grabbing: `.zoom-layer svg { pointer-events: none }` makes the whole overlay
+    click-through so panning works over it, so the hit target needs `pointer-events="auto"`
+    explicitly. (b) The handle was sized in **source** pixels — the 1920-wide viewBox is shown in
+    ~685 px, so a nominal r=26 was only ~9 px on screen and missed on nearly every attempt. Handles
+    are now sized in screen pixels via `_srcPerScreen()` and stay a constant size through zoom.
+  - Committing on `pointerup` only: pointer capture also fires `pointerleave` when the cursor crosses
+    out of `.main` mid-drag, and committing on that would drop the player at whatever the panel edge
+    happened to be.
+  - **Incidental confirmation of #107:** with the handles on screen it is visible in one glance that
+    the stance markers sit on the players' feet while the *skeleton* overlays — which still go
+    through the synthetic `scene.camera` — cluster in a corner of the frame nowhere near anybody.
+  - Also visible: a few handles with no player under them, which are tracker-lost subjects. Per R-6
+    they are marked, not erased — and this drag tool is exactly how they get placed.
+  - **Not done yet (#112):** dragging the pitch layout itself to correct the homography. That still
+    needs a calibration correction kind; `TargetKind` has no such member today.
+
 - **2026-07-30 (#110 — the poseannot pitch overlay now draws through the SOLVED calibration)** —
   The user asked for "convenient camera auto-calibration with manual fine-tuning": the system
   calibrates per frame, then the user validates it by dragging the pitch layout and individual

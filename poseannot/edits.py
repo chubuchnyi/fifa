@@ -99,22 +99,28 @@ def build_root_edit(
     kind: str,
     delta: list[float] | np.ndarray,
     user: str,
+    frame_end: int | None = None,
 ) -> Correction:
-    """Build a single-frame CONSTANT_OFFSET correction for the subject root.
+    """Build a CONSTANT_OFFSET correction for the subject root.
 
     ``kind`` is a wire string in ``_ROOT_KINDS``. ``delta`` is a pure nudge the
     engine composes onto the resolved root: an axis-angle offset for
     ROOT_ORIENTATION (left-composed) or an xyz metre offset for
     ROOT_TRANSLATION (added). The client sends only the delta — no current-value
     round-trip, no client-side quaternion math.
+
+    ``frame_end`` widens the range past the single frame the user was looking at.
+    Placement error inherited from the calibration is systematic along a track, so
+    correcting it on one frame alone would trade a steady offset for a visible pop.
     """
     tk = _ROOT_KINDS[kind]
     d = np.asarray(delta, dtype=float).reshape(3)
     ts = _now_iso()
+    end = int(frame if frame_end is None else frame_end)
     return make_offset(
         f"manual-{user}-t{track_id}-f{frame}-{kind}-{ts}",
         CorrectionTarget(kind=tk, subject_track_id=int(track_id)),
-        (int(frame), int(frame)),
+        (int(frame), end),
         d,
         note=f"manual-{user}-{ts}",
     )
