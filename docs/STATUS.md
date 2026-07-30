@@ -278,6 +278,7 @@ PYTHONPATH=src .venv/bin/python scripts/bench_ransac_usac.py       # R10 rejecti
 PYTHONPATH=src .venv/bin/python scripts/bench_line_constraints.py  # R3 point-on-line gain
 PYTHONPATH=src .venv/bin/python scripts/bench_novel_view_metric.py # R7: why 0.35-0.45 m is not a bar
 PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py      # R5: is hyperextension ever reached?
+PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py       # R2: does the camera swim, and is it removable on CPU?
 
 # end-to-end CLI (real pipeline entrypoint)
 .venv/bin/python -m pitch3d.app.cli ...    # see app/cli.py for args (e.g. --stitch, --real-calib)
@@ -372,9 +373,65 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-29 (R2-pre / #104 — the camera does swim, it is removable, and it does not need the GPU)** —
+  Measurement before implementation, per ADR-0012's standing rule: `scripts/bench_camera_swim.py`,
+  CPU only, ~1 min. R2 books a GPU for RAFT-small optical flow to propagate the camera between
+  PnLCalib anchors. Two things had to be true first — the per-frame calibration must actually be
+  inconsistent over time, and that inconsistency must be *noise* rather than the camera genuinely
+  moving. The second is the one that decides the design: a smoother that removes real motion is the
+  yaw low-pass mistake again (ADR-0012, Tier 1).
+  **The truth signal is the pixels, not the calibration.** Smoothness proves nothing — a constant
+  homography is perfectly smooth and completely wrong. A broadcast main camera is on a tripod, so
+  between two frames the whole image is related by **one homography** whatever the scene depth, and
+  that can be recovered independently of where PnLCalib thinks the pitch is. The image convention is
+  *derived* rather than remembered (the #50 gate): both readings are scored and the consistent one
+  wins — raw 0.119 m vs 180-rotated 0.373 m — because a wrong remembered convention stays
+  self-consistent and silently inverts the answer.
+  **It swims.** True camera motion is a smooth **9.26 px/frame** (p95 13.77, max 14.02). Our
+  calibration disagrees with it by **median 0.119 m, p95 0.468 m, max 0.520 m** of scene slide at the
+  players' feet; **20 % of frames past 0.25 m**, 0 % past 1 m. Under R7 (#99) a common-mode error that
+  *moves* is the one a viewer sees — it slides the whole scene under a locked-off shot — so this is
+  the visible half of #61.
+  **It is removable.** Carrying the calibration along the measured motion: ±1 → 0.037, ±4 → 0.017,
+  ±16 → **0.009 m median** (−92 %) and **0.032 m p95** (−93 %). Neighbours are *not* blended in
+  homography coefficients — those are defined only up to scale and the entries are not commensurate.
+  The vote happens where the quantity is physical: each neighbour predicts where a probe pixel lands
+  on the pitch, the world points are combined with a median, and a homography is re-fitted.
+  **The over-smoothing control.** A **frozen** camera is the maximally smooth answer, so a metric that
+  merely rewarded smoothness would rank it first. It scores 0.164 / 0.235 / 0.245 — worse than today's
+  per-frame calibration on the median, though *better* at p95, because its error is systematic and
+  grows with the pan instead of spiking. What it establishes is the narrow thing it should: the metric
+  is not rewarding smoothness, since the smoothest possible camera loses to the carried one by ~18×.
+  **And then the swim metric turned out to be circular** — caught by distrusting my own 92 %. The
+  metric chains frame *k* to *k+1* through the measured motion, so anything *built* by propagating
+  along that motion scores ~0 **by construction**. Measured, not argued: an anchor displaced **10 m**,
+  carried the same way, scores **0.0000 m**. So swim measures **temporal consistency only** and is
+  blind to accuracy. The 92 % is a real removal of wobble and is *not* evidence of a better camera.
+  **An independent accuracy signal, and what it says.** Distance from the projected pitch model to the
+  painted lines in the actual frames. Three detector generations, because the first two could not
+  discriminate and that had to be measured: brightness+desaturation marks 2.5 % of the grass (floodlit
+  specular, white kit, compression noise all pass); a ridge filter at R3's measured 2 px line width is
+  *worse* at 3–8 %, since grass texture is full of 2 px ridges. What separates paint from texture is
+  neither brightness nor width but **extent** — Hough on the ridge seed gets it to **0.83 %**. Then a
+  second floor: a rasterised mask plus `distanceTransform` bottoms out at 0.95 px and scored every
+  candidate identically. Sub-pixel perpendicular distance to the fitted segments finally resolves it.
+  The metric is validated by a control it must fail — a 2 m displaced camera scores **4.53 px** (p95
+  26.9, only 47 % within 5 px) against our **1.70**. On that metric per-frame vs carried is a **coin
+  flip**: 50 % of frames each, median **−0.02 px** apart.
+  **Verdict.** R2's premise holds and its prescription is oversized. Carrying the camera removes
+  92 % of the *visible* error at **zero accuracy cost** — that is the whole case for it, and it is a
+  good one, but it is not "a more accurate camera" and #61's scale/offset defect is untouched by it.
+  RAFT-small exists only to supply the motion the carry rides on, and `goodFeaturesToTrack` + LK +
+  RANSAC supplied it at **4000/4000 corners, 3790 inliers** on CPU. **R2 is re-scoped to the CPU path
+  and un-blocked from the pod**; roadmap row and ADR-0012 updated, including a new Tier 1 row for the
+  GPU/RAFT stage and a general rule: *a metric that shares a model with the thing it scores measures
+  the sharing, not the thing* — every benchmark should carry a candidate it is supposed to fail.
+
 - **2026-07-29 (R5 / #97 — joint limits: measured, rejected, and the last brief item closed)** —
-  Eighth and final measurable brief item. ADR-0012's standing rule for it was "read them, measure
-  them, do not implement them", so this is a measurement, not a feature: `scripts/bench_joint_limits.py`.
+  Eighth and last of the brief items ADR-0012 had flagged measure-only. (A ninth followed the next
+  day: R2 was *adopted* rather than flagged, and its premise got measured before building anyway —
+  see the #104 entry above. ADR-0012 counts nine.) The standing rule was "read them, measure them, do
+  not implement them", so this is a measurement, not a feature: `scripts/bench_joint_limits.py`.
   **The finding — the premise is half right, and the half that fails is the one that decides the
   work.** SMPL-X really has no joint limits, so hyperextension is *representable*. The brief then
   assumes it is *reachable*. It is not: across all **1008** subject-frames of the production variant
