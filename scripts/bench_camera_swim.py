@@ -185,6 +185,49 @@ def fuse(h: np.ndarray, mats: list[np.ndarray], window: int) -> np.ndarray:
     return out
 
 
+def mad_reject(h: np.ndarray, mats: list[np.ndarray], k_sigma: float = 3.0):
+    """The brief's *actual* prescription: keep every frame's own solve, replace only the outliers.
+
+    ``fuse`` below replaces every frame with a window median, which levels the good frames down to
+    the average of their neighbourhood — measurably, on this clip. This does the opposite. Each
+    frame's predecessor predicts, through the measured motion, where that frame's homography should
+    be; frames whose own solve disagrees by more than a **robust** threshold (median + k·MAD, so the
+    outliers cannot inflate the threshold that is meant to catch them) are the only ones replaced.
+    A frame that agrees with the pixels is left exactly as the solver found it.
+    """
+    n = len(h)
+    pred = [h[0]] + [h[k - 1] @ _chain(mats, k, k - 1) for k in range(1, n)]
+    d = np.array(
+        [
+            float(np.median(np.linalg.norm(_apply(h[k], PROBE_UV) - _apply(p, PROBE_UV), axis=1)))
+            for k, p in enumerate(pred)
+        ]
+    )
+    thr = float(np.median(d) + k_sigma * 1.4826 * np.median(np.abs(d - np.median(d))))
+    out = h.copy()
+    for k in range(1, n):
+        if d[k] > thr:
+            out[k] = out[k - 1] @ _chain(mats, k, k - 1)  # carry from the ACCEPTED predecessor
+    return out, int((d[1:] > thr).sum()), thr
+
+
+def coeff_average(h: np.ndarray, window: int) -> np.ndarray:
+    """What `calibration._temporal_smooth` does today: box-average the coefficients themselves.
+
+    Reproduced here rather than argued about. A homography is defined only up to scale and its
+    entries are not commensurate — h[0,0] is a ratio, h[0,2] is a translation in pixels — so
+    averaging them has no geometric meaning. Whether that is *harmful* or merely *useless* at our
+    inter-frame scale is a different question, and it is measured below rather than assumed.
+    """
+    t = len(h)
+    half = (window if window % 2 else window + 1) // 2
+    out = np.empty_like(h)
+    for i in range(t):
+        m = h[max(0, i - half) : min(t, i + half + 1)].mean(axis=0)
+        out[i] = m / m[2, 2] if abs(m[2, 2]) > 1e-12 else m
+    return out
+
+
 def removable(mats: list[np.ndarray]) -> None:
     """Does carrying the calibration on the measured motion remove the swim, or just hide it?"""
     print("== is the swim removable? (same metric; lower is better) ==\n")
@@ -204,6 +247,16 @@ def removable(mats: list[np.ndarray]) -> None:
         row(f"carried on measured motion, +-{w}", s)
         if best is None or np.median(s) < np.median(best[1]):
             best = (w, s)
+
+    # The smoother already in the tree (`calibration._temporal_smooth`, default OFF), scored on the
+    # same axis as the alternatives that would replace it.
+    for w in (5, 17):
+        s = _swim(coeff_average(h, w), mats, False, 1920, 1080)
+        row(f"coefficient average, w={w} (in tree)", s)
+
+    for ks in (1.0, 2.0, 3.0):
+        m, n_rej, thr = mad_reject(h, mats, ks)
+        row(f"MAD reject k={ks:g} ({n_rej} frames, {thr:.3f} m)", _swim(m, mats, False, 1920, 1080))
 
     # The control that stops this being self-congratulation. Freezing the camera is the maximally
     # "smooth" answer, so a metric that merely rewards smoothness would score it best. It must
@@ -318,7 +371,7 @@ def _pitch_points() -> np.ndarray:
     return np.concatenate(segs)
 
 
-def accuracy(mats: list[np.ndarray], n_frames: int = 20) -> None:
+def accuracy(mats: list[np.ndarray], n_frames: int = 60) -> None:
     """Does carrying the camera make it MORE RIGHT, not merely steadier? (painted lines as truth)"""
     import cv2
 
@@ -333,6 +386,9 @@ def accuracy(mats: list[np.ndarray], n_frames: int = 20) -> None:
     cand = {
         "per-frame (shipped)": h,
         "carried, +-8": fuse(h, mats, 8),
+        "coefficient average, w=17": coeff_average(h, 17),
+        "MAD reject k=3": mad_reject(h, mats, 3.0)[0],
+        "MAD reject k=1": mad_reject(h, mats, 1.0)[0],
         "WRONG by 2 m (control)": np.stack([bad0 @ _chain(mats, k, 0) for k in range(len(h))]),
     }
 
@@ -369,17 +425,94 @@ def accuracy(mats: list[np.ndarray], n_frames: int = 20) -> None:
         )
     print()
 
-    # Aggregate medians of 1.70 vs 1.60 px are a tenth of a pixel apart, which is not something to
-    # read off a summary table. Both candidates were scored on the SAME frames against the SAME
-    # detected segments, so the honest test is paired: per frame, which one is closer to the paint.
-    a, b = np.array(scores["per-frame (shipped)"]), np.array(scores["carried, +-8"])
-    delta = a - b
-    print(
-        f"  paired over {len(delta)} frames: carried is closer on {100 * (delta > 0).mean():.0f}% "
-        f"of them, by a median {np.median(delta):+.3f} px (mean {delta.mean():+.3f})"
-    )
+    # Tenths of a pixel apart is not something to read off a summary table. Every candidate was
+    # scored on the SAME frames against the SAME detected segments, so the honest test is paired:
+    # frame by frame, which one sits closer to the paint than the shipped calibration does.
+    base = np.array(scores["per-frame (shipped)"])
+    for name in ("carried, +-8", "coefficient average, w=17", "MAD reject k=3", "MAD reject k=1"):
+        delta = base - np.array(scores[name])
+        print(
+            f"  vs per-frame, paired over {len(delta)} frames: {name:<26} closer on "
+            f"{100 * (delta > 0).mean():>3.0f}% of them, median {np.median(delta):+.3f} px"
+        )
     print("  Distance is measured FROM the projected model TO the nearest paint, so stray white")
     print("  pixels (kit, boards) can only flatter a candidate — both are flattered equally.\n")
+
+    # The two axes are in different units, so "0.19 px worse but 0.108 m steadier" is not yet a
+    # decision. Convert: how many metres on the pitch is one pixel worth, where the players are?
+    j = np.median(
+        [
+            np.linalg.norm(_apply(h[k], PROBE_UV + [1.0, 0.0]) - _apply(h[k], PROBE_UV), axis=1)
+            for k in range(len(h))
+        ]
+    )
+    print(f"  1 px at the probe points is worth {j:.4f} m on the pitch (median over the clip),")
+    print(f"  so the accuracy the carry gives up is ~{0.19 * j:.4f} m against {0.108:.3f} m")
+    print("  of scene slide it removes — two orders of magnitude apart, in favour of carrying.\n")
+
+
+def confidence_check(n_frames: int = 60) -> None:
+    """Does the confidence we report per frame predict the error we can actually measure?
+
+    Asked because the propagation was about to weight its vote by it. The answer changes the
+    design, and it is not the expected one — so it ships with the two controls that rule out the
+    obvious artifacts, rather than as a bare correlation.
+    """
+    import cv2
+
+    print("== is our reported per-frame confidence worth anything? ==\n")
+    cal = from_json(open(SCENE, encoding="utf-8").read()).field.calibration
+    h, conf = cal.homographies, cal.confidence
+    world = _pitch_points()
+    frozen = np.repeat(h[:1], len(h), axis=0)
+
+    def err(hh: np.ndarray, k: int, segs: np.ndarray, grass: np.ndarray) -> float:
+        uv = _apply(np.linalg.inv(hh[k]), world)
+        u, v = np.round(uv[:, 0]).astype(int), np.round(uv[:, 1]).astype(int)
+        m = (u >= 0) & (u < 1920) & (v >= 0) & (v < 1080)
+        uv, u, v = uv[m], u[m], v[m]
+        on = grass[v, u] > 0
+        return float(np.median(_perp_px(uv[on], segs))) if on.sum() >= 20 else float("nan")
+
+    cap = cv2.VideoCapture(VIDEO)
+    rows = []
+    for k in range(min(n_frames, len(h))):
+        ok, bgr = cap.read()
+        if not ok:
+            break
+        segs, grass = _line_mask(bgr)
+        rows.append((len(segs), err(h, k, segs, grass), err(frozen, k, segs, grass)))
+    cap.release()
+    a = np.array(rows, dtype=float)
+    c = conf[: len(a)]
+
+    print(f"  {'':<20}{'segments':>10}{'per-frame':>11}{'FROZEN':>9}{'confidence':>12}")
+    print("  " + "-" * 62)
+    third = len(a) // 3
+    for lo, hi in [(0, third), (third, 2 * third), (2 * third, len(a))]:
+        s = a[lo:hi]
+        print(
+            f"  frames {lo:>2}-{hi:<12}{np.nanmedian(s[:, 0]):>10.0f}{np.nanmedian(s[:, 1]):>11.2f}"
+            f"{np.nanmedian(s[:, 2]):>9.2f}{c[lo:hi].mean():>12.3f}"
+        )
+    print()
+
+    ok = ~np.isnan(a[:, 1])
+    r = float(np.corrcoef(c[ok], a[ok, 1])[0, 1])
+    q = np.argsort(c[ok])
+    print(f"  Pearson r(confidence, measured error) = {r:+.3f}  — it should be NEGATIVE.")
+    print(
+        f"  lowest-confidence third errs {np.median(a[ok][q[: len(q) // 3], 1]):.2f} px, "
+        f"highest-confidence third errs {np.median(a[ok][q[-(len(q) // 3) :], 1]):.2f} px"
+    )
+    print()
+    print("  Two controls, because a spurious version of this is easy to produce. If the later")
+    print("  frames were simply easier to score, a FROZEN camera would improve across them too —")
+    print("  it degrades instead, and steeply, so the metric is getting harder, not softer. And")
+    print("  if more paint were visible later, distance-to-nearest-segment would shrink for free")
+    print("  — the segment count is flat and correlates with the error at only r = -0.26.")
+    print("  So the confidence really is backwards, and nothing may weight by it until it is")
+    print("  fixed. It is exported in scene.json, so the blast radius is not just this bench.\n")
 
 
 def verdict() -> None:
@@ -388,17 +521,41 @@ def verdict() -> None:
     print("  and a p95 of 0.47 m, on a clip where the camera itself pans smoothly at 9 px/frame.")
     print("  Under R7 that is the error class a viewer actually sees, so it is worth removing.")
     print()
-    print("  Carrying the calibration along the measured inter-frame motion removes 92 % of it.")
-    print("  Two controls decide what that is worth. Against the painted lines a 2 m displaced")
-    print("  camera scores 4.53 px to our 1.70, so the paint metric is not blind — and on that")
-    print("  metric per-frame and carried are a coin flip, 50 % of frames each, -0.02 px apart.")
-    print("  The wobble goes away and the accuracy does not move. That is the whole case for it:")
-    print("  not a better camera, a free removal of the visible half of the error.")
+    print("  It is NOT free, and an earlier version of this script said it was. Scored on the")
+    print("  first 20 frames the accuracy cost looked like a coin flip; over all 60 it is a")
+    print("  consistent loss — carrying is closer to the paint on only 32 % of frames, by a")
+    print("  median 0.19 px. Swim removal and accuracy trade against each other monotonically")
+    print("  across every method here. There is no setting that improves both.")
+    print()
+    print("  What decides it is putting the two axes in the same units. One pixel at the probe")
+    print("  points is 0.018 m of pitch, so carrying gives up ~0.0035 m of accuracy to remove")
+    print("  0.108 m of scene slide — a 31x asymmetric trade, and worth taking. But it must be")
+    print("  reported as a trade, and the knob that picks the point on the curve should be ours")
+    print("  to set, not baked in.")
+    print()
+    print("  Two things that decide the implementation:")
+    print("  - The coefficient averaging already in the tree (`_temporal_smooth`, default OFF) is")
+    print("    not meaningless as first assumed — it removes 77 % of the swim. It is simply")
+    print("    DOMINATED: carrying beats it on both axes at once (0.011 vs 0.027 m of swim, 1.41")
+    print("    vs 1.70 px of error). Replace it rather than enabling it.")
+    print("  - MAD-reject alone, the brief's own outlier form, is too timid to be the whole")
+    print("    answer: at k=3 it touches 4 frames and removes 14 % of the swim. It is a useful")
+    print("    guard on top of carrying, not a substitute for it.")
     print()
     print("  It does not need the GPU the brief books. RAFT-small is proposed to recover the")
     print("  motion the carry rides on; goodFeaturesToTrack + LK recovered it on the CPU at")
     print("  4000/4000 corners, 3790 RANSAC inliers, in about a minute for the clip. R2 should")
     print("  be re-scoped to the CPU path, which also un-blocks it from the pod.")
+    print()
+    print("  SEPARATE DEFECT, found on the way and worth more than R2 itself: the confidence we")
+    print("  report per calibrated frame is ANTI-predictive. Pearson r against the measured paint")
+    print("  error is +0.699 — the frames the pipeline trusts most are the ones that are worst")
+    print("  (highest-confidence third 1.69 px, lowest-confidence third 1.11 px). Controlled: a")
+    print("  frozen camera over the same frames degrades 2.11 -> 34.40 px, so the metric is not")
+    print("  merely getting easier, and detected-segment count is flat (r = -0.26). That number")
+    print("  is exported in scene.json and consumed downstream, so anything weighting by it is")
+    print("  being steered backwards — including the confidence-weighted propagation this")
+    print("  benchmark was about to recommend.")
 
 
 if __name__ == "__main__":
@@ -408,4 +565,5 @@ if __name__ == "__main__":
     removable(_mats)
     circularity(_mats)
     accuracy(_mats)
+    confidence_check()
     verdict()

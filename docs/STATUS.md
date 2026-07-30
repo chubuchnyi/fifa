@@ -415,17 +415,45 @@ fabricate or silently hide.
   neither brightness nor width but **extent** — Hough on the ridge seed gets it to **0.83 %**. Then a
   second floor: a rasterised mask plus `distanceTransform` bottoms out at 0.95 px and scored every
   candidate identically. Sub-pixel perpendicular distance to the fitted segments finally resolves it.
-  The metric is validated by a control it must fail — a 2 m displaced camera scores **4.53 px** (p95
-  26.9, only 47 % within 5 px) against our **1.70**. On that metric per-frame vs carried is a **coin
-  flip**: 50 % of frames each, median **−0.02 px** apart.
-  **Verdict.** R2's premise holds and its prescription is oversized. Carrying the camera removes
-  92 % of the *visible* error at **zero accuracy cost** — that is the whole case for it, and it is a
-  good one, but it is not "a more accurate camera" and #61's scale/offset defect is untouched by it.
-  RAFT-small exists only to supply the motion the carry rides on, and `goodFeaturesToTrack` + LK +
-  RANSAC supplied it at **4000/4000 corners, 3790 inliers** on CPU. **R2 is re-scoped to the CPU path
-  and un-blocked from the pod**; roadmap row and ADR-0012 updated, including a new Tier 1 row for the
-  GPU/RAFT stage and a general rule: *a metric that shares a model with the thing it scores measures
-  the sharing, not the thing* — every benchmark should carry a candidate it is supposed to fail.
+  The metric is validated by a control it must fail — a 2 m displaced camera scores **15.3 px** (44 %
+  within 5 px) against our **1.22**.
+  **And then it said the opposite of what I first published.** Scored over the first 20 frames,
+  per-frame vs carried looked like a coin flip and I committed "free removal, zero accuracy cost".
+  Over the full **60**, carrying is closer on only **32 %** of frames, by a median **0.19 px** — a
+  consistent loss. Cause: per-frame accuracy *improves* across the clip (1.70 → 1.23 → 1.14 px) while
+  carrying levels every frame toward its window average, so it helps the bad frames and hurts the good
+  ones. **Swim removal and accuracy trade off monotonically** across every method tried; nothing
+  improves both.
+  **What rescues the verdict is a unit conversion, not a better method.** 1 px at the probe points is
+  **0.0182 m** of pitch, so carrying gives up **~0.0035 m** of accuracy to remove **0.108 m** of scene
+  slide — **31× asymmetric**, clearly worth taking. The lesson is that px-vs-metres hid the real
+  question until both axes were in the same units, and that a 20-frame sample was not enough to
+  publish from.
+  **The measured trade curve** (swim median → paint error), so the operating point is a choice:
+  per-frame 0.119 m → 1.22 px · MAD-reject k=3 0.102 → 1.23 · MAD k=1 0.060 → 1.34 · coefficient
+  average w=17 0.027 → 1.70 · carried ±8 0.011 → 1.41 · carried ±16 0.009. Two consequences.
+  `_temporal_smooth` (coefficient averaging, in the tree, default OFF) is **dominated** — carrying
+  beats it on both axes — so replace it, though it is *not* the no-op I first called it: it removes
+  77 % of the swim. And MAD-reject alone, the brief's own outlier form, is **too timid** to be the
+  whole answer (k=3 touches 4 frames, −14 %); it is a guard on top of carrying, not a substitute.
+  **A separate defect, found on the way, worth more than R2 itself: our reported calibration
+  confidence is ANTI-predictive.** Pearson **r = +0.699** against measured paint error over 60
+  frames — the frames the pipeline trusts most are the ones that are worst (highest-confidence third
+  **1.69 px**, lowest-confidence third **1.11 px**). Both artifact explanations are ruled out by
+  control: if the later frames were simply easier to score, a **frozen** camera would improve across
+  them too — it degrades **2.11 → 15.13 → 34.40 px** — and if more paint were visible, distance-to-
+  nearest-segment would shrink for free, but segment count is flat (24/23/28, r = −0.26). That value
+  is exported in `scene.json` and consumed downstream, so anything weighting by it is steered
+  backwards — including the confidence-weighted propagation this benchmark was about to recommend.
+  Tracked as **#105**, which now blocks that variant of R2.
+  **Verdict.** R2's premise holds, its prescription is oversized, and its benefit is a **trade** and
+  must be reported as one. RAFT-small exists only to supply the motion the carry rides on, and
+  `goodFeaturesToTrack` + LK + RANSAC supplied it at **4000/4000 corners, 3790 inliers** on CPU.
+  **R2 is re-scoped to the CPU path and un-blocked from the pod** (but now blocked on #105 for the
+  confidence-weighted form). #61's scale/offset defect is untouched by any of this. Roadmap row and
+  ADR-0012 updated, including a new Tier 1 row for the GPU/RAFT stage and the general rule this
+  session produced twice over: *a metric that shares a model with the thing it scores measures the
+  sharing, not the thing* — every benchmark should carry a candidate it is supposed to fail.
 
 - **2026-07-29 (R5 / #97 — joint limits: measured, rejected, and the last brief item closed)** —
   Eighth and last of the brief items ADR-0012 had flagged measure-only. (A ninth followed the next
