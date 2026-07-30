@@ -565,6 +565,14 @@ def confidence_check(n_frames: int = 60) -> None:
     print("  — the segment count is flat and correlates with the error at only r = -0.26.")
     print("  So the confidence really is backwards, and nothing may weight by it until it is")
     print("  fixed. It is exported in scene.json, so the blast radius is not just this bench.\n")
+    print("  UPDATE (#105, 2026-07-30): most of the above was a STALE ARTIFACT, not a live defect.")
+    print("  The r = +0.699 was read off a scene.json written 2026-07-09, while R3 changed the")
+    print("  solver on 2026-07-29 — it indicts a points-only configuration that no longer ships.")
+    print("  One real bug remained and is fixed: confidence normalised by observation COUNT, so a")
+    print("  frame at exactly 8 DOF-rows reproduced its own observations and scored ~1.0 on a")
+    print("  metres-wrong fit; it now normalises by residual degrees of freedom. Whatever number")
+    print("  this run just printed is only meaningful if SCENE came from a POST-R3 run — set")
+    print("  PITCH3D_BENCH_SCENE to a fresh export before quoting it (#106).\n")
 
 
 def verdict() -> None:
@@ -598,6 +606,12 @@ def verdict() -> None:
     print("  motion the carry rides on; goodFeaturesToTrack + LK recovered it on the CPU at")
     print("  4000/4000 corners, 3790 RANSAC inliers, in about a minute for the clip. R2 should")
     print("  be re-scoped to the CPU path, which also un-blocks it from the pod.")
+    print()
+    print("  SHIPPED 2026-07-30 (#94), which is why this script now scores the real thing beside")
+    print("  the prototype: LucasKanadeMotion + carry_on_motion behind --camera-carry N (default")
+    print("  8, 0 restores per-frame). MAD-reject did NOT ship — this bench scored 'carry' and")
+    print("  'MAD' separately and never the combination, and shipping an unmeasured component is")
+    print("  the mistake this whole log exists to prevent. Measure MAD-then-carry before adding.")
     print()
     print("  SEPARATE DEFECT, found on the way and worth more than R2 itself: the confidence we")
     print("  report per calibrated frame is ANTI-predictive. Pearson r against the measured paint")
