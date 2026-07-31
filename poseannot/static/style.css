@@ -218,6 +218,19 @@ body.login { display: flex; align-items: center; justify-content: center; }
   color: var(--fg); font-size: 0.85rem; letter-spacing: 0.2px;
   max-width: 340px; text-align: center; font-family: ui-monospace, monospace;
 }
+/* Session-expiry card (#122) reuses .busy-overlay/.busy-card but must not read as "working":
+   it is terminal, so it carries no spinner and overrides the progress cursor. */
+.busy-overlay.expired { cursor: default; }
+.busy-sub {
+  color: var(--fg-dim); font-size: 0.76rem; line-height: 1.45;
+  max-width: 340px; text-align: center;
+}
+.busy-card .btn.primary {
+  background: var(--accent); color: #0d1117; border: none; border-radius: 4px;
+  padding: 0.4rem 1.1rem; font-size: 0.8rem; font-weight: 600;
+  text-decoration: none; cursor: pointer;
+}
+.busy-card .btn.primary:hover { filter: brightness(1.12); }
 
 [x-cloak] { display: none !important; }
 .upload-panel {

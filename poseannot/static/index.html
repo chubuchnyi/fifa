@@ -32,6 +32,18 @@
     </div>
   </div>
 
+  <!-- Session expiry (#122). Blocking on purpose: behind a dead token every overlay is a
+       leftover picture the server is no longer confirming, and judging alignment against one
+       is worse than not seeing it. -->
+  <div class="busy-overlay expired" x-show="sessionExpired" x-cloak>
+    <div class="busy-card">
+      <div class="busy-msg">session expired — the overlays below are stale</div>
+      <div class="busy-sub">Your 24-hour token lapsed. Unsaved edits already sent to the
+        server are safe; anything on screen since is not being updated.</div>
+      <a class="btn primary" href="/">log in again</a>
+    </div>
+  </div>
+
   <!-- Toolbar -->
   <div class="toolbar">
     <span class="brand">poseannot</span>
@@ -226,7 +238,9 @@ badge keeps reading 'one camera'.">layout</button>
        @pointerleave="onPanEnd($event)">
     <div class="canvas-frame" x-ref="canvasFrame">
       <div class="zoom-layer" :style="zoomStyle()">
-        <img :src="frameSrc" @load="onFrameLoaded($event)" @dragstart.prevent
+        <!-- @error: the frame is an <img>, so it never passes through the fetch wrapper that
+             catches a 401 everywhere else. Without this the picture just stops updating. -->
+        <img :src="frameSrc" @load="onFrameLoaded($event)" @error="onFrameError()" @dragstart.prevent
              x-ref="frameImg" x-show="frameSrc" alt="frame"
              :style="`width:${imgSize.w}px;height:${imgSize.h}px`" />
         <!-- overlay injected as an SVG string via x-html: setting innerHTML on
@@ -503,7 +517,35 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-10 · root override (orient/move output edits)";
+const BUILD_ID = "2026-07-31 · pitch layout drag + session-expiry guard";
+
+// Every API call below ends `if (!r.ok) { ...clear the layer...; return; }`. That is the right
+// shape for "no data on this frame" and exactly the wrong one for "your session died": the overlay
+// quietly empties and nothing says why. A 24 h cookie makes that a certainty rather than an edge
+// case — one live session sat behind an expired token re-requesting `/api/frame/1/ground` at
+// ~0.8 req/s for hours (56 000+ 401s and still climbing when this was written) while the cached
+// frame kept rendering, so the operator was judging alignment against a picture the server had
+// stopped confirming (#122).
+//
+// Deliberately driver-agnostic: no timer, retry, recursion or observer in this file can re-issue
+// that call, and the storming tab ran a build we can no longer read, so the repeat was never
+// pinned to a line. Intercepting at the one boundary every caller shares stops it whatever the
+// cause, and short-circuiting once dead is what keeps it stopped. Callers still receive a 401
+// Response and take their existing branch, but nothing more reaches the network.
+let sessionDead = false;
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  if (sessionDead) {
+    return new Response('{"detail":"session expired"}',
+                        { status: 401, headers: { "Content-Type": "application/json" } });
+  }
+  const r = await nativeFetch(input, init);
+  if (r.status === 401) {
+    sessionDead = true;
+    window.dispatchEvent(new CustomEvent("poseannot:session-expired"));
+  }
+  return r;
+};
 
 // bone connectivity — SMPL-X body (pelvis + 21 joints)
 const BONES = [
@@ -781,6 +823,7 @@ Alpine.data("poseAnnot", () => ({
     user: "user",
     busy: false,              // global busy overlay: any long op in flight
     busyMsg: "",              // human-readable label for the current long op
+    sessionExpired: false,    // token died mid-session — every layer below is now stale (#122)
     clipLabel: "loading…",
     clipList: [],
     activeClipId: "default",
@@ -947,6 +990,12 @@ Alpine.data("poseAnnot", () => ({
       this.beginBusy("loading clip — building poses…");
       initThree(this);
       this.diag.three = threeState ? "inited" : "FAILED";
+      // Clear `busy` too: a long op that died on a 401 would otherwise leave its spinner up
+      // forever, hiding the one message that explains what happened.
+      window.addEventListener("poseannot:session-expired", () => {
+        this.sessionExpired = true;
+        this.endBusy();
+      });
       window.addEventListener("resize", () => { this.fitLayer(); this.resetView(); });
       // Re-fit the frame whenever the center panel gets/changes real size.
       // On first paint the grid area can measure 0×0 (frame rendered tiny in a
@@ -1070,6 +1119,15 @@ Alpine.data("poseAnnot", () => ({
       await this.refreshThree();       // active subj 3D joints+mesh (also feeds mesh overlay)
       await this.refreshOverlay3d();   // fetch pitch + all skeletons 3D once → project in JS
       if (this.activeStageLayer() === "ball") await this.refreshStageBall();  // ball marker follows the frame
+    },
+
+    // An <img> reports only "it failed", never the status, so re-request the same URL through the
+    // wrapped fetch — a 401 raises the expiry card, anything else is a genuine decode failure and
+    // is left alone. GET, not HEAD: FastAPI's APIRoute does not answer HEAD on a @app.get route,
+    // so a HEAD probe reads 405 and misses the very thing it is looking for.
+    async onFrameError() {
+      if (this.sessionExpired || !this.frameSrc) return;
+      await fetch(this.frameSrc);
     },
 
     onFrameLoaded(e) {
