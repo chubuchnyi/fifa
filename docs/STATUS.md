@@ -11,13 +11,14 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-10 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-07-31 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
 ## 0. TL;DR for a cold-start LLM
 
 - **Goal:** from ONE broadcast clip → a realistic novel-view video of the *same* episode (different camera angle). Players look like originals (kit + shirt numbers), same realistic stadium. **Judged by eye.**
+- **What is still open → [§3.1](#31-open-items-1xx--poseannot-ui-calibration-pipeline).** That table is the only durable open-item list; the CC task list dies with the session.
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
 - **NEXT ACTION:** **CROWD STRUCTURE LANDED 2026-07-04 (§6): tier walkway/railing/offset
@@ -237,7 +238,30 @@ the stadium is realistic and the same as the source. **Judged by eye.**
 
 ---
 
-## 3. v0 punch-list — the work right now
+## 3. Open board — the work right now
+
+### 3.1 Open items (#1xx — poseannot UI, calibration, pipeline)
+
+The CC task list does not survive a session, so this table is the **only** durable list of what is
+still open. Add a row when you open an item, move it to §6 with the evidence when you close it.
+
+| ID | Open item | Status | Why it is open |
+|----|-----------|--------|----------------|
+| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | pending, **user-requested** | The user's own ask alongside #116. The #114 ridge detector is already a working paint extractor; mowing stripes are a *second, independent* family of parallel world lines, so they constrain the vanishing point without touching the painted markings. Nothing built yet. |
+| #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
+| #61 | Camera-calibration accuracy (offset + ~3× scale) | in_progress, **premise largely disproved** | Was "the project's dominant error source (~55%)". #110/#113/#114 measured the overlay at **1.4 px** against real paint, so the 3× scale claim does not survive; what is left is a uniform ~1–1.5 px bias. Do not re-open as written — re-scope it against the numbers in §6. |
+| #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
+| #107 | Decide: render the **measured** camera or keep the synthetic one | pending, **a decision, not code** | `AppController` unconditionally replaces the solved per-frame `CameraTrack` with a synthetic tiled BROADCAST pose (translation spread over 60 frames is exactly `[0,0,0]` m). So our "broadcast" render cannot be compared pixel-to-pixel with the source — which is what #60 wants. Blocks #109's cleanest fix. |
+| #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending | 0/23 usable crops: it projects through `scene.camera`, which #107 makes synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. Fix = crop via `field.calibration.homographies` at native res. Ships independently of #107. |
+| #60 | Re-run overlays + verify acceptable alignment | pending | The eye-check that closes the calibration thread. Largely overtaken by the poseannot overlay work (#110–#116), which measures alignment against real paint per frame; keep open until a full A/B re-render is judged. |
+| #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** | This is the whole GPU pipeline (rfdetr+bytetrack+gvhmr+keypoints+physics+export) as a minutes-long async job — only runnable on the pod, not this CPU box. Needs a green light on *where it runs* before anything is built. **Do NOT stub a fake generate button.** |
+
+Recently closed (evidence in §6): **#116** goal frames + corner flags overlaid, focal as a hand
+control · **#115** the "D" was a 14 m phantom chord · **#114** the far field was never 37 px out ·
+**#113** honest extrapolation marking · **#111** drag players onto their real feet · **#110** draw
+the overlay through the solved calibration.
+
+### 3.2 v0 punch-list (#2xx — all CLOSED, kept for the root causes)
 
 Detail + exact code root-causes: [`v0-geometry-defects.md`](v0-geometry-defects.md).
 Found by eye in the 300-frame render of the real clip (`out/anim/video/*`, real CUDA models, 4 virtual
