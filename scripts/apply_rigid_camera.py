@@ -18,13 +18,13 @@ two things #118 and #119 measured instead of assuming:
 **The frame flip.** The fit works in the honest right-handed Z-up world; the stored scene is in
 PnLCalib's mirrored top-down template (#118, #120). A camera cannot be written in a mirrored
 world at all — ``M·R`` with ``M = diag(1, −1, 1)`` has determinant −1 and is not a rotation — so
-writing an honest camera *forces* the scene right-handed, and the subjects have to come along:
-``transl → M·t`` and ``global_orient → M·R·M`` (a conjugation, and therefore a real rotation).
+writing an honest camera *forces* the scene right-handed, and the subjects have to come along.
 
-What that does NOT do is mirror each body's own left/right, which needs the SMPL-X joint
-permutation and is #120's remaining half. Every body is placed and facing correctly and is its
-own mirror image internally — at 40-70 m that is a limb-swap, not a pose error, but it is
-unfixed and this script says so rather than pretending the flip was complete.
+Mirroring a *human* is the awkward part: ``M·(FK output)`` is not a pose SMPL-X can represent,
+because no setting of the parameters produces a left-handed body. The way through is to mirror
+the body about its own sagittal plane as well, which SMPL-X *can* represent, and let the two
+improper maps cancel. See :func:`mirror_subjects` for the three parameters that changes and the
+measurement that pins each one.
 
 Writes to a NEW scene by default: the user judges the camera by eye against the old one
 (memory: the user is ground truth on pixel alignment), so both have to exist at once.
@@ -47,12 +47,47 @@ sys.path.insert(0, str(ROOT / "src"))
 
 #: World-Y mirror. Its own inverse, and improper — which is the whole difficulty above.
 M = np.diag([1.0, -1.0, 1.0])
+#: SMPL-X's own sagittal (left↔right) mirror. Measured, not assumed: in the rest pose
+#: ``left_hip − right_hip`` is ``(0.122, 0.011, −0.005)``, so ``x`` is the left-right axis.
+S = np.diag([-1.0, 1.0, 1.0])
+
+#: ``body_pose`` rows (SMPL-X joints 1-21) under the left↔right swap. Rows absent from a pair
+#: (spines, neck, head) are on the midline and map to themselves.
+_LR_PAIRS = ((0, 1), (3, 4), (6, 7), (9, 10), (12, 13), (15, 16), (17, 18), (19, 20))
+_BP_SWAP = np.arange(21)
+for _a, _b in _LR_PAIRS:
+    _BP_SWAP[_a], _BP_SWAP[_b] = _b, _a
 
 
 def rot_from_rvec(rvec: np.ndarray) -> np.ndarray:
     from scipy.spatial.transform import Rotation
 
     return Rotation.from_rotvec(np.asarray(rvec, dtype=float)).as_matrix()
+
+
+def flip_body_pose(body_pose: np.ndarray) -> np.ndarray:
+    """Mirror ``(T, 21, 3)`` axis-angle body pose about the body's sagittal plane.
+
+    Swap the left/right joints, then negate each rotation's ``y`` and ``z``. The negation looks
+    arbitrary and is not: axis-angle is a *pseudo*vector, so under an improper map ``A`` it
+    transforms as ``ω → det(A)·A·ω``, and for ``A = S`` that is ``(ωx, −ωy, −ωz)``.
+    """
+    out = np.asarray(body_pose, dtype=float)[:, _BP_SWAP, :].copy()
+    out[..., 1:] *= -1
+    return out
+
+
+def local_mirror() -> np.ndarray:
+    """The world-Y mirror written in the frame ``global_orient`` is actually expressed in.
+
+    ``global_orient`` is a **camera-frame** rotation (``core.scene.frames``): world vertices are
+    ``R_cam→world · R · (body − pelvis) + transl``. So mirroring the *world* means conjugating
+    ``M`` into that frame — it comes out ``diag(1, 1, −1)``, because world Y is SMPL-X's Z.
+    Derived from the shared constant rather than hard-coded, so the two cannot drift apart.
+    """
+    from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD as r_c2w
+
+    return r_c2w.T @ M @ r_c2w
 
 
 def camera_track(blob, width: int, height: int):
@@ -78,14 +113,36 @@ def camera_track(blob, width: int, height: int):
 
 
 def mirror_subjects(scene) -> int:
-    """Carry the subjects from the mirrored template world into the right-handed one."""
+    """Carry the subjects from the mirrored template world into the right-handed one.
+
+    The requirement is exactly ``world(mirrored params) == M · world(stored params)``, and it
+    takes two body parameters, not one — the old code changed only ``global_orient`` and left
+    every body 1.01 m out and its own mirror image internally:
+
+    * ``body_pose`` is mirrored about the sagittal plane (:func:`flip_body_pose`). A mirrored
+      human is not a pose SMPL-X can represent, so the only way through is to flip the body too
+      and let the two improper maps cancel.
+    * ``global_orient → Mˡ·R·S`` with ``Mˡ`` from :func:`local_mirror`. Both factors are improper,
+      so ``det(Mˡ·R·S) = +1`` and it is a real rotation; ``S`` cancels the sagittal flip above,
+      leaving the world mirror. The old ``M·R·M`` was wrong twice over — a conjugation leaves a
+      body-local 180° yaw, and it used the *world* ``M`` on a *camera-frame* rotation.
+
+    ``transl`` needs only ``M·t``: it is the world pelvis, and SMPL-X's root turns about the
+    pelvis, so no rest-pose offset rides along.
+
+    Verified against real SMPL-X FK over all 23 subjects × 4 frames of the target clip: worst
+    world-joint error 0.041 m, against 1.01 m for the old code. That floor is the neutral
+    template's own left/right asymmetry (its rest hips differ by 0.011 m off-axis), not a bug.
+    """
     from scipy.spatial.transform import Rotation
 
+    m_local = local_mirror()
     for subject in scene.subjects:
         pose = subject.proposal.pose
+        rot = rot_from_rvec(pose.global_orient)  # (T, 3, 3)
         pose.transl = pose.transl @ M  # M is diagonal, so this is M·t per row
-        rot = rot_from_rvec(pose.global_orient)
-        pose.global_orient = Rotation.from_matrix(M @ rot @ M).as_rotvec()
+        pose.global_orient = Rotation.from_matrix(m_local @ rot @ S).as_rotvec()
+        pose.body_pose = flip_body_pose(pose.body_pose)
     return len(scene.subjects)
 
 

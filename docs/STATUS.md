@@ -247,7 +247,7 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 
 | ID | Open item | Status | Why it is open |
 |----|-----------|--------|----------------|
-| #120 | **Stored scenes declare a frame they are not in** | open, **inherited from #118** | Fixed the producer, not the artifacts. `out/*/export/scene.json` declares `world_frame: {up_axis: Z, handedness: right}` while its subject `transl`, ball `positions_3d` and homographies are still in the mirrored template frame — measured: 22/23 SMPL-X roots project in-shot as stored vs 17 Y-mirrored. Nothing looks wrong today (`plane_orientation` reads them correctly and the poseannot diag now shows `mirrored world`), but the label will mirror the first renderer that trusts it. Not flipped blind: 60 frames of user-validated poses. **#119 did most of it**: `scene_rigid.json` is right-handed throughout, with `transl → M·t` and `global_orient → M·R·M`. What is left is narrow and named — each body's own **left/right** mirror (the SMPL-X joint permutation), so bodies there are placed and facing correctly while being internally their own mirror image. The old scene is untouched and still mislabelled. |
+| #120 | **Stored scenes declare a frame they are not in** | **body mirror done 2026-07-31**; the stale *labels* remain | Two halves. **(a) The body mirror is fixed and pinned** (§6): `mirror_subjects` changed one parameter where it needed two, and used the *world* mirror on a **camera-frame** rotation. Correct is `global_orient → Mˡ·R·S` with `Mˡ = R_cam→worldᵀ·M·R_cam→world = diag(1,1,−1)`, `S = diag(−1,1,1)`, **plus** the SMPL-X left↔right `body_pose` flip; `transl → M·t` was always right. Measured against the real SMPL-X forward pass over 23 subjects × 4 frames: **1.01 m → 0.041 m**, and 0.041 m is the neutral template's own asymmetry (its rest hips differ by 0.011 m off-axis), i.e. the floor. `scene_rigid.json` regenerated: 100 % upright, feet at z = **+0.001 m**. `tests/unit/test_subject_mirror.py` pins it *and* pins the old transform as wrong. **(b) Still open:** `out/anim_full_realism/scene.json` and other pre-#118 artifacts declare `world_frame: {handedness: right}` while their contents are left-handed (measured: `plane_orientation` 0/60 right-handed). Nothing reads the label today, but it will mirror the first renderer that trusts it. Not flipped blind — 60 frames of user-validated poses. |
 | #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): 184 parameters beat 480 on paint (1.28 vs 1.62 px) and on pixel motion (1.44 vs 7.18) *simultaneously*; steadiness is **0.55 vs 4.08 px** of gap-1 residual against 8.55 px of real camera motion (the `jitter` column, 5.11 vs 5.31, is too flat to discriminate and is a guard, not evidence). f = 4169 px @1920×1080 from four seeds spanning 2700–5200, centre (−2.3, −70.1, 17.2) m — a focal sweep brackets the paint minimum on both sides, so **±10 %**, and since `f/dist` is fixed at ≈57 the distance carries the same ±10 %. Written to `scene_rigid.json` and registered in the clip switcher **beside** the old scene — the alignment verdict is the user's, per the ground-truth rule. |
 | #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 ±10 % at 1.44 px. The spread was the functionals disagreeing, not the data — and the #119 sweep says which functional was wrong: the pixel-motion residual is **monotone** in the focal (0.85 px at f=2700 rising to 1.64 at 5200, no interior minimum anywhere), so it can never name a focal on its own, while the paint's minimum is bracketed on both sides. #117 read the flat instrument. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): the manual-override half of the standing request, alongside #111's per-player drags. The gesture must exist because **no residual we compute can see this error** — every one is scored against the same lines that placed the model, so the operator's eye is the only instrument. The design choice that makes it safe is composing the edit on the **world plane** (`H @ B`, a 4-DOF similarity) rather than in image space (`A @ H`): `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']`, so the drag provably cannot turn a camera-realizable calibration unrealizable, and K is never touched so the focal is unchanged. Live drag: `fit_px` 1.0 → 19.38 with the camera badge held at `measured · 0.0 px · f 4169.3`; undo restores `edits.json` byte-identical. The `turn` handle is pinned by unit test and by curl but **not yet watched in a browser** (session died, #122). |
@@ -412,6 +412,43 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-31 (#120a — mirroring a human takes two parameters, not one; and the user's eye
+  independently caught #61 in the fresh run)** —
+  User: *"чини пока параллельно #120, я смотрю 119, 112, 111"*, then, while it was in flight:
+  *"на uncorrected poses и fresh pod run лэйоут игроков некорректно ложится на игроков, в one
+  fitted camera более менее корректно. При этом метки контакта с землей корректны."*
+  - **The producer never needed the fix; only `apply_rigid_camera.py` did.** Measured before
+    touching anything: `carry_off/scene.json` is left-handed 60/60, `fresh60` right-handed 60/60
+    with subject Y extents *identical* to the mirrored output (min −11.1, max +29.3). `#118` fixed
+    it at source — `TEMPLATE_TO_WORLD` is applied to the calibration homography — and both
+    SMPL-X→world constants are proper rotations, so no body is ever mirrored downstream.
+  - **The old transform was wrong in two independent ways.** `global_orient → M·R·M` (a) conjugates,
+    which leaves a body-local 180° yaw, and (b) applies the **world** mirror to a rotation stored
+    in the SMPL-X **camera** frame. And `body_pose` was never touched at all, so each body stayed
+    its own mirror image internally. Correct: `global_orient → Mˡ·R·S`, `Mˡ = R_cam→worldᵀ·M·
+    R_cam→world = diag(1,1,−1)`, `S = diag(−1,1,1)`, plus the left↔right `body_pose` flip.
+    `transl → M·t` was right all along.
+  - **Every step is measured, and one plausible answer was measured and thrown away.** The first
+    attempt (`M·R·S` + flip, world mirror) *looked* right and scored 1.89 m — **worse** than the
+    1.01 m it replaced — because it assumed FK output was already world. The thing that caught it
+    was checking whether the bodies stand up: as-stored, `head − foot` in world Z is −0.01 m and
+    0 % are upright; through `R_SMPLX_CAMERA_TO_WORLD` it is **+1.48 m, 100 % upright, feet at
+    z = +0.005 m**. That is what names the frame. Final: **1.01 m → 0.041 m** over 23 subjects ×
+    4 frames, against a 0.041 m floor set by the neutral template's own asymmetry.
+  - **The flip convention is brute-forced, not quoted.** All 3 mirror axes × 7 negation subsets:
+    mirror x + negate (y, z) wins at 0.032 m, next best 0.298 m. Consistent with axis-angle being
+    a pseudovector (`ω → det(A)·A·ω`), but the code rests on the measurement.
+  - **`tests/unit/test_subject_mirror.py`** pins the round-trip on 5 random poses *and* pins the
+    pre-#120 transform as wrong, so it cannot quietly return. Full unit suite green.
+  - **The user's report is #61, and it reproduces numerically.** Camera-vs-homography disagreement
+    on pitch-plane landmarks: `rigid-camera` **0.0 px**, `raw-pose` **1853 px**, `fresh-60`
+    **1942 px**. The consequence is a scale error the eye reads instantly: 1.8 m of world height at
+    pitch centre is **109 px** through the #119 camera and **17–19 px** through the producer's —
+    a **6×** miss. The producer's camera is f = 772 px at (−34, −50, +35.7) m (a ~100° lens 36 m
+    up); #119's is f = 4169 px at (−2.3, −70.1, +17.2) m — a real broadcast gantry. Ground marks
+    stay correct in all three because they are drawn from the **homography**, which is a different
+    path from `scene.camera`. So: bodies wrong, marks right, exactly as reported.
 
 - **2026-07-31 (#122 + a fresh 60-frame pod run — an expired session no longer lies, and a
   mount-point symlink no longer kills the pipeline four stages in)** —
