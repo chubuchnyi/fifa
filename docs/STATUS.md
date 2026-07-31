@@ -251,15 +251,16 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): 184 parameters beat 480 on paint (1.28 vs 1.62 px) and on pixel motion (1.44 vs 7.18) *simultaneously*; steadiness is **0.55 vs 4.08 px** of gap-1 residual against 8.55 px of real camera motion (the `jitter` column, 5.11 vs 5.31, is too flat to discriminate and is a guard, not evidence). f = 4169 px @1920×1080 from four seeds spanning 2700–5200, centre (−2.3, −70.1, 17.2) m — a focal sweep brackets the paint minimum on both sides, so **±10 %**, and since `f/dist` is fixed at ≈57 the distance carries the same ±10 %. Written to `scene_rigid.json` and registered in the clip switcher **beside** the old scene — the alignment verdict is the user's, per the ground-truth rule. |
 | #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 ±10 % at 1.44 px. The spread was the functionals disagreeing, not the data — and the #119 sweep says which functional was wrong: the pixel-motion residual is **monotone** in the focal (0.85 px at f=2700 rising to 1.64 at 5200, no interior minimum anywhere), so it can never name a focal on its own, while the paint's minimum is bracketed on both sides. #117 read the flat instrument. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): the manual-override half of the standing request, alongside #111's per-player drags. The gesture must exist because **no residual we compute can see this error** — every one is scored against the same lines that placed the model, so the operator's eye is the only instrument. The design choice that makes it safe is composing the edit on the **world plane** (`H @ B`, a 4-DOF similarity) rather than in image space (`A @ H`): `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']`, so the drag provably cannot turn a camera-realizable calibration unrealizable, and K is never touched so the focal is unchanged. Live drag: `fit_px` 1.0 → 19.38 with the camera badge held at `measured · 0.0 px · f 4169.3`; undo restores `edits.json` byte-identical. The `turn` handle is pinned by unit test and by curl but **not yet watched in a browser** (session died, #122). |
-| #122 | **An expired session silently degrades the UI instead of asking for a re-login** | open, **found live during #112** | The `poseannot_token` cookie lasts `jwt_expire_hours: 24`; when it lapses mid-session the page keeps polling `/api/frame/{n}/ground` forever and just drops its ground handles. `/tmp/poseannot.log` had accumulated **48 821** `401 Unauthorized` on that one endpoint while the frame the user was looking at still rendered from cache — so the overlay quietly stops being live and nothing says so. Blocked the browser half of the #112 check. Fix is small (surface the 401 as a re-login prompt and stop the poll), but it is exactly the class of failure R-6 says to *mark, not hide*. |
+| #122 | **An expired session silently degrades the UI instead of asking for a re-login** | **done 2026-07-31** | The `poseannot_token` cookie lasts `jwt_expire_hours: 24`; when it lapses mid-session every layer just empties, because all ~50 call sites end `if (!r.ok) { clear the layer; return; }` — right for "no data on this frame", wrong for "your token died". The storm was live and measured: **~0.8 req/s of 401s on `/api/frame/1/ground` for hours**, 48 821 when first seen and 56 000+ still climbing a session later, while the frame the operator was judging alignment against kept rendering from cache. Fixed by wrapping `window.fetch` **once**: latch on the first 401, raise a blocking re-login card, short-circuit every later request. **Deliberately driver-agnostic** — no timer, retry, recursion or observer in `index.html` (nor anywhere in its git history) can re-issue that call, and the storming tab ran a build we can no longer read, so the repeat was never pinned to a line; interception at the one boundary every caller shares stops it regardless. The frame `<img>` bypasses `fetch`, so its `@error` re-requests through the wrapper — as a **GET**, since FastAPI's `APIRoute` answers HEAD with 405 and a HEAD probe would miss the very 401 it hunts. Mechanism verified in a real page: 502 calls → **1** network call, event latched once, callers still get a readable 401 `Response`. |
 | #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. **#107 added the check that was missing** — the pipeline now recovers `scene.camera` *from* the calibration and the UI shows the two-camera distance in the header, so this defect can no longer ship silently a second time. Close once the user has looked. |
-| #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
+| #108 | R3's line-constraint path is a **no-op** on the target clip | pending, **needs instrumentation, not the pod** | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). The plan was to read which branch trips out of `carry_ab_full.log`; checked on the live pod 2026-07-31 and **the log cannot answer it** — 1.4 MB with *zero* mentions of the agreement test, because the branch emits nothing. So this was never blocked on pod access: it needs a log line at the decision first, and only then a run. |
 | #107 | Render the **measured** camera, not the synthetic one | **done 2026-07-31** | Was framed as a decision; it was a measurement, and it came out **neither** for the old scene (§6). `core/scene/plane_camera.py` decomposes the calibration into a real `CameraTrack` (focal from Zhang's constraint, no extra input) and **refuses** — `camera is None` — when no camera explains the homographies. Control: `scene_rigid.json` → focal 4169, reprojection **0.0003 px**; `scene.json`'s 480 free params → **5048 px**, so #107 was never an oversight, there was nothing to render. `AppController` now keeps the solved camera and falls back only when the refusal fires; the header badge names which you are looking at (`one camera · 0 px` vs amber `two cameras · 6220.64 px apart`). Unblocks #109. |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, **unblocked by #107** | 0/23 usable crops: it projects through `scene.camera`, which used to be synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. #107 fixes the *identity* of the camera but not the resolution — on `rigid-camera` the recovered camera is native 1920×1080, on the old scene it is still the synthetic fallback. Fix = crop via `field.calibration.homographies` at native res, which works either way. |
 | #60 | Re-run overlays + verify acceptable alignment | pending | The eye-check that closes the calibration thread. Largely overtaken by the poseannot overlay work (#110–#116), which measures alignment against real paint per frame; keep open until a full A/B re-render is judged. |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** | This is the whole GPU pipeline (rfdetr+bytetrack+gvhmr+keypoints+physics+export) as a minutes-long async job — only runnable on the pod, not this CPU box. Needs a green light on *where it runs* before anything is built. **Do NOT stub a fake generate button.** |
 
-Recently closed (evidence in §6): **#112** the pitch layout is draggable and the drag provably keeps
+Recently closed (evidence in §6): **#122** an expired session now says so instead of quietly emptying
+every overlay · **#112** the pitch layout is draggable and the drag provably keeps
 the one camera · **#119** the clip is ONE camera, and it beats 480 free parameters
 on every metric at once · **#118** the world frame is measured, not assumed · **#116** goal frames +
 corner flags overlaid, focal as a hand
@@ -411,6 +412,50 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-31 (#122 + a fresh 60-frame pod run — an expired session no longer lies, and a
+  mount-point symlink no longer kills the pipeline four stages in)** —
+  User: *"чисть все устаревшие артефакты и давай прогоним пайплайн на поде"*, then *"займись #122"*.
+  - **#122 — the 401 storm was real, live, and hours old.** Not a hypothetical: `/tmp/poseannot.log`
+    was still growing at **~0.8 req/s** of `401 Unauthorized` on `/api/frame/1/ground`, 48 821 when
+    first seen and **56 000+** a session later, from a tab whose operator had long since walked away.
+    Meanwhile the frame kept rendering from cache, so the alignment being judged was a picture the
+    server had stopped confirming. Every call site in `index.html` ends `if (!r.ok) { clear the
+    layer; return; }` — correct for "no data on this frame", exactly wrong for "your token died".
+  - **The fix is deliberately driver-agnostic, and that is the honest part.** The loop was **never
+    pinned to a line**: `index.html` has no `setInterval`, no retry, no recursion, and no observer
+    path that can re-issue that call — checked in the current file *and* across its git history —
+    and the storming tab ran a build we can no longer read. So rather than guess, the interception
+    sits at the one boundary all ~50 callers share: wrap `window.fetch` once, latch `sessionDead` on
+    the first 401, raise a blocking re-login card, and return a synthetic 401 `Response` thereafter
+    so callers keep taking their existing branch while nothing more reaches the network. Verified in
+    a real page: **502 calls → 1 network call**, event fired exactly once, body still readable.
+  - **One trap worth recording:** the frame is an `<img>`, which never passes through `fetch`, so it
+    needs its own `@error` re-request. That probe must be a **GET** — FastAPI's `APIRoute` (unlike
+    Starlette's plain `Route`) does not answer HEAD on a `@app.get` route, so `HEAD /api/frame/1`
+    returns **405** and a HEAD probe would miss the very 401 it exists to catch.
+  - **The pod run died on a symlink, and the failure was quiet in a nasty way.** `FileNotFoundError`
+    naming `pretrained_models/smplest_x_h/config_base.py` — a path `ls` had *just printed*. The two
+    SMPLest-X weight entries were **absolute** symlinks into `/workspace/weights/smplest-x/`, staged
+    on a pod that mounted the network volume at `/workspace`; this pod mounts the **same volume** at
+    `/runpod`, so both dangled. `stat` still reported 43 bytes / mode 777 (the link itself) and only
+    the actual open failed. Same root cause as the driver fix earlier that day: **the mount point is
+    a per-pod setting**. Repaired as *relative* links and captured in
+    `scripts/stage_smplestx_weights.sh` (idempotent — re-running it *is* the repair on a new mount).
+  - **Fresh artifact.** 60 frames, every real backend (RF-DETR → ByteTrack → PnLCalib → SMPLest-X →
+    WASB), `STITCH=1 COHERENCE=1 PHYSICS=1 DEMO_EDITS=0`, **144 s**, 23 subjects →
+    `out/fresh60/export/scene.json`, registered in `poseannot/clips.py` as
+    **"Colombia · fresh pod run (2026-07-31)"**. Pod stopped afterwards ($0.012/hr idle).
+  - **What it does and does not say about #120.** `plane_orientation` reads **right-handed on 60/60
+    frames**, so the amber `mirrored world` badge stays clear — but the old `anim_full_realism` scene
+    reads 60/60 too, so this run is *not* evidence that #120 moved. The in-shot mirror test quoted in
+    the #120 row does not discriminate on this camera either (roots land in frame **23/23 as-stored
+    vs 23/23 mirrored** for the old scene, 23 vs 22 for the fresh one — the view is wide enough to
+    contain both). #120's named remaining half, each body's own left/right SMPL-X joint permutation,
+    is untouched by re-running: the producer was never changed for it.
+  - **#108 was mis-blamed on pod access.** The plan was to read the `_lines_agree` branch out of
+    `carry_ab_full.log`; checked on the live pod and that 1.4 MB log mentions the agreement test
+    **zero times**, because the branch emits nothing. It needs instrumentation first, then a run.
 
 - **2026-07-31 (#112 — the pitch layout is draggable, and the drag provably cannot cost us the
   camera)** —

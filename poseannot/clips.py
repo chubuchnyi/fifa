@@ -94,6 +94,12 @@ _CURATED: list[tuple[str, str, str]] = [
     # replacing it: which one aligns better is the user's call to make, by eye.
     ("rigid-camera", "Colombia · one fitted camera (#119)",
      "out/carry_off/export/scene_rigid.json"),
+    # The same 60 frames through today's producer (pod, 2026-07-31, every real backend:
+    # RF-DETR → ByteTrack → PnLCalib → SMPLest-X → WASB). The two scenes above were written
+    # by older code and carry its fixed-in-tree defects; this one is the honest baseline to
+    # judge current output against, and the only one whose provenance matches the source.
+    ("fresh-60", "Colombia · fresh pod run (2026-07-31)",
+     "out/fresh60/export/scene.json"),
 ]
 
 
