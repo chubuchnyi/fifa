@@ -247,18 +247,20 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 
 | ID | Open item | Status | Why it is open |
 |----|-----------|--------|----------------|
-| #120 | **Stored scenes declare a frame they are not in** | open, **inherited from #118** | Fixed the producer, not the artifacts. `out/*/export/scene.json` declares `world_frame: {up_axis: Z, handedness: right}` while its subject `transl`, ball `positions_3d` and homographies are still in the mirrored template frame — measured: 22/23 SMPL-X roots project in-shot as stored vs 17 Y-mirrored. Nothing looks wrong today (`plane_orientation` reads them correctly and the poseannot diag now shows `mirrored world`), but the label will mirror the first renderer that trusts it. Not flipped blind: 60 frames of user-validated poses, and `global_orient` cannot be honestly transformed without settling the chirality question #58/#59 touch. **#119 subsumes it** — it produces a fresh, right-handed solve. |
-| #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | open, the #117 payoff | The clip's 60 homographies are 480 free parameters with nothing tying them together. Measured consequences: 5.3 px jitter (62% of the real frame-to-frame move), a camera centre that wanders 7–11 m for a bolted-down rig, and a focal that reads 2700 or 3903 or 4277 depending on which functional you use. The raw material exists: pixel-derived inter-frame homographies are 0.16–0.77 px accurate, 10–30× better than the solve's own relative motion. |
-| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**, build not started | Measured (§6): the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
+| #120 | **Stored scenes declare a frame they are not in** | open, **inherited from #118** | Fixed the producer, not the artifacts. `out/*/export/scene.json` declares `world_frame: {up_axis: Z, handedness: right}` while its subject `transl`, ball `positions_3d` and homographies are still in the mirrored template frame — measured: 22/23 SMPL-X roots project in-shot as stored vs 17 Y-mirrored. Nothing looks wrong today (`plane_orientation` reads them correctly and the poseannot diag now shows `mirrored world`), but the label will mirror the first renderer that trusts it. Not flipped blind: 60 frames of user-validated poses. **#119 did most of it**: `scene_rigid.json` is right-handed throughout, with `transl → M·t` and `global_orient → M·R·M`. What is left is narrow and named — each body's own **left/right** mirror (the SMPL-X joint permutation), so bodies there are placed and facing correctly while being internally their own mirror image. The old scene is untouched and still mislabelled. |
+| #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): 184 parameters beat 480 on paint (1.28 vs 1.62 px), pixel motion (1.44 vs 7.18) and jitter (5.11 vs 5.31) *simultaneously*; f = 4169 px @1920×1080 from four seeds spanning 2700–5200, centre (−2.3, −70.1, 17.2) m. Written to `scene_rigid.json` and registered in the clip switcher **beside** the old scene — the alignment verdict is the user's, per the ground-truth rule. |
+| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 at 1.44 px. The spread was the functionals disagreeing, not the data. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
-| #61 | Camera-calibration accuracy (offset + ~3× scale) | in_progress, **premise largely disproved** | Was "the project's dominant error source (~55%)". #110/#113/#114 measured the overlay at **1.4 px** against real paint, so the 3× scale claim does not survive; what is left is a uniform ~1–1.5 px bias. Do not re-open as written — re-scope it against the numbers in §6. |
+| #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. Close once the user has looked. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
 | #107 | Decide: render the **measured** camera or keep the synthetic one | pending, **a decision, not code** | `AppController` unconditionally replaces the solved per-frame `CameraTrack` with a synthetic tiled BROADCAST pose (translation spread over 60 frames is exactly `[0,0,0]` m). So our "broadcast" render cannot be compared pixel-to-pixel with the source — which is what #60 wants. Blocks #109's cleanest fix. |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending | 0/23 usable crops: it projects through `scene.camera`, which #107 makes synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. Fix = crop via `field.calibration.homographies` at native res. Ships independently of #107. |
 | #60 | Re-run overlays + verify acceptable alignment | pending | The eye-check that closes the calibration thread. Largely overtaken by the poseannot overlay work (#110–#116), which measures alignment against real paint per frame; keep open until a full A/B re-render is judged. |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** | This is the whole GPU pipeline (rfdetr+bytetrack+gvhmr+keypoints+physics+export) as a minutes-long async job — only runnable on the pod, not this CPU box. Needs a green light on *where it runs* before anything is built. **Do NOT stub a fake generate button.** |
 
-Recently closed (evidence in §6): **#116** goal frames + corner flags overlaid, focal as a hand
+Recently closed (evidence in §6): **#119** the clip is ONE camera, and it beats 480 free parameters
+on every metric at once · **#118** the world frame is measured, not assumed · **#116** goal frames +
+corner flags overlaid, focal as a hand
 control · **#115** the "D" was a 14 m phantom chord · **#114** the far field was never 37 px out ·
 **#113** honest extrapolation marking · **#111** drag players onto their real feet · **#110** draw
 the overlay through the solved calibration.
@@ -404,6 +406,76 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-31 (#119 — the clip is one camera, and that is measurably a better fit than 480 free
+  parameters; this also closes #61)** —
+  User asked for #118 then #119. A broadcast rig is bolted to a gantry: one focal, one centre, one
+  rotation per frame = **4 + 3F = 184** parameters for 60 frames, against **8F = 480** for free
+  per-frame homographies. Fitting the constrained model is not a regularisation trade — it wins on
+  every metric at once. `scripts/fit_rigid_camera.py`, `scripts/apply_rigid_camera.py`.
+  - **Two independent instruments, and the fit answers to both.** The *paint* (#114's detector:
+    `dist == 0` is the marking centreline, so `cKDTree` gives real correspondences with real
+    Jacobians) and the *pixel motion* (SIFT + MAGSAC image→image homographies — no pitch model, no
+    calibration, no focal anywhere in their derivation). A camera rotating about a fixed centre
+    satisfies `H(i→j) = K Rⱼ Rᵢᵀ K⁻¹` **for any scene**, so the second instrument measures the
+    frame-to-frame motion *and* the focal, from pixels the first one never looks at.
+
+    | model | params | paint px (p90) | pan px | jitter px |
+    |---|---|---|---|---|
+    | free homographies (the shipped solve) | 480 | 1.62 (4.52) | 7.18 | 5.31 |
+    | rigid, paint only | 184 | 1.42 (4.53) | 3.81 | 6.42 |
+    | **rigid, paint + pan** | **184** | **1.28 (4.01)** | **1.44** | **5.11** |
+
+    (n = 19012 paint samples, 140 pan pairs, real inter-frame motion 8.55 px.) Note the middle row:
+    paint alone *improves the paint and costs jitter* — the pan is what makes the fit honest, and
+    the two-instrument row beats the 480-parameter baseline on all three.
+  - **The 480-parameter solve gets nearly half the camera motion wrong.** Its pixel-motion error by
+    gap: 1→4.08 px, 10→8.60, 30→16.23, 59→13.31. At gap 1 that is 4.08 px of every 8.55 px the
+    camera actually moves. The one camera: **1→0.55 px**, 10→2.09, 30→4.30, 59→6.98.
+  - **The fixed-centre assumption is not detectably violated.** The pan instrument disagrees with
+    *itself* by more than the model's residual at every long gap — chained gap-1 maps vs the direct
+    map give 10→2.37 px, 30→7.08, 59→13.22, all larger than the model's 2.09 / 4.30 / 6.98. A rig
+    drifting off its pivot would show as a residual climbing *faster* than the instrument's own
+    noise; it does not. (The chained-vs-direct ratios 1 : 2.99 : 5.57 track **linear** growth, not
+    √n — a systematic ~0.24 px per-hop bias, which is what sets the ~1–2 px floor on `pan`.)
+  - **The focal is single-valued and seed-independent: f ≈ 4169 px @1920×1080.** Four seeds spanning
+    2700–5200 converge to 4169.5 / 4171.2 / 4157.8 / 4169.3, camera centre (−2.3, −70.1, 17.2) m —
+    a gantry 70 m back and 17 m up, which is what a broadcast rig is.
+  - **#117's "focal = 2700" was not noise — the two instruments really do disagree, and the paint
+    wins.** Holding the focal and refitting everything else (`--sweep`, 183 free parameters) at
+    f = 2700 gives **pan 0.85 px** — *better* than the joint fit's 1.44 — while the paint collapses
+    to **5.22 px (p90 27.50)** against 1.28 (4.01). So the pixel motion genuinely does lean short;
+    it is just nearly flat in f, exactly the `K R Rᵀ K⁻¹` degeneracy #117 identified, and with 180
+    free rotation parameters a short focal buys the pan a little slack. The paint is the sharp
+    instrument here and it rejects 2700 outright. Note what this overturns: *"a single plane cannot
+    determine the focal"* (`recalibrate_camera.py`) is true of a **single homography** and false of a
+    rigid multi-frame fit, where one plane seen from 60 rotations at a shared centre does pin it.
+    The joint fit spends 0.6 px of pan to save 4 px of paint. Full curve: `/tmp/pan_sweep.log`,
+    reproducible with `fit_rigid_camera.py --pan --sweep`.
+  - **#61 is diagnosed and fixed, and it was never "~3× scale".** In `out/carry_off/export/scene.json`
+    the `CameraTrack` and the `FieldCalibration` **are not the same camera** — projecting six pitch
+    landmarks through each disagrees by **12686 px**. The stored intrinsics are fx = 772 @1280×720 =
+    1158 px in 1920-space against a measured 4169, i.e. 3.6× too short, which is exactly the recorded
+    "players ~3× too small" symptom. In the rebuilt scene the two agree to **0.00 px** by
+    construction. Verified end-to-end *through the written scene files*, not the fit's internals:
+    paint **1.25 px (p90 3.69)** rigid vs **1.58 (3.99)** for the shipped solve, on more matched
+    samples (18605 vs 18499).
+  - **Writing a camera forces the world right-handed, so the subjects had to come along.**
+    `M = diag(1, −1, 1)` is improper, so `M·R` has det −1 and *no valid camera exists* in the
+    mirrored template frame — #118's flip and #119's camera are the same fact seen twice. The
+    applier carries subjects over with `transl → M·t` and `global_orient → M·R·M` (a conjugation,
+    hence a real rotation). **Not done: each body's own left/right mirror**, which needs the SMPL-X
+    joint permutation — every body is placed and facing correctly and is internally its own mirror
+    image. That is #120's remaining half and is stated, not papered over.
+  - **Shipped beside the original, not over it.** `out/carry_off/export/scene_rigid.json`, registered
+    in `poseannot/clips.py` as **"Colombia · one fitted camera (#119)"** so it can be A/B'd against
+    the current scene in the existing clip switcher. Which one aligns better is the user's call.
+    Manual override kept per the project rule: `fit_rigid_camera.py --out camera.npz` →
+    `apply_rigid_camera.py camera.npz --focal OVERRIDE`.
+  - **Supersedes `scripts/recalibrate_camera.py`**, whose two recorded failures were exactly these
+    two facts: "camera lands BELOW the pitch at every focal" was the mirrored frame (#118), and "a
+    single plane cannot determine the focal" is true — which is why the focal here comes from
+    image→image motion over gaps up to 59 frames, where `K R Rᵀ K⁻¹` is no longer degenerate in f.
 
 - **2026-07-31 (#118 — the world frame is now measured, not assumed; and the diagnosis in §3.1 was wrong)** —
   User asked for #118 then #119. Shipped, but the row above was wrong on both halves and the

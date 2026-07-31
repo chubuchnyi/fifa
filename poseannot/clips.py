@@ -88,6 +88,12 @@ def _discover() -> list[Clip]:
 _CURATED: list[tuple[str, str, str]] = [
     ("raw-pose", "Colombia · uncorrected pose (inverted bodies)",
      "out/anim_full_realism/scene.json"),
+    # The same 60 frames re-solved as ONE camera (#119): 4 + 3F parameters instead of 8F, so the
+    # pitch overlay and the players are at last drawn through the same camera (#61 — in the
+    # default scene those two disagree by 12686 px). Listed beside the original rather than
+    # replacing it: which one aligns better is the user's call to make, by eye.
+    ("rigid-camera", "Colombia · one fitted camera (#119)",
+     "out/carry_off/export/scene_rigid.json"),
 ]
 
 
