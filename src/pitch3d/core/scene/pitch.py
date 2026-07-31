@@ -161,11 +161,14 @@ def pitch_polylines(
         parts += _box_lines(goal_x, inward, GOAL_BOX_DEPTH, GOAL_BOX_HALF_WIDTH, spacing)
         spot_x = goal_x + inward * PENALTY_SPOT_DIST
         parts.append(np.array([[spot_x, 0.0]]))  # penalty spot
+        # The "D" is only the arc poking out past the box's inner line, so it must be sampled over
+        # that angular range. Filtering a full circle instead splits it into two blocks that array
+        # indexing then concatenates, and the seam is drawn as a 14 m chord straight across the
+        # penalty area, 0.37 m from — and parallel to — the box's front line.
         box_inner_x = goal_x + inward * PENALTY_BOX_DEPTH
-        circle = _arc((spot_x, 0.0), PENALTY_ARC_RADIUS, 0.0, 2.0 * np.pi, spacing)
-        # keep only the "D" — the arc portion poking out past the box's inner line toward centre
-        keep = circle[:, 0] <= box_inner_x if inward < 0 else circle[:, 0] >= box_inner_x
-        parts.append(circle[keep])
+        half = float(np.arccos(abs(box_inner_x - spot_x) / PENALTY_ARC_RADIUS))
+        base = 0.0 if inward > 0 else np.pi
+        parts.append(_arc((spot_x, 0.0), PENALTY_ARC_RADIUS, base - half, base + half, spacing))
     return parts
 
 

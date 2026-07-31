@@ -17,6 +17,7 @@ from pitch3d.core.scene.pitch import (
     GOAL_POST_THICK,
     goal_frame_geometry,
     pitch_line_ribbons,
+    pitch_polylines,
     pitch_line_world_points,
     pitch_line_xy,
 )
@@ -78,6 +79,21 @@ def test_penalty_arc_pokes_outside_its_box():
     # points on the right half near y≈0 that sit inside the box line are the arc's "D"
     near_axis = xy[(np.abs(xy[:, 1]) < 9.0) & (xy[:, 0] > 0)]
     assert (near_axis[:, 0] < box_inner_x).any()
+
+
+def test_consecutive_samples_never_jump_a_gap():
+    """Neighbours in a polyline are drawn joined, so a big step is a line that isn't painted.
+
+    Building the "D" by boolean-filtering a full circle put its two kept angular blocks side by
+    side in the array, and the seam drew as a 14 m chord across the penalty area — a phantom
+    marking 0.37 m from the box's front line, which is why the arc looked like it lagged the box.
+    """
+    for spacing in (0.5, 2.0):
+        for poly in pitch_polylines(spacing=spacing):
+            if len(poly) < 2:
+                continue
+            step = np.linalg.norm(np.diff(poly, axis=0), axis=1)
+            assert step.max() <= spacing + 1e-6
 
 
 # --- ribbon geometry: the measured markings given thickness for Cycles (M2-9) ---
