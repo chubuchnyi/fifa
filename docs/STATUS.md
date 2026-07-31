@@ -441,14 +441,22 @@ fabricate or silently hide.
     a pseudovector (`ω → det(A)·A·ω`), but the code rests on the measurement.
   - **`tests/unit/test_subject_mirror.py`** pins the round-trip on 5 random poses *and* pins the
     pre-#120 transform as wrong, so it cannot quietly return. Full unit suite green.
-  - **The user's report is #61, and it reproduces numerically.** Camera-vs-homography disagreement
-    on pitch-plane landmarks: `rigid-camera` **0.0 px**, `raw-pose` **1853 px**, `fresh-60`
-    **1942 px**. The consequence is a scale error the eye reads instantly: 1.8 m of world height at
-    pitch centre is **109 px** through the #119 camera and **17–19 px** through the producer's —
-    a **6×** miss. The producer's camera is f = 772 px at (−34, −50, +35.7) m (a ~100° lens 36 m
-    up); #119's is f = 4169 px at (−2.3, −70.1, +17.2) m — a real broadcast gantry. Ground marks
-    stay correct in all three because they are drawn from the **homography**, which is a different
-    path from `scene.camera`. So: bodies wrong, marks right, exactly as reported.
+  - **The user's report is #61, and it reproduces numerically.** All three cameras normalised to
+    1920-wide source pixels first — the producer stores its camera at the **1280×720 render** size
+    with `raw_frame_aligned: false`, and not rescaling it inflates the gap (a first pass quoted
+    "6×" off exactly that mistake; the real figure is below). Camera-vs-homography disagreement on
+    pitch-plane landmarks: `rigid-camera` **0.0 px**, `raw-pose` **1725 px**, `fresh-60`
+    **1852 px**. The consequence is the scale error the eye reads instantly: 1.8 m of world height
+    at pitch centre is **109 px** through the #119 camera and **28 px** through the producer's —
+    **3.9×** too small, which is the "~3× scale" of #61's title arriving at last as a number.
+    Producer camera: f = 1158 px @1920 at (−34.0, −50.0, +35.7) m — 36 m up and 60 m wide of the
+    halfway line. #119: f = 4169 px at (−2.3, −70.1, +17.2) m, a real broadcast gantry.
+  - **Why the ground marks stay right while the bodies do not** — they are two different paths, and
+    the code says so: `poseannot/app.py:_joints2d_for` projects joints through `scene.camera`,
+    while `api_frame_ground` and the pitch polygon go through `project_ground(..., w2i)`, i.e. the
+    calibration homography. The homography is measured against real paint (1.4 px, #110/#113/#114);
+    `scene.camera` is a separate, worse estimate. So: marks right, bodies wrong, exactly as
+    reported — and the fix is to stop having two cameras, which is what #119 already built.
 
 - **2026-07-31 (#122 + a fresh 60-frame pod run — an expired session no longer lies, and a
   mount-point symlink no longer kills the pipeline four stages in)** —
