@@ -525,8 +525,10 @@ def main() -> None:
 
     if args.out:
         h = np.stack([plane_h(p[0], p[4 + 3 * j : 7 + 3 * j], p[1:4]) for j in range(len(frames))])
+        # width/height travel with the fit: a focal is meaningless without the pixel space it was
+        # measured in, and the principal point the consumer rebuilds K from lives here too.
         np.savez(args.out, focal=p[0], centre=p[1:4], rvecs=p[4:].reshape(-1, 3),
-                 frames=np.array(frames), world_to_image=h)
+                 frames=np.array(frames), world_to_image=h, width=WIDTH, height=HEIGHT)
         print(f"\nwrote {args.out}")
 
 
