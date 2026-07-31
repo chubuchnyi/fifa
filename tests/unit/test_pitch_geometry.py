@@ -17,9 +17,9 @@ from pitch3d.core.scene.pitch import (
     GOAL_POST_THICK,
     goal_frame_geometry,
     pitch_line_ribbons,
-    pitch_polylines,
     pitch_line_world_points,
     pitch_line_xy,
+    pitch_polylines,
 )
 from pitch3d.core.scene.units import FieldDimensions
 

@@ -379,6 +379,54 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-31 (#116 — goal frames + corner flags overlaid in 3D; the focal is an eyeball control)** —
+  User asked for the goal mouths and corner flags drawn over the frame, to help both manual and
+  automatic camera tuning. Shipped, and the interesting part is *why* it helps.
+  - **They are the only thing in shot that can see the focal.** Every other overlay lies on `Z = 0`,
+    where the solved homography is an exact map of the lawn and the focal never enters the arithmetic
+    — which is exactly why #114's pixel metric could score the markings 1.4 px and still say nothing
+    about the camera. Two goal frames (base → crossbar → base) and four 1.5 m flagposts are the only
+    measured geometry that leaves the plane, so they are the only thing a wrong focal moves.
+  - **The focal is genuinely not observable from the lawn.** The two constraints one homography puts
+    on it (`r1 ⊥ r2`, `|r1| == |r2|`) disagree by **1.5–1.8×** on this clip, and sweeping the focal to
+    hold the recovered camera centre still across all 60 frames has a minimum so flat that 2500 and
+    3500 px score within 4%. So `focal_from_homography` is a least-squares compromise of the two, and
+    the shipped default is its **clip median (3903 px)** — per-frame it swings 28%, which would make
+    the goal breathe as you scrub. That focal puts the camera at **(−9, 73, 18) m**, which is where a
+    broadcast main camera actually stands; the toolbar shows it so a hand-set number can be sanity
+    checked before the overlay is even looked at.
+  - **The automated crossbar fit is a trap — recorded so it is not re-attempted.** Fitting the focal so
+    the drawn crossbar sits on the brightest pixels of the real one reads **4350–4585 px** over the 6
+    frames where the goal is unoccluded, ~15% high, and it is wrong: the Laws put 2.44 m at the
+    crossbar's **lower edge**, so the line belongs *under* the white band, not through it, and at this
+    distance the bar's own thickness is most of the disagreement. Rendered at 9× the clip-median focal
+    lands on the lower edge and the "measured" one rides the top. Hence the design: auto value +
+    a user-typed override, judged by eye (`feedback_auto_plus_manual`).
+  - **Two sign decisions, not one.** `lift_homography` splits `H` into a ground map and an image
+    direction for world +Z. Both need a sign, and each is pinned by something physical: the grass under
+    the image centre is *visible* so its depth is positive; the camera is *above* the pitch so lifting a
+    point moves it up the image. On a homography that really is `sK[r1 r2 t]` these always agree —
+    asserted against the synthetic GT camera. On this clip's solved homography they do **not**
+    (`|r1|/|r2| = 0.91`, `r1·r2 = −0.21`): it is a least-squares fit to keypoints, not a camera, and
+    deriving one sign from the other blanked every upright. An earlier attempt took the algebraic
+    branch and drew all four goalposts *buried*, with the camera at Z = −13…−19 m.
+  - Verified on the real clip in-browser (6 uprights drawn, fit 1.4 px, 333/333 `ok`) and by native-res
+    render: the corner flag base lands on the corner-arc apex on frames 0/30/59. New
+    `tests/unit/test_offplane_projection.py` (11) anchors focal, camera centre and off-plane projection
+    to `eval.synthetic`'s independently-built pinhole camera. Full unit suite green.
+- **2026-07-31 (#115 — the "D" was drawn with a 14 m phantom chord across the penalty box)** —
+  User reported the penalty arc still looked wrong after #114 called the overlay healthy ("D все
+  равно("). They were right and the metric was blind. `pitch_polylines` built each arc by
+  boolean-filtering a full 0..2π circle; for the **left** goal the kept range straddles angle 0, so the
+  two kept blocks sit at opposite ends of the array and indexing concatenates them — the seam drew as a
+  straight **14.04 m chord** from (−35.63, 7.02) to (−35.63, −7.02), i.e. **0.37 m from the penalty-box
+  front line and parallel to it**. The right arc's range is contiguous, so only the in-shot goal showed
+  it. **Why #114 scored it perfect:** the chord has no interior samples and both endpoints sit on real
+  paint, so every sample passed while the drawn line crossed bare grass — a per-sample pixel metric
+  cannot see what happens *between* samples. Fixed by sampling the arc over its actual angular range;
+  regression test asserts no polyline ever steps further than its own sampling spacing. Reach is wider
+  than the overlay: the same function feeds `pitch_line_ribbons` (Cycles render geometry) and
+  `pitch_line_xy` (the point set calibration fits to).
 - **2026-07-31 (#114 — the far field was never 37 px out; the line detector could not see it)** —
   #113 handed over "B: fix the solve so the far field stops being extrapolated". There is nothing
   to fix. The 37 px far-field error #113 reported was an artefact of its own line detector, and the

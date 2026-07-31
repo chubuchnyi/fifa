@@ -51,14 +51,21 @@ from . import studio as studio_mod
 from .auth import authenticate, current_user, issue_token
 from .camera import (
     CameraAdjust,
+    camera_centre,
+    focal_from_homography,
     frame_projector,
     image_to_ground,
     project_ground,
     project_points,
+    project_world,
     world_to_image,
 )
 from .config import load as load_config
-from pitch3d.core.scene.pitch import pitch_line_world_points, pitch_polylines
+from pitch3d.core.scene.pitch import (
+    pitch_line_world_points,
+    pitch_polylines,
+    pitch_upright_polylines,
+)
 from .pitch_evidence import DEFAULT_TOLERANCE_PX, classify
 from .scene_state import (
     BODY_JOINT_NAMES,
@@ -345,9 +352,23 @@ def api_pitch(
     return {"pts": pts, "frame_flipped": bool(proj.frame_flipped)}
 
 
+def _clip_focal(cal, width: int, height: int) -> float | None:
+    """One focal for the whole clip — the median of what each frame's homography implies.
+
+    Per-frame it swings 28% on the target clip, which would make the goal frame breathe as you
+    scrub. The camera's zoom barely moves here, so the median is both steadier and closer.
+    """
+    est = [focal_from_homography(world_to_image(cal, int(f)), width, height) for f in cal.frames]
+    good = [f for f in est if f is not None]
+    return float(np.median(good)) if good else None
+
+
 @app.get("/api/pitch/calibrated/{frame}")
 def api_pitch_calibrated(
-    frame: int, tolerance: float | None = None, user: str = Depends(current_user)
+    frame: int,
+    tolerance: float | None = None,
+    focal: float | None = None,
+    user: str = Depends(current_user),
 ) -> dict:
     """The pitch markings drawn through the SOLVED per-frame calibration.
 
@@ -417,10 +438,32 @@ def api_pitch_calibrated(
         counts[p["status"]] += sum(
             1 for u, v in p["pts"] if 0 <= u < vw and 0 <= v < vh
         )
+    # The goal frames and corner flags stand off the plane, so unlike everything above they are
+    # not measured — they are drawn through a focal the pitch itself cannot supply, and that is
+    # the point: a wrong focal is invisible on the lawn and obvious on a goalpost.
+    auto_focal = _clip_focal(cal, vw, vh)
+    used_focal = float(focal) if focal else auto_focal
+    uprights: list[dict] = []
+    cam = None
+    if used_focal and used_focal > 1.0:
+        for poly in pitch_upright_polylines(field.dimensions, plane_z=field.plane_z):
+            uv = project_world(poly, w2i, used_focal, vw, vh)
+            if not np.isfinite(uv).all() or (np.abs(uv) > 20000).any():
+                continue
+            uprights.append({"pts": [[float(u), float(v)] for u, v in uv]})
+        cam = [round(float(x), 1) for x in camera_centre(w2i, used_focal, vw, vh)]
+
     all_err = np.concatenate(errors) if errors else np.array([np.nan])
     fit = float(np.nanmedian(all_err)) if np.isfinite(all_err).any() else None
     return {
         "polylines": polylines,
+        "uprights": uprights,
+        "focal_px": used_focal,
+        "focal_auto_px": auto_focal,
+        # Where the chosen focal puts the camera, in metres. A broadcast rig is ~15-25 m up and
+        # tens of metres past the touchline, and it does not move — so this is the readout that
+        # says whether a hand-set focal is physical before the overlay is even looked at.
+        "camera_m": cam,
         "confidence": conf,
         # Measured against the painted pixels in THIS frame. Unlike ``confidence`` — which
         # #105/#106 showed is anti-predictive — this one is checkable by eye.

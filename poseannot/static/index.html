@@ -80,6 +80,30 @@
                 + ', which #106 showed is anti-predictive here — this readout replaces it.'"
           x-text="'fit ' + (pitchFit === null ? '—' : pitchFit.toFixed(1)) + ' px'
                 + (pitchCounts ? ' · ok ' + pitchCounts.ok + ' / off ' + pitchCounts.off : '')"></span>
+    <span x-show="showPitch && pitchSource === 'calib'" class="sep"
+          :title="'Focal length in pixels: it fixes how tall the goal frames and corner flags '
+                + '(cyan) are drawn, and NOTHING else — the markings are on the pitch plane, '
+                + 'where the homography is exact and the focal never enters. Which is why it '
+                + 'has to be set by eye here: the focal is not observable from the lawn at all '
+                + '(the two constraints one homography puts on it disagree by 1.5-1.8x), and '
+                + 'the only thing in shot that can measure it is the goal frame, 2.44 m of '
+                + 'known height. Judge it on the CROSSBAR, and mind which edge: the Laws put '
+                + '2.44 m at the crossbar\'s lower edge, so the drawn line belongs under the '
+                + 'white band, not through it. At the auto '
+                + (pitchFocalAuto === null ? '—' : pitchFocalAuto.toFixed(0))
+                + ' px it lands there. Type a number to override; blank = auto.'">
+      f <input type="number" step="50" min="200" max="20000" placeholder="auto"
+               style="width:5.5em" x-model="focalOverride"
+               @change="refreshCalibratedPitch()">
+      <span x-text="pitchFocal === null ? '' : Math.round(pitchFocal) + ' px'"></span>
+    </span>
+    <span x-show="showPitch && pitchSource === 'calib' && pitchCamera" class="sep"
+          title="Where the chosen focal puts the camera, in world metres. A broadcast main
+camera stands ~15-25 m up and tens of metres past the touchline, and it does not move
+between frames. A focal that buries it underground or plants it on the pitch is wrong
+whatever the overlay looks like — so read this before trusting a hand-set number."
+          x-text="pitchCamera ? 'cam ' + pitchCamera[0] + ', ' + pitchCamera[1]
+                + ', ' + pitchCamera[2] + ' m' : ''"></span>
     <button @click="toggleGround()" :class="{ active: showGround }"
             title="stance handles: where the solved calibration puts each player's feet.
 Drag one onto the player's real feet — the drop pixel becomes a world position and the
@@ -754,6 +778,16 @@ Alpine.data("poseAnnot", () => ({
     // checkable by eye: median px from an overlay point to the nearest real marking.
     pitchFit: null,
     pitchCounts: null,        // {ok, off, unknown} over the points inside the frame
+    // Goal frames + corner flags. Everything above lies on the pitch plane, where the
+    // homography is exact and the focal never enters. These stand UP off it, so drawing
+    // them is a bet on a focal the lawn cannot supply — measured on this clip, the two
+    // constraints one homography puts on the focal disagree by 1.5-1.8x. Which is the
+    // point: a wrong focal is invisible on the markings and obvious on a goalpost.
+    pitchUprights: [],        // [{pts:[[u,v],...]}, ...]
+    pitchFocal: null,         // focal actually used to draw them, px
+    pitchFocalAuto: null,     // what the homographies imply (clip median) — the default
+    pitchCamera: null,        // [X, Y, Z] m: where that focal puts the camera
+    focalOverride: "",        // user-typed focal; empty = use the auto one
     // Stance handles — one per subject, at the pixel where the SOLVED calibration puts
     // their feet. Drag one onto the player's real feet to correct the world position.
     showGround: true,
@@ -1077,10 +1111,13 @@ Alpine.data("poseAnnot", () => ({
     async refreshCalibratedPitch() {
       if (this.pitchSource !== "calib" || !this.showPitch) { this.pitchLines = []; return; }
       const want = this.frame;
-      const r = await fetch(`/api/pitch/calibrated/${want}`);
+      const f = parseFloat(this.focalOverride);
+      const q = Number.isFinite(f) && f > 1 ? `?focal=${f}` : "";
+      const r = await fetch(`/api/pitch/calibrated/${want}${q}`);
       if (!r.ok) {
         this.pitchLines = []; this.pitchConf = null;
         this.pitchFit = null; this.pitchCounts = null;
+        this.pitchUprights = []; this.pitchCamera = null;
         this.rebuildOverlay();
         return;
       }
@@ -1090,6 +1127,10 @@ Alpine.data("poseAnnot", () => ({
       this.pitchConf = d.confidence;
       this.pitchFit = d.fit_px;
       this.pitchCounts = d.counts;
+      this.pitchUprights = d.uprights || [];
+      this.pitchFocal = d.focal_px;
+      this.pitchFocalAuto = d.focal_auto_px;
+      this.pitchCamera = d.camera_m;
       this.rebuildOverlay();
     },
 
@@ -1412,6 +1453,18 @@ Alpine.data("poseAnnot", () => ({
           if (pts.length < 2) continue;
           const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
           out.push(`<polyline points="${d}" fill="none" ${style[poly.status] || style.unknown}/>`);
+        }
+        // Goal frames + corner flags, in cyan so they never read as measured markings.
+        // Every polyline above lies on the pitch plane, where the homography is exact and
+        // the focal never enters the arithmetic. These leave the plane, so their drawn
+        // position is a function of a focal the lawn cannot supply — which is what makes
+        // them the instrument: line the crossbar up with the real one and the focal is right.
+        for (const poly of this.pitchUprights) {
+          const pts = poly.pts;
+          if (pts.length < 2) continue;
+          const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+          out.push(`<polyline points="${d}" fill="none" stroke="#22d3ee"`
+            + ` stroke-width="2.2" stroke-dasharray="9 4" opacity="0.9"/>`);
         }
       } else if (this.showPitch && this.pitch2d.length) {
         for (const p of this.pitch2d) {

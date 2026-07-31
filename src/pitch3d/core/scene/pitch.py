@@ -34,6 +34,12 @@ GOAL_INNER_WIDTH = 7.32
 GOAL_FRAME_HEIGHT = 2.44
 GOAL_POST_THICK = 0.12
 
+# Laws of the Game: a corner flagpost is not less than 1.5 m high. Together with the goal frame it
+# is the only fixed thing on a pitch that stands UP off the plane, which is what makes the pair
+# worth drawing: a ground homography maps the lawn exactly and says nothing whatever about height,
+# so nothing on the plane can tell a right focal from a wrong one.
+CORNER_FLAG_HEIGHT = 1.5
+
 
 def _segment(p0: tuple[float, float], p1: tuple[float, float], spacing: float) -> np.ndarray:
     """Sample a straight line ``p0→p1`` every ~``spacing`` m (endpoints included)."""
@@ -169,6 +175,35 @@ def pitch_polylines(
         half = float(np.arccos(abs(box_inner_x - spot_x) / PENALTY_ARC_RADIUS))
         base = 0.0 if inward > 0 else np.pi
         parts.append(_arc((spot_x, 0.0), PENALTY_ARC_RADIUS, base - half, base + half, spacing))
+    return parts
+
+
+def pitch_upright_polylines(
+    dimensions: FieldDimensions | None = None, *, plane_z: float = 0.0
+) -> list[np.ndarray]:
+    """The fixed structures that stand UP off the pitch, as ``(n, 3)`` world polylines.
+
+    Both goal frames traced base → crossbar → base, and the four corner flagposts. Everything
+    else this module emits lies on ``Z = plane_z``, where a homography is exact; these are the
+    only measured points that leave the plane, so they are the only ones whose drawn position
+    depends on the camera's focal — which is exactly what makes them the instrument for checking
+    it. Post thickness is ignored: this is a wireframe to align against, not render geometry
+    (:func:`goal_frame_geometry` is the solid version).
+    """
+    dims = dimensions or FieldDimensions()
+    hl, hw = dims.length / 2.0, dims.width / 2.0
+    half = GOAL_INNER_WIDTH / 2.0
+    z0 = float(plane_z)
+    parts = [
+        np.array([[gx, -half, z0], [gx, -half, z0 + GOAL_FRAME_HEIGHT],
+                  [gx, half, z0 + GOAL_FRAME_HEIGHT], [gx, half, z0]])
+        for gx in (-hl, hl)
+    ]
+    parts += [
+        np.array([[sx * hl, sy * hw, z0], [sx * hl, sy * hw, z0 + CORNER_FLAG_HEIGHT]])
+        for sx in (-1.0, 1.0)
+        for sy in (-1.0, 1.0)
+    ]
     return parts
 
 

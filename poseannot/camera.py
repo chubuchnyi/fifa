@@ -186,6 +186,111 @@ def project_ground(xy: np.ndarray, w2i: np.ndarray) -> np.ndarray:
     return uv
 
 
+# ── off the plane: what it costs to draw something that stands up ──
+# A ground homography is a map of the lawn. Anything at Z > 0 needs the full camera, and the one
+# thing separating the two is the focal — so drawing a goalpost is a bet on a number the plane
+# cannot supply. Measured on the target clip: the two constraints a single homography puts on the
+# focal (r1 ⊥ r2, and |r1| == |r2|) disagree by a factor of 1.5-1.8, and sweeping the focal to
+# hold the recovered camera centre still across all 60 frames has a minimum so flat that 2500 and
+# 3500 px score within 4% of each other. The focal is genuinely not observable from the lawn.
+#
+#
+# It IS observable from the goal frame — 2.44 m of known height standing in shot — but only by eye,
+# and the automated version of that check is a trap worth recording. Fitting the focal so the drawn
+# crossbar sits on the brightest pixels of the real one reads 4350-4585 px across the frames where
+# the goal is unoccluded, ~15% above what the homographies imply. It is wrong: the Laws put 2.44 m
+# at the crossbar's LOWER edge, so the line belongs under the white band, not through the middle of
+# it, and at this distance the bar is most of the disagreement. Rendered at 9x the clip-median focal
+# lands on the lower edge and the "measured" one rides the top. Hence the design here — the estimate
+# is a starting point for a control the user sets by eye, not an answer.
+
+
+def focal_from_homography(w2i: np.ndarray, width: int, height: int) -> float | None:
+    """Focal in pixels from one ground-plane homography, or ``None`` if it has no real solution.
+
+    Assumes square pixels and the principal point at the image centre, which leaves ``H = sK[r1
+    r2 t]`` with two constraints on ``K`` — ``r1·r2 == 0`` and ``|r1| == |r2|``. Solved together
+    in least squares because on a broadcast's grazing view of the pitch they disagree badly, and
+    picking either one alone silently commits to its bias.
+    """
+    h = np.asarray(w2i, dtype=float)
+    (a1, b1, c1), (a2, b2, c2) = h[:, 0], h[:, 1]
+    a1, a2 = a1 - c1 * width / 2.0, a2 - c2 * width / 2.0
+    b1, b2 = b1 - c1 * height / 2.0, b2 - c2 * height / 2.0
+    coef = np.array([a1 * a2 + b1 * b2, (a1**2 + b1**2) - (a2**2 + b2**2)])
+    rhs = np.array([c1 * c2, c1**2 - c2**2])
+    denom = float(coef @ coef)
+    if denom < 1e-30:
+        return None
+    inv_f_sq = -float(coef @ rhs) / denom
+    return float(1.0 / np.sqrt(inv_f_sq)) if inv_f_sq > 1e-12 else None
+
+
+def lift_homography(
+    w2i: np.ndarray, focal_px: float, width: int, height: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split the homography into ``(ground map, image direction of world +Z)``.
+
+    A world point ``(X, Y, Z)`` then images at ``ground @ (X, Y, 1) + Z * up``, homogeneous, with a
+    usable depth in the third component. A homography is only defined up to scale — sign included
+    — so both halves need one fixed by hand, and each is fixed by something that cannot be argued
+    with rather than by algebra:
+
+    ``ground``  the patch of grass under the image centre is *visible*, so it is in front of the
+                camera and its depth is positive.
+    ``up``      the camera is above the pitch, not under it, so lifting a point off the grass
+                moves it UP the image. Taking the algebraic branch instead draws goalposts buried.
+
+    Two separate decisions on purpose. On a homography that really is ``sK[r1 r2 t]`` they always
+    agree — asserted against a synthetic camera in the golden tests. On this clip's solved
+    homography they do **not**: it is a least-squares fit to keypoints, not a camera, and it misses
+    the pinhole form badly enough (``|r1|/|r2| = 0.91``, ``r1·r2 = -0.21`` where an honest
+    decomposition needs 1 and 0) that deriving one sign from the other blanks the overlay.
+    """
+    k = np.array([[focal_px, 0.0, width / 2.0], [0.0, focal_px, height / 2.0], [0.0, 0.0, 1.0]])
+    h = np.asarray(w2i, dtype=float)
+    m = np.linalg.inv(k) @ h
+    scale = (float(np.linalg.norm(m[:, 0])) + float(np.linalg.norm(m[:, 1]))) / 2.0
+
+    centre = np.linalg.solve(h, [width / 2.0, height / 2.0, 1.0])  # grass under the image centre
+    ground = (1.0 if centre[2] > 0.0 else -1.0) / scale * h
+    up = k @ np.cross(m[:, 0] / scale, m[:, 1] / scale)
+    seen = ground @ (centre / centre[2])
+    if float(up[1] * seen[2] - seen[1] * up[2]) > 0.0:  # d(v)/d(Z) — must be negative
+        up = -up
+    return ground, up
+
+
+def camera_centre(w2i: np.ndarray, focal_px: float, width: int, height: int) -> np.ndarray:
+    """Where the camera is standing, in world metres — the sanity check on a chosen focal.
+
+    A broadcast main camera is ~15-25 m up and tens of metres beyond the touchline, and it does
+    not move between frames. A focal that puts it underground or on the pitch is wrong whatever
+    the overlay looks like.
+    """
+    k = np.array([[focal_px, 0.0, width / 2.0], [0.0, focal_px, height / 2.0], [0.0, 0.0, 1.0]])
+    m = np.linalg.inv(k) @ np.asarray(w2i, dtype=float)
+    scale = (float(np.linalg.norm(m[:, 0])) + float(np.linalg.norm(m[:, 1]))) / 2.0
+    r1, r2, t = m[:, 0] / scale, m[:, 1] / scale, m[:, 2] / scale
+    if float(np.cross(r1, r2) @ t) > 0.0:
+        r1, r2, t = -r1, -r2, -t
+    u, _s, vt = np.linalg.svd(np.column_stack([r1, r2, np.cross(r1, r2)]))
+    return -(u @ vt).T @ t
+
+
+def project_world(
+    xyz: np.ndarray, w2i: np.ndarray, focal_px: float, width: int, height: int
+) -> np.ndarray:
+    """Project ``(N, 3)`` world points to ``(N, 2)`` pixels; NaN where behind the camera."""
+    xyz = np.asarray(xyz, dtype=float).reshape(-1, 3)
+    ground, up = lift_homography(w2i, focal_px, width, height)
+    p = np.column_stack([xyz[:, :2], np.ones(len(xyz))]) @ ground.T + xyz[:, 2:3] * up
+    ok = p[:, 2] > 1e-9
+    uv = np.full((len(xyz), 2), np.nan)
+    uv[ok] = p[ok, :2] / p[ok, 2, None]
+    return uv
+
+
 def image_to_ground(uv: np.ndarray, calibration, frame_index: int) -> np.ndarray:
     """Inverse of :func:`project_ground` — pixels back to pitch-plane world XY.
 
