@@ -247,9 +247,9 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 
 | ID | Open item | Status | Why it is open |
 |----|-----------|--------|----------------|
-| #118 | **The exported calibration is mirrored in world Y** | open, **blocks everything 3D** | Found by #117's research. Every frame decomposes to a camera whose optical axis points *up* and whose centre sits *under* the pitch, at every focal; negating world Y makes it a real camera and moves not one pixel. The pitch is symmetric about Y = 0, so no marking metric can ever catch it — which is why `lift_homography` needed a hand-forced "up" sign and why goalposts drew buried. Fix at the source (the export / PnLCalib world frame), not with another sign patch. |
+| #120 | **Stored scenes declare a frame they are not in** | open, **inherited from #118** | Fixed the producer, not the artifacts. `out/*/export/scene.json` declares `world_frame: {up_axis: Z, handedness: right}` while its subject `transl`, ball `positions_3d` and homographies are still in the mirrored template frame — measured: 22/23 SMPL-X roots project in-shot as stored vs 17 Y-mirrored. Nothing looks wrong today (`plane_orientation` reads them correctly and the poseannot diag now shows `mirrored world`), but the label will mirror the first renderer that trusts it. Not flipped blind: 60 frames of user-validated poses, and `global_orient` cannot be honestly transformed without settling the chirality question #58/#59 touch. **#119 subsumes it** — it produces a fresh, right-handed solve. |
 | #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | open, the #117 payoff | The clip's 60 homographies are 480 free parameters with nothing tying them together. Measured consequences: 5.3 px jitter (62% of the real frame-to-frame move), a camera centre that wanders 7–11 m for a bolted-down rig, and a focal that reads 2700 or 3903 or 4277 depending on which functional you use. The raw material exists: pixel-derived inter-frame homographies are 0.16–0.77 px accurate, 10–30× better than the solve's own relative motion. |
-| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**, build not started | Measured (§6): the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins are #118 and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
+| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**, build not started | Measured (§6): the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
 | #61 | Camera-calibration accuracy (offset + ~3× scale) | in_progress, **premise largely disproved** | Was "the project's dominant error source (~55%)". #110/#113/#114 measured the overlay at **1.4 px** against real paint, so the 3× scale claim does not survive; what is left is a uniform ~1–1.5 px bias. Do not re-open as written — re-scope it against the numbers in §6. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
@@ -405,6 +405,46 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-31 (#118 — the world frame is now measured, not assumed; and the diagnosis in §3.1 was wrong)** —
+  User asked for #118 then #119. Shipped, but the row above was wrong on both halves and the
+  correction is the useful part.
+  - **It was never a PnLCalib bug.** PnLCalib is self-consistent; its keypoint table is a top-down
+    pitch **template image** — X across it, **Y down** it, as in any image. Our own `pitch.py` adopts
+    that same XY (`"Side line top"` sits at `y = −34`) while its docstring declares "X along the
+    length, Y along the width, **Z up**". Taking a template-Y as a world-Y and *then* calling the
+    third axis "up" is a **left-handed labelling**. The source is our convention mixing, in our file.
+  - **The read-out was not broken either.** `lift_homography` and `camera_centre` return
+    **bit-identical** `ground`, `up` and `centre` before and after this change — on all 60 real frames
+    *and* on the synthetic golden camera (`camera centre old [-8.7, 72.8, 18.0] → new [-8.7, 72.8,
+    18.0]`). The two hand-forced signs were right **by luck**: they were independent heuristics that
+    happened to agree on this clip. What changed is that both now *derive from one measurement*, so
+    they agree by construction instead of by coincidence.
+  - **Handedness is measurable, and it is free.** The Jacobian determinant of a homography at `x` is
+    `det(H)/(h₃ᵀx)³`, so `sign(det(H) · depth)` at any visible point reads the frame — no focal, and
+    invariant under the arbitrary scale *and sign* an `H` is only defined up to (`λH` scales it by
+    `λ⁴`). A camera above a right-handed Z-up world sees the plane **reversed** (world `+Y` runs up
+    the image while pixel `v` counts down), so that sign is the whole test. Shipped as
+    `poseannot.camera.plane_orientation`. Synthetic golden → `+1`; the real clip → **`−1` on all 60
+    frames, unanimous**; the real clip after `@ diag(1,−1,1)` → `+1`.
+  - **Fixed at the producer.** `calibration.TEMPLATE_TO_WORLD = diag(1,−1,1)` — on `Z = 0` that is the
+    plane restriction of a 180° rotation about world X, a proper rotation (`det +1`), not a flip.
+    Applied on both solve paths (`image_to_world_from_cam_params` and the DLT path in
+    `pnlcalib_backend`), and `pitch.py`'s `seg()` now crosses the same boundary so the "top"/"bottom"
+    naming travels with the geometry — split them and the line-residual gate throws out its own
+    evidence for disagreeing with the keypoints.
+  - **Why it survived this long, stated precisely:** `pitch_polylines()` is **bit-invariant** under Y
+    negation (1446 points). The only Y-asymmetric thing in the entire pitch model is a *name*. So no
+    overlay and no marking metric could ever have caught it — only something with height, which is
+    why a goalpost (#116) was what finally found it.
+  - **Marked, not erased (R-6).** Scenes solved before this fix are still mirrored; the poseannot diag
+    now reads the frame per-homography and shows an amber **`mirrored world`** badge. Verified on the
+    live endpoint, frames 0/30/59: `mirrored`, camera 18 m up and 72–79 m out, fit 1.4–2.2 px — i.e.
+    the overlay is right and the label is wrong, exactly the failure mode. Migrating the artifacts is
+    **#120**, deliberately not done blind.
+  - Covered by 4 new golden tests in `test_offplane_projection.py` (the two frames are told apart; a
+    mirrored frame still puts the camera *above* the pitch, still lifts the crossbar upward, and draws
+    **pixel-identical** output from mirrored coordinates). 3 existing tests re-pinned to the new frame.
+    Full unit suite green.
 - **2026-07-31 (#117 — research: what frame preprocessing would actually buy, and what it would not)** —
   User asked to take on #117 and estimate the payoff *before* building. Measured on the target clip:
   `scripts/bench_frame_preprocessing.py` (A–D) and `scripts/bench_rigid_camera.py`. The answer is that

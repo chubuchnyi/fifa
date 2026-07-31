@@ -104,6 +104,14 @@ between frames. A focal that buries it underground or plants it on the pitch is 
 whatever the overlay looks like — so read this before trusting a hand-set number."
           x-text="pitchCamera ? 'cam ' + pitchCamera[0] + ', ' + pitchCamera[1]
                 + ', ' + pitchCamera[2] + ' m' : ''"></span>
+    <span x-show="showPitch && pitchSource === 'calib' && pitchFrameHanded === 'mirrored'"
+          class="sep" style="color:var(--edited)"
+          title="This calibration was solved in PnLCalib's top-down TEMPLATE frame, whose Y
+runs DOWN the template — so labelling the third axis 'up' makes it left-handed, and the
+camera above decomposes as a camera below. The pitch is symmetric about Y = 0, so this
+costs exactly zero pixels here and the overlay is still right; it is the world coordinates
+handed to Blender and to novel-view cameras that come out mirrored. Re-solve the clip to
+clear it — solves after #118 land right-handed.">mirrored world</span>
     <button @click="toggleGround()" :class="{ active: showGround }"
             title="stance handles: where the solved calibration puts each player's feet.
 Drag one onto the player's real feet — the drop pixel becomes a world position and the
@@ -787,6 +795,7 @@ Alpine.data("poseAnnot", () => ({
     pitchFocal: null,         // focal actually used to draw them, px
     pitchFocalAuto: null,     // what the homographies imply (clip median) — the default
     pitchCamera: null,        // [X, Y, Z] m: where that focal puts the camera
+    pitchFrameHanded: null,   // 'right' | 'mirrored' — which world the solve lives in (#118)
     focalOverride: "",        // user-typed focal; empty = use the auto one
     // Stance handles — one per subject, at the pixel where the SOLVED calibration puts
     // their feet. Drag one onto the player's real feet to correct the world position.
@@ -1118,6 +1127,7 @@ Alpine.data("poseAnnot", () => ({
         this.pitchLines = []; this.pitchConf = null;
         this.pitchFit = null; this.pitchCounts = null;
         this.pitchUprights = []; this.pitchCamera = null;
+        this.pitchFrameHanded = null;
         this.rebuildOverlay();
         return;
       }
@@ -1131,6 +1141,7 @@ Alpine.data("poseAnnot", () => ({
       this.pitchFocal = d.focal_px;
       this.pitchFocalAuto = d.focal_auto_px;
       this.pitchCamera = d.camera_m;
+      this.pitchFrameHanded = d.frame_handed || null;
       this.rebuildOverlay();
     },
 

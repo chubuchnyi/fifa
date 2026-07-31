@@ -30,14 +30,17 @@ from pitch3d.eval.datasets_soccernet import (
 def test_pitch_template_geometry() -> None:
     lines = pitch_plane_lines(length=105.0, width=68.0)
     assert len(lines) == 17  # 5 touch/halfway + 6 big-rect + 6 small-rect; no circles/goals
-    # Spot-check known laws-of-the-game coordinates (metres, origin at centre mark).
-    np.testing.assert_allclose(lines["Side line top"][0], [-52.5, -34.0])
-    np.testing.assert_allclose(lines["Side line top"][1], [52.5, -34.0])
-    np.testing.assert_allclose(lines["Middle line"], [[0.0, -34.0], [0.0, 34.0]])
+    # Spot-check known laws-of-the-game coordinates (metres, origin at centre mark). "top" is the
+    # top of SoccerNet's top-down template, whose Y runs down the image, so in our Z-up
+    # right-handed world it is the +Y touchline (#118).
+    np.testing.assert_allclose(lines["Side line top"][0], [-52.5, 34.0])
+    np.testing.assert_allclose(lines["Side line top"][1], [52.5, 34.0])
+    np.testing.assert_allclose(lines["Side line bottom"][0], [-52.5, -34.0])
+    np.testing.assert_allclose(lines["Middle line"], [[0.0, 34.0], [0.0, -34.0]])
     # Penalty box "main" line is 16.5 m in from the goal line, half-width 20.16 m.
-    np.testing.assert_allclose(lines["Big rect. left main"], [[-36.0, -20.16], [-36.0, 20.16]])
+    np.testing.assert_allclose(lines["Big rect. left main"], [[-36.0, 20.16], [-36.0, -20.16]])
     # Goal-area box "main" line is 5.5 m in, half-width 9.16 m, on the right.
-    np.testing.assert_allclose(lines["Small rect. right main"], [[47.0, -9.16], [47.0, 9.16]])
+    np.testing.assert_allclose(lines["Small rect. right main"], [[47.0, 9.16], [47.0, -9.16]])
 
 
 def test_load_annotation_scales_and_filters() -> None:
@@ -55,7 +58,7 @@ def test_load_annotation_scales_and_filters() -> None:
     assert gt.frame == 7 and gt.width == 960 and gt.height == 540
     top = next(ln for ln in gt.lines if ln.name == "Side line top")
     np.testing.assert_allclose(top.image_uv, [[96.0, 108.0], [864.0, 135.0]])  # normalised x W,H
-    np.testing.assert_allclose(top.world_a, [-52.5, -34.0])
+    np.testing.assert_allclose(top.world_a, [-52.5, 34.0])  # template top → our +Y (#118)
 
 
 def test_synthetic_oracle_is_near_zero_and_perturbation_grows() -> None:

@@ -32,6 +32,7 @@ from poseannot.camera import (  # noqa: E402  (after importorskip, as elsewhere 
     camera_centre,
     focal_from_homography,
     lift_homography,
+    plane_orientation,
     project_world,
     world_to_image,
 )
@@ -143,6 +144,65 @@ def test_lift_reports_a_ground_map_and_an_up_direction_that_compose():
     np.testing.assert_allclose(
         p[:, :2] / p[:, 2, None], project_world(SAMPLES, w2i, TRUE_FOCAL, wid, hgt), atol=1e-9
     )
+
+
+# --- the frame the homography lives in (#118) ---
+# Everything above runs on the synthetic camera, which is honestly right-handed and Z-up. The
+# target clip's solved calibration is not: PnLCalib's world table is a top-down TEMPLATE with Y
+# running down it, so reading those two axes as X and Y and calling the third one "up" is a
+# left-handed labelling, and the decomposition returns a camera looking upward from under the
+# grass at every focal. The pitch is symmetric about Y = 0, so the mirror moves not one pixel and
+# nothing drawn on the lawn can ever catch it. These pin the measurement that can.
+
+
+def _mirrored():
+    """The golden camera's homography, re-expressed in the mirrored (template) frame."""
+    scene, w2i, wid, hgt = _truth()
+    del scene
+    return w2i @ np.diag([1.0, -1.0, 1.0]), wid, hgt
+
+
+def test_orientation_tells_the_two_frames_apart():
+    scene, w2i, wid, hgt = _truth()
+    del scene
+    mirror, _, _ = _mirrored()
+    assert plane_orientation(w2i, wid, hgt) == 1.0
+    assert plane_orientation(mirror, wid, hgt) == -1.0
+    # Free of the arbitrary scale — and sign — a homography is only defined up to.
+    assert plane_orientation(-2.5 * w2i, wid, hgt) == 1.0
+    assert plane_orientation(-2.5 * mirror, wid, hgt) == -1.0
+
+
+def test_a_mirrored_frame_still_puts_the_camera_above_the_pitch():
+    # The symptom that started #118: taking the algebraic branch on this homography returns a
+    # camera 15 m UNDER the grass, looking up. X and Y stay in the caller's labels, so only the
+    # touchline the gantry stands beyond changes name.
+    mirror, wid, hgt = _mirrored()
+    np.testing.assert_allclose(
+        camera_centre(mirror, TRUE_FOCAL, wid, hgt), [0.0, 50.0, 15.0], atol=1e-9
+    )
+
+
+def test_a_mirrored_frame_draws_the_same_picture_from_mirrored_coordinates():
+    # The claim that makes the mirror invisible and therefore dangerous: it is a relabelling, not
+    # a different view. Feed the same world points with Y negated and every pixel is unchanged,
+    # crossbar included — so no overlay, and no marking metric, can ever report it.
+    scene, w2i, wid, hgt = _truth()
+    del scene
+    mirror, _, _ = _mirrored()
+    np.testing.assert_allclose(
+        project_world(SAMPLES * [1.0, -1.0, 1.0], mirror, TRUE_FOCAL, wid, hgt),
+        project_world(SAMPLES, w2i, TRUE_FOCAL, wid, hgt),
+        atol=1e-9,
+    )
+
+
+def test_a_mirrored_frame_still_lifts_the_crossbar_upward():
+    mirror, wid, hgt = _mirrored()
+    base, top = project_world(
+        SAMPLES[2:4] * [1.0, -1.0, 1.0], mirror, TRUE_FOCAL, wid, hgt
+    )
+    assert top[1] < base[1]  # 2.44 m up the goalpost is up the image, not buried under it
 
 
 # --- the geometry being drawn ---

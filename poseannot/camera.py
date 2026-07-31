@@ -226,26 +226,55 @@ def focal_from_homography(w2i: np.ndarray, width: int, height: int) -> float | N
     return float(1.0 / np.sqrt(inv_f_sq)) if inv_f_sq > 1e-12 else None
 
 
+# ── which way is up? the frame the solved homography actually lives in (#118) ──
+# PnLCalib's world table is a top-down pitch TEMPLATE: X across the image, Y *down* it. Read those
+# two axes as our X and Y and then call the third one "up", and the labelling is left-handed — so a
+# homography that maps the lawn perfectly still decomposes to a camera looking upward from under the
+# grass. Measured on the target clip, at every candidate focal and on all 60 frames: optical axis
+# +0.175 (up), centre 18 m below. Mirroring world Y turns it into a real broadcast gantry —
+# -0.175, 18 m up, 72 m beyond the touchline — and moves not one pixel, because the pitch is
+# symmetric about Y = 0. Nothing drawn on the lawn can ever catch this; only something with height.
+#
+# So the frame is not a constant to hardcode, it is a property of the homography in hand, and it is
+# cheap to measure: `plane_orientation` reads it off the sign of `det(H)` alone. The synthetic
+# golden camera (`pitch3d.eval.synthetic`, honestly right-handed Z-up) and this clip's solve sit on
+# opposite sides of it, which is exactly why the two must be told apart rather than assumed.
+
+
+def plane_orientation(w2i: np.ndarray, width: int, height: int) -> float:
+    """``+1`` if this homography's world is right-handed with ``Z`` up, ``-1`` if it is mirrored.
+
+    A camera above a right-handed ``Z``-up world sees the plane *reversed*: world ``+Y`` runs UP
+    the image while pixel ``v`` counts down it, so the map from lawn to pixels flips orientation
+    and its Jacobian determinant is negative. That determinant is ``det(H)/(h₃ᵀx)³``, so its sign
+    is ``sign(det(H) · depth)`` at any visible point — free of the focal, and unchanged by the
+    arbitrary scale (and sign) a homography is only defined up to, since ``λH`` scales it by ``λ⁴``.
+
+    The point used is the grass under the image centre, which is visible by definition and so has
+    positive depth whatever sign convention the caller's ``H`` arrived in.
+    """
+    h = np.asarray(w2i, dtype=float)
+    centre = np.linalg.solve(h, [width / 2.0, height / 2.0, 1.0])
+    depth = float(h[2] @ (centre / centre[2]))
+    return -float(np.sign(np.linalg.det(h) * depth))
+
+
 def lift_homography(
     w2i: np.ndarray, focal_px: float, width: int, height: int
 ) -> tuple[np.ndarray, np.ndarray]:
     """Split the homography into ``(ground map, image direction of world +Z)``.
 
     A world point ``(X, Y, Z)`` then images at ``ground @ (X, Y, 1) + Z * up``, homogeneous, with a
-    usable depth in the third component. A homography is only defined up to scale — sign included
-    — so both halves need one fixed by hand, and each is fixed by something that cannot be argued
-    with rather than by algebra:
+    usable depth in the third component. A homography is only defined up to scale — sign included —
+    so both halves need one fixed, and neither is fixed by algebra alone:
 
     ``ground``  the patch of grass under the image centre is *visible*, so it is in front of the
                 camera and its depth is positive.
-    ``up``      the camera is above the pitch, not under it, so lifting a point off the grass
-                moves it UP the image. Taking the algebraic branch instead draws goalposts buried.
-
-    Two separate decisions on purpose. On a homography that really is ``sK[r1 r2 t]`` they always
-    agree — asserted against a synthetic camera in the golden tests. On this clip's solved
-    homography they do **not**: it is a least-squares fit to keypoints, not a camera, and it misses
-    the pinhole form badly enough (``|r1|/|r2| = 0.91``, ``r1·r2 = -0.21`` where an honest
-    decomposition needs 1 and 0) that deriving one sign from the other blanks the overlay.
+    ``up``      ``r1 × r2`` is the image of the world's third axis, which points up in a
+                right-handed frame and down in a mirrored one — :func:`plane_orientation` says
+                which this homography is in. Taking the algebraic branch unconditionally draws
+                goalposts buried, and that is not a quirk of a noisy solve: on this clip it is the
+                correct answer to the wrong question.
     """
     k = np.array([[focal_px, 0.0, width / 2.0], [0.0, focal_px, height / 2.0], [0.0, 0.0, 1.0]])
     h = np.asarray(w2i, dtype=float)
@@ -254,28 +283,32 @@ def lift_homography(
 
     centre = np.linalg.solve(h, [width / 2.0, height / 2.0, 1.0])  # grass under the image centre
     ground = (1.0 if centre[2] > 0.0 else -1.0) / scale * h
-    up = k @ np.cross(m[:, 0] / scale, m[:, 1] / scale)
-    seen = ground @ (centre / centre[2])
-    if float(up[1] * seen[2] - seen[1] * up[2]) > 0.0:  # d(v)/d(Z) — must be negative
-        up = -up
+    up = plane_orientation(h, width, height) * (k @ np.cross(m[:, 0] / scale, m[:, 1] / scale))
     return ground, up
 
 
 def camera_centre(w2i: np.ndarray, focal_px: float, width: int, height: int) -> np.ndarray:
     """Where the camera is standing, in world metres — the sanity check on a chosen focal.
 
-    A broadcast main camera is ~15-25 m up and tens of metres beyond the touchline, and it does
-    not move between frames. A focal that puts it underground or on the pitch is wrong whatever
-    the overlay looks like.
+    A broadcast main camera is ~15-25 m up and tens of metres beyond the touchline, and it does not
+    move between frames. A focal that puts it on the pitch is wrong whatever the overlay looks like.
+
+    The height is signed by :func:`plane_orientation`, for the same reason :func:`lift_homography`
+    needs it: in a mirrored frame the decomposition's ``+Z`` is physically down. ``X`` and ``Y``
+    stay in the caller's labels, so the answer is directly comparable with anything else drawn
+    through the same homography.
     """
     k = np.array([[focal_px, 0.0, width / 2.0], [0.0, focal_px, height / 2.0], [0.0, 0.0, 1.0]])
-    m = np.linalg.inv(k) @ np.asarray(w2i, dtype=float)
+    h = np.asarray(w2i, dtype=float)
+    m = np.linalg.inv(k) @ h
     scale = (float(np.linalg.norm(m[:, 0])) + float(np.linalg.norm(m[:, 1]))) / 2.0
-    r1, r2, t = m[:, 0] / scale, m[:, 1] / scale, m[:, 2] / scale
-    if float(np.cross(r1, r2) @ t) > 0.0:
-        r1, r2, t = -r1, -r2, -t
+    # Same branch `lift_homography` puts the ground on: the grass under the image centre is seen.
+    front = 1.0 if float(np.linalg.solve(h, [width / 2.0, height / 2.0, 1.0])[2]) > 0.0 else -1.0
+    r1, r2, t = front * m[:, 0] / scale, front * m[:, 1] / scale, front * m[:, 2] / scale
     u, _s, vt = np.linalg.svd(np.column_stack([r1, r2, np.cross(r1, r2)]))
-    return -(u @ vt).T @ t
+    rot = u @ np.diag([1.0, 1.0, float(np.linalg.det(u @ vt))]) @ vt
+    centre = -rot.T @ t
+    return centre * np.array([1.0, 1.0, plane_orientation(h, width, height)])
 
 
 def project_world(

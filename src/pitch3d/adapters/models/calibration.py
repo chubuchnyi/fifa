@@ -601,6 +601,25 @@ class KeypointFieldCalibrator(FieldCalibrator):
         return self.backend or PitchKeypointBackend(device=self.device)
 
 
+# ── PnLCalib's world is a template, not a world (#118) ──────────────────────────────────────────
+# Its keypoint table is a top-down pitch TEMPLATE: X across it, Y *down* it, as in any image. Read
+# those two axes as our X and Y and then call the third one "up", and the labelling is left-handed
+# — so a homography that maps the lawn perfectly still decomposes to a camera looking UPWARD from
+# under the grass. Measured on the target clip at every candidate focal and on all 60 frames:
+# optical axis +0.175 (up), centre 18 m below the pitch. Turning the world 180° about X — Y and Z
+# both negated, a proper rotation — makes it a real broadcast gantry (-0.175, 18 m up, 72 m beyond
+# the touchline) and is what the rest of this codebase means by "world" (`core.scene.units`: Z-up,
+# right-handed, metres; the same frame SMPL-X, Blender and the novel-view cameras live in).
+#
+# On the pitch plane Z = 0 that rotation is just the Y negation below. It costs nothing to get
+# right and everything to get wrong: the pitch is symmetric about Y = 0, so the flip moves not one
+# pixel and no marking metric can ever catch it. Only something with height can — which is why it
+# survived until a goalpost had to be drawn. `poseannot.camera.plane_orientation` measures the
+# handedness of a homography in hand rather than trusting a label, so calibrations solved before
+# this fix are still read correctly instead of silently.
+TEMPLATE_TO_WORLD = np.diag([1.0, -1.0, 1.0])
+
+
 def image_to_world_from_cam_params(cam_params: dict) -> np.ndarray:
     """Convert a PnLCalib camera-module ``cam_params`` dict to a ``(3, 3)`` image→world homography.
 
@@ -608,7 +627,8 @@ def image_to_world_from_cam_params(cam_params: dict) -> np.ndarray:
     world metres ``[X, Y, Z, 1]ᵀ`` to image pixels. On the pitch plane ``Z = 0`` the third column
     drops out, so the world→image map is the ``(3, 3)`` ``H_w→i = P[:, (0, 1, 3)]``; we invert and
     renormalise it to get image→world in the **same** centre-origin metric frame the DLT path uses
-    (``keypoint_world_coords_2D``), making it a drop-in for :class:`FieldCalibration`.
+    (``keypoint_world_coords_2D``), then turn that template frame into ours with
+    :data:`TEMPLATE_TO_WORLD`, making it a drop-in for :class:`FieldCalibration`.
 
     Args:
         cam_params: PnLCalib ``cam_params`` with keys ``x_focal_length``, ``y_focal_length``,
@@ -633,7 +653,7 @@ def image_to_world_from_cam_params(cam_params: dict) -> np.ndarray:
     projection = intrinsic @ (rotation @ extrinsic)  # (3, 4) world→image
 
     h_w2i = projection[:, [0, 1, 3]]  # drop Z column (pitch plane Z=0) → (3, 3) world→image
-    h_i2w = np.linalg.inv(h_w2i)  # raises LinAlgError on a singular/degenerate view
+    h_i2w = TEMPLATE_TO_WORLD @ np.linalg.inv(h_w2i)  # LinAlgError on a singular/degenerate view
     return h_i2w / h_i2w[2, 2] if abs(h_i2w[2, 2]) > 1e-12 else h_i2w
 
 

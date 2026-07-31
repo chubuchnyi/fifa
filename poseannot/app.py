@@ -55,6 +55,7 @@ from .camera import (
     focal_from_homography,
     frame_projector,
     image_to_ground,
+    plane_orientation,
     project_ground,
     project_points,
     project_world,
@@ -464,6 +465,10 @@ def api_pitch_calibrated(
         # tens of metres past the touchline, and it does not move — so this is the readout that
         # says whether a hand-set focal is physical before the overlay is even looked at.
         "camera_m": cam,
+        # Which world this calibration was solved in (#118). Calibrations solved before the fix
+        # sit in PnLCalib's top-down template frame, where "Z up" is a left-handed label — every
+        # pixel on the lawn is identical, so this readout is the only place it can ever show.
+        "frame_handed": "right" if plane_orientation(w2i, vw, vh) > 0 else "mirrored",
         "confidence": conf,
         # Measured against the painted pixels in THIS frame. Unlike ``confidence`` — which
         # #105/#106 showed is anti-predictive — this one is checkable by eye.

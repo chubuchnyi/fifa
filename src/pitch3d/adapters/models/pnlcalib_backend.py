@@ -173,7 +173,10 @@ class _PnLCalibBackend:
             for kid, d in kp_dict.items():
                 wp = s["kw"][kid - 1] if kid <= _N_MAIN else s["ka"][kid - 1 - _N_MAIN]
                 uv.append([d["x"] * w_orig, d["y"] * h_orig])  # normalised → original image px
-                world.append([float(wp[0]), float(wp[1])])  # metres, centre-origin, Z=0
+                # Y negated out of PnLCalib's top-down template into our Z-up world (#118, see
+                # `calibration.TEMPLATE_TO_WORLD`), so this path and the camera-module path below
+                # stay in one frame — the whole point of scoring them against each other.
+                world.append([float(wp[0]), -float(wp[1])])  # metres, centre-origin, Z=0
                 conf.append(float(d.get("p", 1.0)))
             image_uv = np.asarray(uv, dtype=float).reshape(-1, 2)
             world_xy = np.asarray(world, dtype=float).reshape(-1, 2)

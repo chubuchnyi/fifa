@@ -481,7 +481,10 @@ def _cam_params(fx=1400.0, fy=1350.0, px=480.0, py=270.0):
 
 def test_image_to_world_from_cam_params_round_trips_ground_plane():
     # Build the forward projection P exactly like PnLCalib's projection_from_cam_params, project
-    # centre-origin ground points to image, and assert the converted H recovers world from image.
+    # centre-origin ground points to image, and assert the converted H recovers them from image.
+    # PnLCalib solves in its top-down TEMPLATE frame (Y down the template); ours is the same lawn
+    # with Y negated, which is what makes "Z up" right-handed and a camera readable out of the
+    # homography at all (#118).
     cam_params = _cam_params()
     it = np.eye(4)[:-1]
     it[:, -1] = -np.asarray(cam_params["position_meters"])
@@ -489,11 +492,11 @@ def test_image_to_world_from_cam_params_round_trips_ground_plane():
                   [0.0, cam_params["y_focal_length"], cam_params["principal_point"][1]],
                   [0.0, 0.0, 1.0]])
     p = k @ (np.asarray(cam_params["rotation_matrix"]) @ it)
-    world = np.array([[0.0, 0.0], [20.0, 10.0], [-15.0, 8.0], [5.0, -12.0], [30.0, 25.0]])
-    img = np.array([(p @ [x, y, 0.0, 1.0])[:2] / (p @ [x, y, 0.0, 1.0])[2] for x, y in world])
+    template = np.array([[0.0, 0.0], [20.0, 10.0], [-15.0, 8.0], [5.0, -12.0], [30.0, 25.0]])
+    img = np.array([(p @ [x, y, 0.0, 1.0])[:2] / (p @ [x, y, 0.0, 1.0])[2] for x, y in template])
 
     h = image_to_world_from_cam_params(cam_params)
-    np.testing.assert_allclose(_apply_homography(h, img), world, atol=1e-6)
+    np.testing.assert_allclose(_apply_homography(h, img), template * [1.0, -1.0], atol=1e-6)
     assert h[2, 2] == pytest.approx(1.0)  # normalised
 
 

@@ -81,6 +81,9 @@ def pitch_plane_line_segments(
     exactly the ones that constrain an image→world homography (circles are curved; goal frames sit
     at ``Z ≠ 0``). The box metrics are the fixed Laws-of-the-Game values; only the outer rectangle
     scales with ``dimensions``.
+
+    The coordinates in the table below are written in SoccerNet's own top-down **template** frame so
+    they stay diffable against it, and ``seg`` turns each one into our world on the way out.
     """
     dims = dimensions or FieldDimensions()
     hl, hw = dims.length / 2.0, dims.width / 2.0
@@ -88,7 +91,14 @@ def pitch_plane_line_segments(
     pa_hw, ga_hw = PENALTY_BOX_HALF_WIDTH, GOAL_BOX_HALF_WIDTH
 
     def seg(ax: float, ay: float, bx: float, by: float) -> tuple[np.ndarray, np.ndarray]:
-        return np.array([ax, ay], dtype=float), np.array([bx, by], dtype=float)
+        """Template ``(x, y)`` → world: ``Y`` negated (#118, ``calibration.TEMPLATE_TO_WORLD``).
+
+        "top" and "bottom" are the top and bottom of SoccerNet's template *image*, whose ``Y`` runs
+        down it; our world is Z-up right-handed, so the template's top side line is our ``+Y`` one.
+        The names and the geometry have to cross that boundary together — split them and the
+        line-residual gate throws out its own evidence for disagreeing with the keypoints.
+        """
+        return np.array([ax, -ay], dtype=float), np.array([bx, -by], dtype=float)
 
     return {
         "Side line top": seg(-hl, -hw, hl, -hw),
