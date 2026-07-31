@@ -59,6 +59,7 @@ from .camera import (
 )
 from .config import load as load_config
 from pitch3d.core.scene.pitch import pitch_line_world_points, pitch_polylines
+from .pitch_evidence import DEFAULT_TOLERANCE_PX, classify
 from .scene_state import (
     BODY_JOINT_NAMES,
     apply_and_persist_edit,
@@ -345,7 +346,9 @@ def api_pitch(
 
 
 @app.get("/api/pitch/calibrated/{frame}")
-def api_pitch_calibrated(frame: int, user: str = Depends(current_user)) -> dict:
+def api_pitch_calibrated(
+    frame: int, tolerance: float | None = None, user: str = Depends(current_user)
+) -> dict:
     """The pitch markings drawn through the SOLVED per-frame calibration.
 
     The sibling ``/api/pitch`` projects through ``scene.camera``, which #107 showed is a
@@ -372,7 +375,12 @@ def api_pitch_calibrated(frame: int, user: str = Depends(current_user)) -> dict:
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
 
-    polylines: list[list[list[float]]] = []
+    cfg = load_config()
+    vw, vh = frame_size(str(cfg.source_video))
+    tol = DEFAULT_TOLERANCE_PX if tolerance is None else float(tolerance)
+
+    polylines: list[dict] = []
+    errors: list[np.ndarray] = []
     for poly in pitch_polylines(field.dimensions, spacing=0.5):
         uv = project_ground(poly, w2i)
         # A marking is only drawable where it is in front of the camera AND not so far
@@ -382,18 +390,43 @@ def api_pitch_calibrated(frame: int, user: str = Depends(current_user)) -> dict:
             continue
         cut = np.nonzero(np.diff(good.astype(int)) != 0)[0] + 1
         for run in np.split(np.arange(len(uv)), cut):
-            if len(run) and good[run[0]]:
-                seg = uv[run]
-                polylines.append([[float(u), float(v)] for u, v in seg])
+            if not len(run) or not good[run[0]]:
+                continue
+            seg = uv[run]
+            labels, dist = classify(seg, str(cfg.source_video), int(frame), tol)
+            errors.append(dist)
+            # split again wherever the verdict changes, so a single marking can be drawn
+            # part confirmed and part extrapolated
+            bnd = np.nonzero(labels[1:] != labels[:-1])[0] + 1
+            for piece in np.split(np.arange(len(seg)), bnd):
+                if len(piece) < 2:
+                    continue
+                polylines.append({
+                    "pts": [[float(u), float(v)] for u, v in seg[piece]],
+                    "status": str(labels[piece[0]]),
+                })
 
     frames = np.asarray(cal.frames, dtype=int)
     idx = int(np.nonzero(frames == int(frame))[0][0])
     conf = float(np.asarray(cal.confidence, dtype=float)[idx])
-    cfg = load_config()
-    vw, vh = frame_size(str(cfg.source_video))
+    # Count only what the user can actually see. Most sampled points land outside the
+    # 1920x1080 frame (the pitch is much bigger than the shot) and would otherwise swamp
+    # the summary with "unknown".
+    counts = {k: 0 for k in ("ok", "off", "unknown")}
+    for p in polylines:
+        counts[p["status"]] += sum(
+            1 for u, v in p["pts"] if 0 <= u < vw and 0 <= v < vh
+        )
+    all_err = np.concatenate(errors) if errors else np.array([np.nan])
+    fit = float(np.nanmedian(all_err)) if np.isfinite(all_err).any() else None
     return {
         "polylines": polylines,
         "confidence": conf,
+        # Measured against the painted pixels in THIS frame. Unlike ``confidence`` — which
+        # #105/#106 showed is anti-predictive — this one is checkable by eye.
+        "fit_px": fit,
+        "counts": counts,
+        "tolerance_px": tol,
         "frame": int(frame),
         "video_size": [int(vw), int(vh)],
     }

@@ -71,11 +71,15 @@
               ? 'pitch drawn through the SOLVED per-frame homography (exact on the pitch plane) — click for the old scene.camera path'
               : 'pitch drawn through scene.camera, a synthetic frozen pose (#107) — click for the solved calibration'"
             x-text="pitchSource === 'calib' ? 'calib' : 'cam'"></button>
-    <span x-show="showPitch && pitchSource === 'calib' && pitchConf !== null" class="sep"
-          :title="'calibration confidence for this frame. NOTE (#106): this number is '
-                + 'anti-predictive on the target clip (r=+0.69 against measured error) — '
-                + 'do not trust it as a quality signal.'"
-          x-text="'conf ' + (pitchConf === null ? '' : pitchConf.toFixed(2))"></span>
+    <span x-show="showPitch && pitchSource === 'calib' && pitchFit !== null" class="sep"
+          :title="'MEASURED against the painted pixels in this frame: median distance from an '
+                + 'overlay point to the nearest real marking, and how many drawn points sit on '
+                + 'paint (ok) vs on clear grass (off, drawn dashed amber — the overlay is '
+                + 'claiming a marking that is not there). The solver\'s own confidence is '
+                + (pitchConf === null ? 'unavailable' : pitchConf.toFixed(2))
+                + ', which #106 showed is anti-predictive here — this readout replaces it.'"
+          x-text="'fit ' + (pitchFit === null ? '—' : pitchFit.toFixed(1)) + ' px'
+                + (pitchCounts ? ' · ok ' + pitchCounts.ok + ' / off ' + pitchCounts.off : '')"></span>
     <button @click="toggleGround()" :class="{ active: showGround }"
             title="stance handles: where the solved calibration puts each player's feet.
 Drag one onto the player's real feet — the drop pixel becomes a world position and the
@@ -744,8 +748,12 @@ Alpine.data("poseAnnot", () => ({
     // disagree by a median ~1300 px, so hand-aligning "cam" could never converge.
     // Kept switchable so the difference stays visible rather than asserted.
     pitchSource: "calib",
-    pitchLines: [],           // [[[u,v],...],...] polylines from the calibrated path
+    pitchLines: [],           // [{pts:[[u,v],...], status:"ok"|"off"|"unknown"}, ...]
     pitchConf: null,          // this frame's calibration confidence (see #106: anti-predictive)
+    // Measured against the painted pixels in THIS frame, so unlike pitchConf it is
+    // checkable by eye: median px from an overlay point to the nearest real marking.
+    pitchFit: null,
+    pitchCounts: null,        // {ok, off, unknown} over the points inside the frame
     // Stance handles — one per subject, at the pixel where the SOLVED calibration puts
     // their feet. Drag one onto the player's real feet to correct the world position.
     showGround: true,
@@ -1070,11 +1078,18 @@ Alpine.data("poseAnnot", () => ({
       if (this.pitchSource !== "calib" || !this.showPitch) { this.pitchLines = []; return; }
       const want = this.frame;
       const r = await fetch(`/api/pitch/calibrated/${want}`);
-      if (!r.ok) { this.pitchLines = []; this.pitchConf = null; this.rebuildOverlay(); return; }
+      if (!r.ok) {
+        this.pitchLines = []; this.pitchConf = null;
+        this.pitchFit = null; this.pitchCounts = null;
+        this.rebuildOverlay();
+        return;
+      }
       const d = await r.json();
       if (this.frame !== want) return;   // user scrubbed on; a later fetch owns the state
       this.pitchLines = d.polylines;
       this.pitchConf = d.confidence;
+      this.pitchFit = d.fit_px;
+      this.pitchCounts = d.counts;
       this.rebuildOverlay();
     },
 
@@ -1381,15 +1396,22 @@ Alpine.data("poseAnnot", () => ({
       // Drawn as connected polylines on the calibrated path — a line that should be
       // straight and isn't says more about a bad solve than scattered dots ever could.
       if (this.showPitch && this.pitchSource === "calib") {
+        // Three verdicts, three looks. The solve is fit from keypoints clustered near one
+        // goal, so it is exact there and extrapolates everywhere else — drawing both with
+        // the same confident green invites hand-aligning something that was never anchored.
+        //   ok       a painted line is under it       solid green
+        //   off      clear grass, no marking there    dashed amber — an unbacked claim
+        //   unknown  off the grass, no evidence       dim, thin
+        const style = {
+          ok: `stroke="${this.pitchColor}" stroke-width="2.5" opacity="0.85"`,
+          off: `stroke="#e3a008" stroke-width="2.2" stroke-dasharray="7 6" opacity="0.85"`,
+          unknown: `stroke="${this.pitchColor}" stroke-width="1.4" opacity="0.3"`,
+        };
         for (const poly of this.pitchLines) {
-          if (poly.length === 1) {
-            out.push(`<circle cx="${poly[0][0]}" cy="${poly[0][1]}" r="3"`
-              + ` fill="${this.pitchColor}" opacity="0.9"/>`);
-          } else if (poly.length > 1) {
-            const pts = poly.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
-            out.push(`<polyline points="${pts}" fill="none" stroke="${this.pitchColor}"`
-              + ` stroke-width="2.5" opacity="0.85"/>`);
-          }
+          const pts = poly.pts;
+          if (pts.length < 2) continue;
+          const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+          out.push(`<polyline points="${d}" fill="none" ${style[poly.status] || style.unknown}/>`);
         }
       } else if (this.showPitch && this.pitch2d.length) {
         for (const p of this.pitch2d) {

@@ -379,6 +379,43 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-31 (#113 — the pitch overlay now says which of its lines are measured and which are
+  extrapolated)** — The user reported three defects in the overlay: the lines do not sit cleanly on
+  the paint, the penalty arc "lags" the box, and the centre circle is drawn on grass where no circle
+  is visible. Measurement showed these are **one** defect: the homography is fit from keypoints
+  clustered in the near penalty area, so it is a **local** fit — **2.0 px median within ~25 m of the
+  near goal line (stable across all 60 frames), 37.1 px median beyond it (range 23–61 px)**, and the
+  centre circle projects to `u ∈ [1835, 2883]` on a 1920-wide frame so only a right-edge sliver leaks
+  in, onto empty grass, 316–331 px out, on 11 of 20 sampled frames — all early ones, matching the
+  user's "in the first few frames".
+  - Fixing the solve is a separate, larger job (#108/#61). What ships here is honesty (R-6: mark, do
+    not erase): the overlay still draws the extrapolated part, just not as if it were measured.
+  - `poseannot/pitch_evidence.py` checks every projected point **against the pixels of that frame**:
+    `ok` = painted line within tolerance (default 6 px — the markings are 12 cm wide and the model
+    draws their centreline), `off` = clear grass and no marking anywhere near, `unknown` = off the
+    grass (crowd, boards) so there is no evidence either way. `/api/pitch/calibrated/{frame}` returns
+    runs split by verdict; the UI draws `ok` solid green, `off` **dashed amber**, `unknown` dim.
+  - Deliberately **not** a hardcoded 25 m trust radius. That number is true for this clip and not in
+    general; pixel evidence transfers to any clip.
+  - The toolbar badge now reads `fit 2.0 px · ok 287 / off 51` — measured against this frame's paint,
+    counted only over points inside the 1920×1080 frame. It **replaces** the `conf` badge, which
+    #105/#106 showed is anti-predictive (confidence falls 0.60 → 0.46 across the clip while
+    near-field error stays flat at 2.0 px). Confidence is still in the tooltip, labelled as such.
+  - Measured per frame (in-browser, live): f0 `fit 1.4 px, ok 251 / off 51`; f15 `2.0, 256 / 47`;
+    f30 `2.8, 245 / 93`; f46 `2.0, 287 / 51`. Endpoint 271–301 ms warm, 5.4 s cold.
+  - **Two metric bugs found and fixed, both of the kind that flatters the result.** (a) The first
+    version scored the penalty arc a perfect **0.0 px** while the user's eye said it lagged: "white
+    on grass" was catching players' socks and shorts and the arc runs through a cluster of them.
+    Paint is a few px wide and a player is tens, so a 13×13 morphological opening (+31×31 dilation
+    margin) separates them. (b) Gap-bridging — which exists so a defender standing on the touchline
+    does not read as a calibration error — was a cv2 binary closing, whose border handling promoted a
+    *lone* confirmed sample into a confirmed run. Bridging now fills a gap only when it is **enclosed
+    by confirmed samples on both sides**. This moved frame 0 from 22 `off` to 51.
+  - `tests/unit/test_pitch_evidence.py` pins both: a fat white blob must classify `off`, and a
+    trailing gap after a lone confirmed sample must not be bridged.
+  - **Next (#114):** feed the far touchline / halfway line into the solve so the far field stops being
+    extrapolated. That is the substance of #108 and #61.
+
 - **2026-07-30 (#111 — players can be dragged onto their real feet; the drop pixel becomes a world
   position)** — Second half of the auto-calibration-with-manual-fine-tuning loop the user asked for.
   #110 put the *pitch* on screen through the solved homography; this puts the *players* there and
