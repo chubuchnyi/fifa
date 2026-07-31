@@ -6,10 +6,12 @@
 # **real SMPLest-X** pose + **real WASB** ball backends injected by dotted path (ADR-0006)
 # — i.e. the genuine single-cam -> world-SMPL-X path, end to end, on CUDA.
 #
-# Env (all have sensible pod defaults — override to point elsewhere):
-#   PITCH3D_REPO=/workspace/fifa            repo root (PYTHONPATH=src is set from here)
-#   PITCH3D_PY=/workspace/.venv/bin/python  interpreter with cuda torch + rfdetr + smplx
-#   PITCH3D_CLIP=/workspace/clip.mp4        input broadcast clip
+# Env (all have sensible pod defaults — override to point elsewhere). $VOL below is the network
+# volume, found by looking for `fifa` under /workspace then /runpod (see the resolver):
+#   PITCH3D_VOL=<auto>                      network-volume mount; set it to skip the search
+#   PITCH3D_REPO=$VOL/fifa                  repo root (PYTHONPATH=src is set from here)
+#   PITCH3D_PY=$VOL/.venv/bin/python        interpreter with cuda torch + rfdetr + smplx
+#   PITCH3D_CLIP=$VOL/clip.mp4              input broadcast clip
 #   FRAMES=8                                --frames
 #   OUT=out/run                             --out-dir (relative to repo)
 #   FORMAT=smplx_npz                        --format (json carries the ball; smplx_npz = bodies)
@@ -21,9 +23,20 @@
 # (defaults /workspace/repos/WASB-SBDT + wasb_soccer_best.pth.tar on cuda).
 set -euo pipefail
 
-REPO="${PITCH3D_REPO:-/workspace/fifa}"
-PY="${PITCH3D_PY:-/workspace/.venv/bin/python}"
-CLIP="${PITCH3D_CLIP:-/workspace/clip.mp4}"
+# Where the persistent network volume is mounted is a PER-POD setting: most of our pods put it on
+# /workspace, some on /runpod — and a pod that mounts it elsewhere still has an empty /workspace
+# from the image, so the path existing proves nothing. Resolve it by content (who has `fifa`)
+# instead of by name, because guessing wrong here is not loud: PNLCALIB_REPO below would miss and
+# the run would silently fall back to the proxy calibrator, i.e. the #203 depth collapse.
+VOL="${PITCH3D_VOL:-}"
+if [ -z "$VOL" ]; then
+  for c in /workspace /runpod; do [ -d "$c/fifa" ] && { VOL="$c"; break; }; done
+  VOL="${VOL:-/workspace}"
+fi
+
+REPO="${PITCH3D_REPO:-$VOL/fifa}"
+PY="${PITCH3D_PY:-$VOL/.venv/bin/python}"
+CLIP="${PITCH3D_CLIP:-$VOL/clip.mp4}"
 FRAMES="${FRAMES:-8}"
 OUT="${OUT:-out/run}"
 FORMAT="${FORMAT:-smplx_npz}"
@@ -34,13 +47,21 @@ FORMAT="${FORMAT:-smplx_npz}"
 # checkout; the `-d` guard falls back to the proxy ONLY when the repo is genuinely absent (e.g. a
 # local CPU box). Force the proxy explicitly with PNLCALIB_REPO= (empty). The backend reads its own
 # PNLCALIB_WEIGHTS_* paths (pod defaults are baked into pnlcalib_backend.make()).
-PNLCALIB_REPO="${PNLCALIB_REPO-/workspace/repos/PnLCalib}"
+PNLCALIB_REPO="${PNLCALIB_REPO-$VOL/repos/PnLCalib}"
 export PNLCALIB_REPO
 # SMPL-X model dir for the T6a v2 foot-plant provider (foot_plant_gate uses SMPL-X FK
 # to measure per-subject pelvis-above-foot; foot-plane target is the median of that).
 # The anim_export stage (pod_make_video.sh) already ships this — the reconstruction
 # stage needs it too now that foot_plant runs via controller.run_reconstruction.
-export PITCH3D_SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-/workspace/repos/SMPLest-X/human_models/human_model_files}"
+export PITCH3D_SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-$VOL/repos/SMPLest-X/human_models/human_model_files}"
+# The three model backends each carry their own `/workspace/...` default baked into Python, which
+# is right for most pods and wrong for a box that mounts the volume elsewhere. Re-point them from
+# $VOL here rather than in the adapters: the driver is the layer that knows what a pod looks like.
+export PITCH3D_SMPLESTX_REPO="${PITCH3D_SMPLESTX_REPO:-$VOL/repos/SMPLest-X}"
+export PITCH3D_WASB_REPO="${PITCH3D_WASB_REPO:-$VOL/repos/WASB-SBDT}"
+export PITCH3D_WASB_CKPT="${PITCH3D_WASB_CKPT:-$VOL/weights/wasb/wasb_soccer_best.pth.tar}"
+export PNLCALIB_WEIGHTS_KP="${PNLCALIB_WEIGHTS_KP:-$VOL/weights/pnlcalib/SV_kp}"
+export PNLCALIB_WEIGHTS_LINES="${PNLCALIB_WEIGHTS_LINES:-$VOL/weights/pnlcalib/SV_lines}"
 CALIB_ARGS=()
 if [ -n "${PNLCALIB_REPO}" ] && [ -d "${PNLCALIB_REPO}" ]; then
   CALIB_ARGS=(--calibrator keypoints
