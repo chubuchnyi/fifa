@@ -32,6 +32,7 @@ class TargetKind(str, Enum):
     ROOT_TRANSLATION = "root_translation"   # root transl (meters)
     SHAPE_BETA = "shape_beta"               # β shape coefficients
     BALL_POSITION = "ball_position"         # ball 3D position (meters)
+    FIELD_CALIBRATION = "field_calibration"  # where the pitch model sits on its own plane
 
 
 class CorrectionMode(str, Enum):
@@ -86,6 +87,27 @@ class OffsetPayload:
 
     def __post_init__(self) -> None:
         self.delta = np.asarray(self.delta, dtype=float).reshape(-1)
+
+
+@dataclass
+class PlaneTransformPayload:
+    """CONSTANT_OFFSET for FIELD_CALIBRATION: a 3x3 similarity of the pitch plane.
+
+    Composed on the **world** side — ``H'_world→image = H_world→image @ matrix`` — which is
+    what makes it safe. A world-plane similarity leaves ``K`` and the camera's rotation basis
+    intact (``K[r₁ r₂ t] @ B`` is again ``K[r₁' r₂' t']`` with ``r₁' ⟂ r₂'``), so re-registering
+    the pitch by hand cannot turn a camera-realizable calibration into an unrealizable one — the
+    #107 check keeps reading "one camera". An image-side ``A @ H`` would offer no such guarantee.
+
+    Restricting to a similarity (rotate, uniform scale, translate — 4 DOF) is the same argument
+    from the other end: a general projective nudge would leave the pitch a non-rectangle, i.e. no
+    longer the object whose dimensions we know.
+    """
+
+    matrix: np.ndarray  # (3, 3), acts on homogeneous pitch-plane points [x, y, 1]
+
+    def __post_init__(self) -> None:
+        self.matrix = np.asarray(self.matrix, dtype=float).reshape(3, 3)
 
 
 @dataclass

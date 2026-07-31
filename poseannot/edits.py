@@ -18,11 +18,19 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 import numpy as np
 
 from pitch3d.core.correction.engine import make_keyframes, make_offset
-from pitch3d.core.scene.layers import Correction, CorrectionTarget, TargetKind
+from pitch3d.core.scene.layers import (
+    Correction,
+    CorrectionMode,
+    CorrectionTarget,
+    FrameRange,
+    PlaneTransformPayload,
+    TargetKind,
+)
 
 #: string edit-kind (wire/API) → the scene TargetKind it addresses. The root
 #: kinds edit the SMPL-X root (global_orient / transl) rather than a body joint.
@@ -36,7 +44,18 @@ _LOCK = threading.Lock()
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _uid() -> str:
+    """The unique part of a correction id.
+
+    The timestamp alone is not one. Every edit here comes from a nudge gesture, which is repeated
+    by nature, and the ids were `...-{ts}` at one-second resolution — so two drags in the same
+    second minted the same id. Undo pops by position and kept working, which is why it went
+    unnoticed until a live undo returned the same id twice.
+    """
+    return uuid4().hex[:8]
 
 
 def load_edits(path: Path) -> list[Correction]:
@@ -78,7 +97,7 @@ def build_body_pose_edit(
     aa = np.asarray(axis_angle, dtype=float).reshape(3)
     ts = _now_iso()
     return make_keyframes(
-        f"manual-{user}-t{track_id}-f{frame}-j{joint_index}-{ts}",
+        f"manual-{user}-t{track_id}-f{frame}-j{joint_index}-{ts}-{_uid()}",
         CorrectionTarget(
             kind=TargetKind.POSE_BODY_JOINT,
             subject_track_id=int(track_id),
@@ -118,12 +137,51 @@ def build_root_edit(
     ts = _now_iso()
     end = int(frame if frame_end is None else frame_end)
     return make_offset(
-        f"manual-{user}-t{track_id}-f{frame}-{kind}-{ts}",
+        f"manual-{user}-t{track_id}-f{frame}-{kind}-{ts}-{_uid()}",
         CorrectionTarget(kind=tk, subject_track_id=int(track_id)),
         (int(frame), end),
         d,
         note=f"manual-{user}-{ts}",
     )
+
+
+def build_calibration_edit(
+    *,
+    frame: int,
+    frame_end: int,
+    matrix: np.ndarray,
+    user: str,
+    note: str | None = None,
+) -> Correction:
+    """Build a FIELD_CALIBRATION correction re-registering the pitch on its own plane (#112).
+
+    Whole-clip by default (``frame_end`` at the last frame): a layout that is a metre out on one
+    frame is a metre out on all of them, since the offset lives in the pitch model's placement
+    and not in the pan. Narrowing the range is possible but is almost always the wrong answer —
+    it buys alignment on one frame and a jump on the next.
+    """
+    ts = _now_iso()
+    return Correction(
+        id=f"pitch-{user}-f{frame}-{ts}-{_uid()}",
+        target=CorrectionTarget(kind=TargetKind.FIELD_CALIBRATION),
+        frame_range=FrameRange(int(frame), int(frame_end)),
+        mode=CorrectionMode.CONSTANT_OFFSET,
+        payload=PlaneTransformPayload(matrix=matrix),
+        note=note or f"manual-{user}-{ts}",
+        created_at=ts,
+    )
+
+
+def pop_last_calibration_edit(path: Path) -> Correction | None:
+    """Pop the most recent pitch-layout edit — undo for the one correction with no track_id."""
+    with _LOCK:
+        current = load_edits(path)
+        for i in range(len(current) - 1, -1, -1):
+            if current[i].target.kind is TargetKind.FIELD_CALIBRATION:
+                popped = current.pop(i)
+                save_edits(path, current)
+                return popped
+        return None
 
 
 def append_edit(path: Path, correction: Correction) -> list[Correction]:

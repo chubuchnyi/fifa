@@ -56,12 +56,14 @@ from .camera import (
     frame_projector,
     image_to_ground,
     plane_orientation,
+    plane_similarity,
     project_ground,
     project_points,
     project_world,
     world_to_image,
 )
 from .config import load as load_config
+from pitch3d.core.scene.layers import TargetKind
 from pitch3d.core.scene.projection import quat_to_rotation_matrix
 from pitch3d.core.scene.pitch import (
     pitch_line_world_points,
@@ -71,10 +73,14 @@ from pitch3d.core.scene.pitch import (
 from .pitch_evidence import DEFAULT_TOLERANCE_PX, classify
 from .scene_state import (
     BODY_JOINT_NAMES,
+    apply_and_persist_calibration_edit,
     apply_and_persist_edit,
     apply_and_persist_root_edit,
+    calibration,
+    camera,
     edited_frames,
     get_state,
+    undo_last_calibration_edit,
     undo_last_edit,
 )
 from .video import encode_jpeg, frame_size, read_frame
@@ -239,11 +245,11 @@ def api_joints2d(
     sub = st.subjects[tid]
     if frame < 0 or frame >= sub.frames.shape[0]:
         raise HTTPException(404, f"frame {frame} out of range for subject {tid}")
-    if st.scene.camera is None:
+    if camera(st) is None:
         raise HTTPException(500, "scene has no camera track")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    proj = frame_projector(camera(st), frame, video_size=vsize)
     joints2d = project_points(sub.joints[frame], proj)
     # replace NaN (behind camera) with None so JSON serializes cleanly
     pts = []
@@ -280,11 +286,11 @@ def api_mesh2d(
     sub = st.subjects[tid]
     if frame < 0 or frame >= sub.frames.shape[0]:
         raise HTTPException(404, f"frame {frame} out of range for subject {tid}")
-    if st.scene.camera is None:
+    if camera(st) is None:
         raise HTTPException(500, "scene has no camera track")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize, adjust=adj)
+    proj = frame_projector(camera(st), frame, video_size=vsize, adjust=adj)
     verts = sub.verts[frame]
     if stride <= 0:
         stride = max(1, verts.shape[0] // 1200)
@@ -340,13 +346,13 @@ def api_pitch(
     until it lands on the painted lines and the players follow."""
     del user
     st = get_state()
-    if st.scene.camera is None or getattr(st.scene, "field", None) is None:
+    if camera(st) is None or getattr(st.scene, "field", None) is None:
         raise HTTPException(500, "scene has no camera/field")
     if frame < 0 or frame >= st.n_frames:
         raise HTTPException(404, f"frame {frame} out of range")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize, adjust=adj)
+    proj = frame_projector(camera(st), frame, video_size=vsize, adjust=adj)
     field = st.scene.field
     world = pitch_line_world_points(field.dimensions, plane_z=field.plane_z, spacing=0.5)
     uv = project_points(world, proj)
@@ -372,7 +378,7 @@ _AGREE_PROBE = np.array(
 )
 
 
-def _camera_provenance(scene, w2i: np.ndarray, frame: int, width: int) -> dict:
+def _camera_provenance(cam, w2i: np.ndarray, frame: int, width: int) -> dict:
     """How far ``scene.camera`` is from the calibration it is supposed to *be*, in pixels.
 
     ``real`` here means "the same camera the pitch is drawn through", which is the only sense the
@@ -382,7 +388,6 @@ def _camera_provenance(scene, w2i: np.ndarray, frame: int, width: int) -> dict:
     Both sides are read at *this* frame: a real camera pans, so comparing its frame-0 pose against
     this frame's homography would report the pan itself as disagreement.
     """
-    cam = getattr(scene, "camera", None)
     if cam is None:
         return {"source": "none", "agree_px": None}
     row = int(np.argmin(np.abs(np.asarray(cam.frames, dtype=int) - int(frame))))
@@ -403,6 +408,24 @@ def _camera_provenance(scene, w2i: np.ndarray, frame: int, width: int) -> dict:
         "size": [int(cam.intrinsics.width), int(cam.intrinsics.height)],
         "static": bool(np.ptp(np.asarray(cam.translation, dtype=float), axis=0).max() == 0.0),
     }
+
+
+#: The pitch-layout gizmo, as a fraction of the frame. Fixed in SCREEN space rather than pinned
+#: to a landmark: a broadcast shot contains whatever part of the pitch it happens to contain, and
+#: a handle on the corner flag is unreachable in every frame where that corner is out of shot.
+#: These two are always on screen and always on the lawn, and the world points beneath them are
+#: read back through the current calibration — so the gesture is a pitch-plane gesture regardless.
+_GIZMO_UV = ((0.50, 0.60), (0.80, 0.60))
+
+
+def _gizmo(cal, frame: int, width: int, height: int) -> list[dict]:
+    """The two draggable layout handles at ``frame``, in pixels and in metres."""
+    px = np.array([[fu * width, fv * height] for fu, fv in _GIZMO_UV])
+    xy = image_to_ground(px, cal, frame)
+    return [
+        {"id": name, "uv": [float(u), float(v)], "world": [float(x), float(y)]}
+        for name, (u, v), (x, y) in zip(("move", "turn"), px, xy, strict=True)
+    ]
 
 
 @app.get("/api/pitch/calibrated/{frame}")
@@ -428,7 +451,7 @@ def api_pitch_calibrated(
     del user
     st = get_state()
     field = getattr(st.scene, "field", None)
-    cal = getattr(field, "calibration", None) if field is not None else None
+    cal = calibration(st)
     if cal is None:
         raise HTTPException(400, "scene has no field calibration — nothing to draw")
     if frame < 0 or frame >= st.n_frames:
@@ -504,7 +527,7 @@ def api_pitch_calibrated(
         # The pitch above comes from the homography; the players come from ``scene.camera``. For
         # months those were two different cameras 12686 px apart and every consumer read only one
         # of them, so nothing could see it. This is where it becomes visible without a script.
-        "camera": _camera_provenance(st.scene, w2i, frame, vw),
+        "camera": _camera_provenance(camera(st), w2i, frame, vw),
         "focal_px": used_focal,
         "focal_auto_px": auto_focal,
         # Where the chosen focal puts the camera, in metres. A broadcast rig is ~15-25 m up and
@@ -523,7 +546,76 @@ def api_pitch_calibrated(
         "tolerance_px": tol,
         "frame": int(frame),
         "video_size": [int(vw), int(vh)],
+        # Where to grab the layout to re-register it by hand (#112).
+        "handles": _gizmo(cal, frame, vw, vh),
+        "adjusted": any(
+            c.target.kind is TargetKind.FIELD_CALIBRATION and c.enabled
+            for c in st.scene.corrections
+        ),
     }
+
+
+class PitchAdjustRequest(BaseModel):
+    frame: int
+    #: which gizmo handle was dragged — ``move`` translates, ``turn`` rotates and scales.
+    handle: str
+    #: where it was dropped, in video pixels.
+    uv: list[float]
+
+
+@app.post("/api/pitch/adjust")
+def api_pitch_adjust(req: PitchAdjustRequest, user: str = Depends(current_user)) -> dict:
+    """Drag the pitch layout onto the painted lines (#112).
+
+    The solve can be a perfectly good *camera* and still sit a metre off along its own plane;
+    no residual we compute can see that, because the residual is scored against the very lines
+    that placed it. So the operator's eye is the instrument, and what their drag produces is a
+    world-plane similarity stored as an ordinary correction — non-destructive, undoable, and
+    provably unable to break the single-camera property (see ``PlaneTransformPayload``).
+    """
+    st = get_state()
+    cal = calibration(st)
+    if cal is None:
+        raise HTTPException(400, "scene has no field calibration — nothing to adjust")
+    if req.handle not in ("move", "turn"):
+        raise HTTPException(400, f"unknown handle {req.handle!r}")
+    if req.frame < 0 or req.frame >= st.n_frames:
+        raise HTTPException(404, f"frame {req.frame} out of range")
+
+    cfg = load_config()
+    vw, vh = frame_size(str(cfg.source_video))
+    try:
+        handles = _gizmo(cal, req.frame, vw, vh)
+        dst = image_to_ground(np.asarray([req.uv], dtype=float), cal, req.frame)[0]
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if not np.isfinite(dst).all():
+        raise HTTPException(400, "that pixel is not on the pitch plane")
+
+    anchor = np.asarray(handles[0]["world"], dtype=float)
+    src = np.asarray(handles[1 if req.handle == "turn" else 0]["world"], dtype=float)
+    b = plane_similarity(anchor=anchor, src=src, dst=dst, turn=req.handle == "turn")
+    corr = apply_and_persist_calibration_edit(
+        st, frame=0, frame_end=st.n_frames - 1, matrix=b, user=user,
+    )
+    return {
+        "ok": True,
+        "correction_id": corr.id,
+        "frame_range": [corr.frame_range.start, corr.frame_range.end],
+        # What the drag actually did, in units the user can sanity-check against a pitch.
+        "moved_m": round(float(np.linalg.norm(dst - src)), 2),
+        "scale": round(float(np.hypot(b[0, 0], b[1, 0])), 4),
+        "turn_deg": round(float(np.degrees(np.arctan2(b[1, 0], b[0, 0]))), 2),
+    }
+
+
+@app.post("/api/pitch/adjust/undo")
+def api_pitch_adjust_undo(user: str = Depends(current_user)) -> dict:
+    """Undo the most recent layout drag."""
+    del user
+    st = get_state()
+    popped = undo_last_calibration_edit(st)
+    return {"ok": popped is not None, "correction_id": None if popped is None else popped.id}
 
 
 #: SMPL-X body joints whose midpoint is "where this player is standing".
@@ -546,8 +638,7 @@ def api_frame_ground(n: int, user: str = Depends(current_user)) -> dict:
     """
     del user
     st = get_state()
-    field = getattr(st.scene, "field", None)
-    cal = getattr(field, "calibration", None) if field is not None else None
+    cal = calibration(st)
     if cal is None:
         raise HTTPException(400, "scene has no field calibration — nothing to place against")
     if n < 0 or n >= st.n_frames:
@@ -595,8 +686,7 @@ def api_subject_place(req: PlaceRequest, user: str = Depends(current_user)) -> d
     sub = st.subjects[req.track_id]
     if req.frame < 0 or req.frame >= sub.frames.shape[0]:
         raise HTTPException(404, f"frame {req.frame} out of range")
-    field = getattr(st.scene, "field", None)
-    cal = getattr(field, "calibration", None) if field is not None else None
+    cal = calibration(st)
     if cal is None:
         raise HTTPException(400, "scene has no field calibration — cannot place")
 
@@ -645,13 +735,13 @@ def api_frame_poses3d(n: int, user: str = Depends(current_user)) -> dict:
 def api_camera(frame: int, user: str = Depends(current_user)) -> dict:
     del user
     st = get_state()
-    if st.scene.camera is None:
+    if camera(st) is None:
         raise HTTPException(500, "scene has no camera track")
     if frame < 0 or frame >= st.n_frames:
         raise HTTPException(404, f"frame {frame} out of range")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    proj = frame_projector(camera(st), frame, video_size=vsize)
     return {
         "fx": proj.fx, "fy": proj.fy, "cx": proj.cx, "cy": proj.cy,
         "R": proj.R.tolist(),
@@ -671,13 +761,13 @@ def api_overlay3d(frame: int, user: str = Depends(current_user)) -> dict:
     Replaces the old per-tick ``?zoom=&pan=&yaw=`` re-projection round-trips."""
     del user
     st = get_state()
-    if st.scene.camera is None or getattr(st.scene, "field", None) is None:
+    if camera(st) is None or getattr(st.scene, "field", None) is None:
         raise HTTPException(500, "scene has no camera/field")
     if frame < 0 or frame >= st.n_frames:
         raise HTTPException(404, f"frame {frame} out of range")
     cfg = load_config()
     vsize = frame_size(str(cfg.source_video))
-    proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+    proj = frame_projector(camera(st), frame, video_size=vsize)
     field = st.scene.field
     world = pitch_line_world_points(field.dimensions, plane_z=field.plane_z, spacing=0.5)
     world = np.asarray(world, dtype=float)
@@ -743,10 +833,10 @@ def api_studio_ball(frame: int, user: str = Depends(current_user)) -> dict:
         "conf": float(conf[frame]) if conf is not None else None,
         "pt": None,
     }
-    if st.scene.camera is not None:
+    if camera(st) is not None:
         cfg = load_config()
         vsize = frame_size(str(cfg.source_video))
-        proj = frame_projector(st.scene.camera, frame, video_size=vsize)
+        proj = frame_projector(camera(st), frame, video_size=vsize)
         uv = project_points(pos[frame][None, :], proj)[0]
         if np.isfinite(uv).all():
             out["pt"] = [float(uv[0]), float(uv[1])]
@@ -844,9 +934,10 @@ def _serialize_subject_frame(cache, frame: int, joints2d_pts: list) -> dict:
 
 
 def _joints2d_for(state, cache, frame: int, video_size, adjust=None) -> list:
-    if state.scene.camera is None:
+    cam = camera(state)
+    if cam is None:
         return []
-    proj = frame_projector(state.scene.camera, frame, video_size=video_size, adjust=adjust)
+    proj = frame_projector(cam, frame, video_size=video_size, adjust=adjust)
     j2d = project_points(cache.joints[frame], proj)
     out = []
     for uv in j2d:

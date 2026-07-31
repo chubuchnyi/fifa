@@ -135,6 +135,24 @@ clear it — solves after #118 land right-handed.">mirrored world</span>
             title="stance handles: where the solved calibration puts each player's feet.
 Drag one onto the player's real feet — the drop pixel becomes a world position and the
 move is applied to the rest of that track.">feet</button>
+    <button @click="toggleLayout()" :class="{ active: showLayout }"
+            x-show="showPitch && pitchSource === 'calib'"
+            title="move the pitch model onto the painted lines. A calibration can be a perfectly
+good camera and still sit a metre off along its own plane — every residual we compute is scored
+against the same lines that placed it, so none of them can see that, and the fit reading above
+stays happy. Your eye is the instrument. Drag the SQUARE to slide the layout; drag the RING to
+spin and size it about the square. Applies to the whole clip, never touches the stored solve,
+and stays a similarity — so the pitch remains a rectangle of the right shape and the camera
+badge keeps reading 'one camera'.">layout</button>
+    <span x-show="showLayout && pitchAdjusted" class="sep">
+      <span style="color:var(--edited)"
+            :title="lastLayout
+              ? 'last drag: moved ' + lastLayout.moved_m + ' m, turned ' + lastLayout.turn_deg
+                + '°, scaled x' + lastLayout.scale
+              : 'this layout has been hand-registered; the stored solve is unchanged'"
+            x-text="lastLayout ? 'moved ' + lastLayout.moved_m + ' m' : 'hand-placed'"></span>
+      <button @click="undoLayout()" title="take back the last layout drag">undo layout</button>
+    </span>
     <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
             title="overlay orientation: rotate/move/flip about the pitch centre (C)">orient</button>
     <span class="user">
@@ -827,6 +845,14 @@ Alpine.data("poseAnnot", () => ({
     _dragTrack: null,         // track being dragged, or null
     _dragUV: null,            // live cursor position in source pixels while dragging
     lastPlace: null,          // {track_id, dx, dy, from, to} — last applied move, for the diag panel
+    // The pitch-layout gizmo (#112). Off by default: it sits mid-frame, where players are,
+    // and it must never quietly steal the drag from a stance handle.
+    showLayout: false,
+    pitchHandles: [],         // [{id:"move"|"turn", uv:[u,v], world:[x,y]}]
+    pitchAdjusted: false,     // is the drawn layout hand-registered rather than as-solved?
+    lastLayout: null,         // {moved_m, turn_deg, scale} — what the last drag did
+    _dragPitch: null,         // handle id being dragged, or null
+    _dragPitchUV: null,
     showCamAdjust: false,     // overlay-orient panel visible?
     // Overlay orientation: a rigid transform of the whole overlay (pitch +
     // skeletons + mesh) about the pitch-markings centre, applied in the browser.
@@ -1171,7 +1197,48 @@ Alpine.data("poseAnnot", () => ({
       this.pitchCamAgree = cam.agree_px;
       this.pitchCamFocal = cam.focal_px;
       this.pitchCamStatic = cam.static;
+      this.pitchHandles = d.handles || [];
+      this.pitchAdjusted = !!d.adjusted;
       this.rebuildOverlay();
+    },
+
+    toggleLayout() {
+      this.showLayout = !this.showLayout;
+      this.rebuildOverlay();
+    },
+
+    // Move the pitch model onto the painted lines. The client reports only where the cursor
+    // was; the server turns that pixel into a point on the plane and stores the similarity.
+    async adjustLayout(handle, uv) {
+      this.busy = true;
+      try {
+        const r = await fetch("/api/pitch/adjust", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ frame: this.frame, handle, uv }),
+        });
+        if (!r.ok) { this.diag.refresh = `layout failed ${r.status}`; return; }
+        this.lastLayout = await r.json();
+        // Both overlays are drawn through the calibration that just changed, so both are
+        // now stale — and the stance handles are the honest part: a re-registered pitch
+        // moves the players with it, which is exactly what the user needs to see.
+        await this.refreshCalibratedPitch();
+        await this.refreshGround();
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async undoLayout() {
+      this.busy = true;
+      try {
+        await fetch("/api/pitch/adjust/undo", { method: "POST" });
+        this.lastLayout = null;
+        await this.refreshCalibratedPitch();
+        await this.refreshGround();
+      } finally {
+        this.busy = false;
+      }
     },
 
     // Apply the overlay-orientation transform + camera projection entirely in the
@@ -1588,6 +1655,35 @@ Alpine.data("poseAnnot", () => ({
             + ` r="${hit}" fill="transparent" pointer-events="auto" style="cursor:grab"/>`);
         }
       }
+      // The pitch-layout gizmo (#112). A calibration can be a perfectly good camera and still
+      // put the pitch model a metre off along its own plane — every residual we compute is
+      // scored against the same lines that placed it, so none of them can see that. The eye can.
+      // Square = slide the layout; ring = spin and size it about the square. Drawn above the
+      // stance handles so it wins the hit-test, which is safe only because it is opt-in.
+      if (this.showLayout && this.showPitch && this.pitchSource === "calib"
+          && this.pitchHandles.length === 2) {
+        const s = this._srcPerScreen();
+        const sw = 2.0 * s, hit = 26 * s, half = 9 * s, rad = 12 * s;
+        const col = "#f472b6";
+        const at = (h) => (this._dragPitch === h.id && this._dragPitchUV) ? this._dragPitchUV : h.uv;
+        const [m, t] = this.pitchHandles.map(at);
+        out.push(`<line x1="${m[0]}" y1="${m[1]}" x2="${t[0]}" y2="${t[1]}" stroke="${col}"`
+          + ` stroke-width="${sw * 0.7}" stroke-dasharray="${6 * s} ${5 * s}" opacity="0.55"`
+          + ` pointer-events="none"/>`);
+        out.push(`<rect x="${m[0] - half}" y="${m[1] - half}" width="${half * 2}"`
+          + ` height="${half * 2}" fill="none" stroke="${col}" stroke-width="${sw}"`
+          + ` opacity="0.95" pointer-events="none"/>`);
+        out.push(`<circle cx="${m[0]}" cy="${m[1]}" r="${1.6 * s}" fill="${col}"`
+          + ` pointer-events="none"/>`);
+        out.push(`<circle cx="${t[0]}" cy="${t[1]}" r="${rad}" fill="none" stroke="${col}"`
+          + ` stroke-width="${sw}" opacity="0.95" pointer-events="none"/>`);
+        out.push(`<circle cx="${t[0]}" cy="${t[1]}" r="${rad * 0.34}" fill="${col}"`
+          + ` opacity="0.9" pointer-events="none"/>`);
+        for (const [h, u] of [[this.pitchHandles[0], m], [this.pitchHandles[1], t]]) {
+          out.push(`<circle class="pitch-handle" data-hid="${h.id}" cx="${u[0]}" cy="${u[1]}"`
+            + ` r="${hit}" fill="transparent" pointer-events="auto" style="cursor:grab"/>`);
+        }
+      }
       // ball marker (ball2d/ball3d stage layer) — drawn last, above the skeletons
       if (this.ballMarker2d) {
         const b = this.ballMarker2d;
@@ -1875,6 +1971,13 @@ Alpine.data("poseAnnot", () => ({
       // A stance handle takes the gesture instead of the pan. The capture stays on
       // .main either way, so the move/up handlers below see the whole drag even when
       // the cursor leaves the small handle.
+      const g = e.target.closest && e.target.closest(".pitch-handle");
+      if (g) {
+        this._dragPitch = g.dataset.hid;
+        this._dragPitchUV = this._clientToSource(e);
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
+        return;
+      }
       const h = e.target.closest && e.target.closest(".ground-handle");
       if (h) {
         this._dragTrack = Number(h.dataset.tid);
@@ -1889,6 +1992,11 @@ Alpine.data("poseAnnot", () => ({
     },
 
     onPanMove(e) {
+      if (this._dragPitch !== null) {
+        this._dragPitchUV = this._clientToSource(e);
+        this.rebuildOverlay();
+        return;
+      }
       if (this._dragTrack !== null) {
         this._dragUV = this._clientToSource(e);
         this.rebuildOverlay();
@@ -1902,6 +2010,13 @@ Alpine.data("poseAnnot", () => ({
     },
 
     onPanEnd(e) {
+      if (this._dragPitch !== null) {
+        if (e && e.type !== "pointerup") return;   // see the note below
+        const hid = this._dragPitch, uv = this._dragPitchUV;
+        this._dragPitch = null; this._dragPitchUV = null;
+        if (uv) this.adjustLayout(hid, uv);
+        return;
+      }
       if (this._dragTrack !== null) {
         // Only a real pointerup commits. Pointer capture still fires pointerleave when
         // the cursor crosses out of .main mid-drag, and committing on that would drop

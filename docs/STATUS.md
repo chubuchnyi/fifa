@@ -250,7 +250,8 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #120 | **Stored scenes declare a frame they are not in** | open, **inherited from #118** | Fixed the producer, not the artifacts. `out/*/export/scene.json` declares `world_frame: {up_axis: Z, handedness: right}` while its subject `transl`, ball `positions_3d` and homographies are still in the mirrored template frame — measured: 22/23 SMPL-X roots project in-shot as stored vs 17 Y-mirrored. Nothing looks wrong today (`plane_orientation` reads them correctly and the poseannot diag now shows `mirrored world`), but the label will mirror the first renderer that trusts it. Not flipped blind: 60 frames of user-validated poses. **#119 did most of it**: `scene_rigid.json` is right-handed throughout, with `transl → M·t` and `global_orient → M·R·M`. What is left is narrow and named — each body's own **left/right** mirror (the SMPL-X joint permutation), so bodies there are placed and facing correctly while being internally their own mirror image. The old scene is untouched and still mislabelled. |
 | #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): 184 parameters beat 480 on paint (1.28 vs 1.62 px) and on pixel motion (1.44 vs 7.18) *simultaneously*; steadiness is **0.55 vs 4.08 px** of gap-1 residual against 8.55 px of real camera motion (the `jitter` column, 5.11 vs 5.31, is too flat to discriminate and is a guard, not evidence). f = 4169 px @1920×1080 from four seeds spanning 2700–5200, centre (−2.3, −70.1, 17.2) m — a focal sweep brackets the paint minimum on both sides, so **±10 %**, and since `f/dist` is fixed at ≈57 the distance carries the same ±10 %. Written to `scene_rigid.json` and registered in the clip switcher **beside** the old scene — the alignment verdict is the user's, per the ground-truth rule. |
 | #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 ±10 % at 1.44 px. The spread was the functionals disagreeing, not the data — and the #119 sweep says which functional was wrong: the pixel-motion residual is **monotone** in the focal (0.85 px at f=2700 rising to 1.64 at 5200, no interior minimum anywhere), so it can never name a focal on its own, while the paint's minimum is bracketed on both sides. #117 read the flat instrument. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
-| #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
+| #112 | **Drag the pitch layout to correct the homography** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): the manual-override half of the standing request, alongside #111's per-player drags. The gesture must exist because **no residual we compute can see this error** — every one is scored against the same lines that placed the model, so the operator's eye is the only instrument. The design choice that makes it safe is composing the edit on the **world plane** (`H @ B`, a 4-DOF similarity) rather than in image space (`A @ H`): `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']`, so the drag provably cannot turn a camera-realizable calibration unrealizable, and K is never touched so the focal is unchanged. Live drag: `fit_px` 1.0 → 19.38 with the camera badge held at `measured · 0.0 px · f 4169.3`; undo restores `edits.json` byte-identical. The `turn` handle is pinned by unit test and by curl but **not yet watched in a browser** (session died, #122). |
+| #122 | **An expired session silently degrades the UI instead of asking for a re-login** | open, **found live during #112** | The `poseannot_token` cookie lasts `jwt_expire_hours: 24`; when it lapses mid-session the page keeps polling `/api/frame/{n}/ground` forever and just drops its ground handles. `/tmp/poseannot.log` had accumulated **48 821** `401 Unauthorized` on that one endpoint while the frame the user was looking at still rendered from cache — so the overlay quietly stops being live and nothing says so. Blocked the browser half of the #112 check. Fix is small (surface the 401 as a re-login prompt and stop the poll), but it is exactly the class of failure R-6 says to *mark, not hide*. |
 | #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. **#107 added the check that was missing** — the pipeline now recovers `scene.camera` *from* the calibration and the UI shows the two-camera distance in the header, so this defect can no longer ship silently a second time. Close once the user has looked. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
 | #107 | Render the **measured** camera, not the synthetic one | **done 2026-07-31** | Was framed as a decision; it was a measurement, and it came out **neither** for the old scene (§6). `core/scene/plane_camera.py` decomposes the calibration into a real `CameraTrack` (focal from Zhang's constraint, no extra input) and **refuses** — `camera is None` — when no camera explains the homographies. Control: `scene_rigid.json` → focal 4169, reprojection **0.0003 px**; `scene.json`'s 480 free params → **5048 px**, so #107 was never an oversight, there was nothing to render. `AppController` now keeps the solved camera and falls back only when the refusal fires; the header badge names which you are looking at (`one camera · 0 px` vs amber `two cameras · 6220.64 px apart`). Unblocks #109. |
@@ -258,7 +259,8 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #60 | Re-run overlays + verify acceptable alignment | pending | The eye-check that closes the calibration thread. Largely overtaken by the poseannot overlay work (#110–#116), which measures alignment against real paint per frame; keep open until a full A/B re-render is judged. |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** | This is the whole GPU pipeline (rfdetr+bytetrack+gvhmr+keypoints+physics+export) as a minutes-long async job — only runnable on the pod, not this CPU box. Needs a green light on *where it runs* before anything is built. **Do NOT stub a fake generate button.** |
 
-Recently closed (evidence in §6): **#119** the clip is ONE camera, and it beats 480 free parameters
+Recently closed (evidence in §6): **#112** the pitch layout is draggable and the drag provably keeps
+the one camera · **#119** the clip is ONE camera, and it beats 480 free parameters
 on every metric at once · **#118** the world frame is measured, not assumed · **#116** goal frames +
 corner flags overlaid, focal as a hand
 control · **#115** the "D" was a 14 m phantom chord · **#114** the far field was never 37 px out ·
@@ -409,6 +411,60 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-31 (#112 — the pitch layout is draggable, and the drag provably cannot cost us the
+  camera)** —
+  User: *"пользователь должен провалидировать это, перемещая поверх фрэймов лэйоут поля"*. The
+  manual-override half of the standing request; #111 already shipped dragging players.
+  - **Why the gesture has to exist at all.** A calibration can be a perfectly good camera and still
+    place the pitch model a metre off along its own plane. Every residual we compute — #110's
+    `fit_px`, #113's evidence marking, #119's paint cost — is scored against the same painted lines
+    that *placed* the model, so none of them can see that offset. The operator's eye is the only
+    instrument that can. That is also why this is an override and not a solver.
+  - **The whole design is one choice: compose on the world side, `H_w2i @ B`, not the image side,
+    `A @ H_w2i`.** The obvious implementation is to shift the drawing on screen. It is the wrong
+    one, and #107 is why: `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']` with `r₁' ⟂ r₂'`, so a
+    world-plane similarity **cannot** turn a camera-realizable calibration into an unrealizable
+    one, and `K` is never touched so the reported focal is unchanged. The rejected `A @ H` form is
+    not decomposable at any focal — pinned as its own test, so the realizability check cannot pass
+    by being blind. Restricting `B` to a similarity (rotate + uniform scale + translate, 4 DOF) is
+    the same argument from the other end: a general projective nudge would leave the pitch a
+    non-rectangle, i.e. no longer the object whose dimensions we know.
+  - **The defect the design did not prevent, found on the first live drag.** Moving the pitch under
+    a fixed `scene.camera` re-split the two descriptions — the header badge went from `measured
+    0.0 px` to `synthetic 2500.79 px`, which is #61 walking back in through the editor.
+    Realizable-in-principle was never the invariant; *the scene's camera **is** the scene's
+    calibration* is. Fixed by `adjusted_camera()`: the same right-multiply moves the camera
+    exactly, `[R[:,0] R[:,1] t] @ B` normalised by `‖m₀‖` with `r₃ = r₁ × r₂` — no re-solve, no
+    focal re-measurement. All 12 `st.scene.camera` reads in `app.py` now go through
+    `scene_state.camera(st)` so the two can only move together.
+  - **Live on `rigid-camera`, real pointer events in Chrome** (`move` handle, 960,648 → 1050,608):
+
+    | state | `adjusted` | `fit_px` | camera badge | readout |
+    |---|---|---|---|---|
+    | baseline | False | 1.0 | measured · 0.0 px · f 4169.3 | — |
+    | after drag | True | **19.38** | measured · **0.0 px** · f **4169.3** | `moved 9.82 m` |
+    | after undo | False | 1.0 | measured · 0.0 px | — |
+
+    `fit_px` rising is the *correct* reading: the layout was deliberately dragged off the paint, and
+    #113 re-marked the markings as extrapolated on its own. The badge holding at 0.0 px through a
+    9.82 m re-registration is the claim above, measured. Pitch **and players move together as one
+    rigid world**, which is what a re-registration means — per-subject nudges stay #111's job. The
+    edit survived a page reload and `edits.json` after undo is byte-identical to the pre-test
+    backup.
+  - **Correction ids were not unique**, found because a live undo returned the same id twice. Every
+    id here was `...-{ts}` at one-second resolution, and every one of these edits comes from a
+    *nudge* gesture, which is repeated by nature — the layout id was the worst case, since its
+    whole-clip range pins `frame` at 0 so two drags in the same second were indistinguishable. Undo
+    pops by position and kept working, which is exactly why it went unnoticed. `_uid()` now makes
+    the id unique by construction rather than by timing luck; ms resolution on `created_at` is a
+    side benefit, not the fix. Applies to the player and joint builders too.
+  - **Not yet judged by eye.** The browser session's 24 h cookie expired mid-check (the server log
+    had accumulated **48 821** `401 Unauthorized` on `/api/frame/{n}/ground` — the page keeps
+    polling with a dead cookie and silently loses its ground handles instead of saying "log in
+    again"; opened as #122). The `turn` handle's commit is therefore pinned by test and by curl but
+    has not been watched in a browser. **The alignment verdict is the user's**, per the
+    ground-truth rule.
 
 - **2026-07-31 (#107 — the render camera is now the clip's camera, and when it cannot be, the code
   says so instead of inventing one)** —

@@ -46,6 +46,7 @@ _CLASSES: list[type] = [
     # layers
     layers.FrameRange, layers.CorrectionTarget, layers.OffsetPayload,
     layers.KeyframePayload, layers.RefitPayload, layers.SmoothingPayload,
+    layers.PlaneTransformPayload,
     layers.Correction, layers.ConfidenceMap,
     layers.Layer, layers.TargetKind, layers.CorrectionMode,
     # assets

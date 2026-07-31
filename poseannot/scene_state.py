@@ -25,13 +25,16 @@ from pitch3d.core.scene.layers import Correction, TargetKind
 from pitch3d.core.scene.scene import Scene
 from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
 
+from .camera import adjusted_calibration, adjusted_camera
 from .config import PoseAnnotConfig
 from .config import load as load_config
 from .edits import append_edit as _persist_edit
 from .edits import (
     build_body_pose_edit,
+    build_calibration_edit,
     build_root_edit,
     load_edits,
+    pop_last_calibration_edit,
     pop_last_matching,
 )
 
@@ -216,6 +219,67 @@ def apply_and_persist_root_edit(
         )
     cache = rebuild_subject_cache(st, track_id, cfg)
     return cache, corr
+
+
+def camera(st: SceneState):
+    """``scene.camera`` moved by the same layout drags the calibration got (#112).
+
+    Read through here, never off ``scene.camera`` directly: the two are one camera (#107) and
+    the only way to keep them one is to move them together.
+    """
+    return adjusted_camera(getattr(st.scene, "camera", None), st.scene.corrections)
+
+
+def calibration(st: SceneState):
+    """The field calibration as the user has re-registered it (#112), or ``None`` if absent.
+
+    Every consumer of the pitch plane goes through here rather than reaching into
+    ``scene.field.calibration``, so the markings, the player handles and the drop-a-player
+    back-projection all read one calibration and cannot drift apart.
+    """
+    fld = getattr(st.scene, "field", None)
+    cal = getattr(fld, "calibration", None) if fld is not None else None
+    if cal is None:
+        return None
+    return adjusted_calibration(cal, st.scene.corrections)
+
+
+def apply_and_persist_calibration_edit(
+    st: SceneState,
+    *,
+    frame: int,
+    frame_end: int,
+    matrix,
+    user: str,
+    cfg: PoseAnnotConfig | None = None,
+) -> Correction:
+    """Persist a pitch-layout drag and fold it into the scene. No FK rebuild — subjects are
+    stored in world coordinates, so moving the pitch model moves what is *drawn*, not the bodies.
+    """
+    cfg = cfg or load_config()
+    corr = build_calibration_edit(
+        frame=frame, frame_end=frame_end, matrix=matrix, user=user,
+    )
+    _persist_edit(cfg.corrections_out, corr)
+    with st.lock:
+        from dataclasses import replace as _dc_replace
+        st.scene = _dc_replace(st.scene, corrections=[*st.scene.corrections, corr])
+    return corr
+
+
+def undo_last_calibration_edit(
+    st: SceneState, cfg: PoseAnnotConfig | None = None,
+) -> Correction | None:
+    """Pop the most recent pitch-layout drag; ``None`` if there is none left."""
+    cfg = cfg or load_config()
+    popped = pop_last_calibration_edit(cfg.corrections_out)
+    if popped is None:
+        return None
+    with st.lock:
+        from dataclasses import replace as _dc_replace
+        remaining = [c for c in st.scene.corrections if c.id != popped.id]
+        st.scene = _dc_replace(st.scene, corrections=remaining)
+    return popped
 
 
 def undo_last_edit(
