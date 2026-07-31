@@ -88,6 +88,7 @@ from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
 from ..core.scene.assets import RenderAssetRef, SynthViewRef, SynthViewSeam
 from ..core.scene.camera import CameraTrack
+from ..core.scene.plane_camera import PlaneCameraFit, camera_from_calibration
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.review import AttentionItem, attention_list
 from ..core.scene.scene import Episode, EpisodeSource, Scene, Source, SourceKind
@@ -113,6 +114,7 @@ class Application:
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
     _scene_kinematics: dict[str, KinematicReport | None] = field(default_factory=dict, repr=False)
+    _scene_camera_fit: dict[str, PlaneCameraFit] = field(default_factory=dict, repr=False)
     _scene_contact: dict[str, ContactProbeReport | None] = field(default_factory=dict, repr=False)
     _snapshots: SnapshotStore = field(default_factory=SnapshotStore, repr=False)
     _ids: dict[str, itertools.count[int]] = field(default_factory=dict, repr=False)
@@ -291,7 +293,7 @@ class Application:
                     scene, physics_cfg.joint_smooth, fps=clip.fps,
                 )
 
-        scene.camera = self._static_camera(scene)
+        scene.camera = self._measured_camera(scene, clip) or self._static_camera(scene)
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
         self._scene_stitch[scene_id] = result.stitch
@@ -633,8 +635,33 @@ class Application:
             return scene.ball.frames
         return np.arange(1)
 
+    def _measured_camera(self, scene: Scene, clip: ClipRef) -> CameraTrack | None:
+        """The camera the scene's own calibration came from, or ``None`` if it did not come from one.
+
+        ``None`` is the common answer and not a failure: a calibration of *free* per-frame
+        homographies is not a camera at any focal (#107), so the caller falls back to the synthetic
+        track. Refusing beats emitting a plausible wrong camera — that is the #61 defect, where a
+        scene carried two cameras 12686 px apart and nothing noticed for months.
+        """
+        if scene.field is None or scene.field.calibration is None:
+            return None
+        fit = camera_from_calibration(
+            scene.field.calibration, width=clip.width, height=clip.height
+        )
+        self._scene_camera_fit[scene.id] = fit
+        return fit.camera
+
+    def camera_fit(self, scene_id: str) -> PlaneCameraFit | None:
+        """Why a scene's camera is measured or synthetic — focal and reprojection, in pixels."""
+        return self._scene_camera_fit.get(scene_id)
+
     def _static_camera(self, scene: Scene) -> CameraTrack:
-        """A static broadcast camera replicated over the whole clip (default render path)."""
+        """A static broadcast camera replicated over the whole clip (fallback render path).
+
+        Used only where :meth:`_measured_camera` refuses. It is *not* the clip's camera and cannot
+        be compared pixel-to-pixel with the source — anything doing that must check
+        :meth:`camera_fit` first.
+        """
         frames = self._scene_frames(scene)
         cam0 = standard_viewpoints(scene, which=[Viewpoint.BROADCAST], frame=int(frames[0]))[0].camera
         t = frames.shape[0]

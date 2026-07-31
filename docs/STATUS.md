@@ -251,10 +251,10 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): 184 parameters beat 480 on paint (1.28 vs 1.62 px) and on pixel motion (1.44 vs 7.18) *simultaneously*; steadiness is **0.55 vs 4.08 px** of gap-1 residual against 8.55 px of real camera motion (the `jitter` column, 5.11 vs 5.31, is too flat to discriminate and is a guard, not evidence). f = 4169 px @1920×1080 from four seeds spanning 2700–5200, centre (−2.3, −70.1, 17.2) m — a focal sweep brackets the paint minimum on both sides, so **±10 %**, and since `f/dist` is fixed at ≈57 the distance carries the same ±10 %. Written to `scene_rigid.json` and registered in the clip switcher **beside** the old scene — the alignment verdict is the user's, per the ground-truth rule. |
 | #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 ±10 % at 1.44 px. The spread was the functionals disagreeing, not the data — and the #119 sweep says which functional was wrong: the pixel-motion residual is **monotone** in the focal (0.85 px at f=2700 rising to 1.64 at 5200, no interior minimum anywhere), so it can never name a focal on its own, while the paint's minimum is bracketed on both sides. #117 read the flat instrument. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
-| #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. Close once the user has looked. |
+| #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. **#107 added the check that was missing** — the pipeline now recovers `scene.camera` *from* the calibration and the UI shows the two-camera distance in the header, so this defect can no longer ship silently a second time. Close once the user has looked. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
-| #107 | Decide: render the **measured** camera or keep the synthetic one | pending, **a decision, not code** | `AppController` unconditionally replaces the solved per-frame `CameraTrack` with a synthetic tiled BROADCAST pose (translation spread over 60 frames is exactly `[0,0,0]` m). So our "broadcast" render cannot be compared pixel-to-pixel with the source — which is what #60 wants. Blocks #109's cleanest fix. |
-| #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending | 0/23 usable crops: it projects through `scene.camera`, which #107 makes synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. Fix = crop via `field.calibration.homographies` at native res. Ships independently of #107. |
+| #107 | Render the **measured** camera, not the synthetic one | **done 2026-07-31** | Was framed as a decision; it was a measurement, and it came out **neither** for the old scene (§6). `core/scene/plane_camera.py` decomposes the calibration into a real `CameraTrack` (focal from Zhang's constraint, no extra input) and **refuses** — `camera is None` — when no camera explains the homographies. Control: `scene_rigid.json` → focal 4169, reprojection **0.0003 px**; `scene.json`'s 480 free params → **5048 px**, so #107 was never an oversight, there was nothing to render. `AppController` now keeps the solved camera and falls back only when the refusal fires; the header badge names which you are looking at (`one camera · 0 px` vs amber `two cameras · 6220.64 px apart`). Unblocks #109. |
+| #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, **unblocked by #107** | 0/23 usable crops: it projects through `scene.camera`, which used to be synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. #107 fixes the *identity* of the camera but not the resolution — on `rigid-camera` the recovered camera is native 1920×1080, on the old scene it is still the synthetic fallback. Fix = crop via `field.calibration.homographies` at native res, which works either way. |
 | #60 | Re-run overlays + verify acceptable alignment | pending | The eye-check that closes the calibration thread. Largely overtaken by the poseannot overlay work (#110–#116), which measures alignment against real paint per frame; keep open until a full A/B re-render is judged. |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** | This is the whole GPU pipeline (rfdetr+bytetrack+gvhmr+keypoints+physics+export) as a minutes-long async job — only runnable on the pod, not this CPU box. Needs a green light on *where it runs* before anything is built. **Do NOT stub a fake generate button.** |
 
@@ -358,7 +358,10 @@ fabricate or silently hide.
   `src/pitch3d/adapters/models/calibration.py` (identity fallback; `CameraModuleFieldCalibrator`),
   `src/pitch3d/core/scene/units.py` (`FieldDimensions` 105×68 m).
 - **Cameras (#204):** `src/pitch3d/core/agent/viewpoints.py` (`standard_viewpoints` 63 m radius,
-  `action_centroid`), `src/pitch3d/app/controller.py` (`_static_camera`, frozen frame-0).
+  `action_centroid`), `src/pitch3d/app/controller.py` (`_measured_camera` → `_static_camera`
+  fallback, frozen frame-0), `src/pitch3d/core/scene/plane_camera.py` (#107 —
+  `camera_from_calibration`: homographies → real `CameraTrack`, or `None` when none exists;
+  `REALIZABLE_PX = 1.0` is the line between the two).
 - **Render / pitch / goals (#205):** `src/pitch3d/adapters/blender/_cycles_script.py` (`_add_ground`,
   `_build_pitch`), `src/pitch3d/adapters/render/cycles.py` (`draw_pitch`), `src/pitch3d/core/scene/pitch.py`
   (markings). Goals: add a `_build_goals()` mesh (absent today).
@@ -406,6 +409,61 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-07-31 (#107 — the render camera is now the clip's camera, and when it cannot be, the code
+  says so instead of inventing one)** —
+  User: *"синтетическую камеру замени на реальную"*. `AppController.run_reconstruction` ended with
+  an unconditional `scene.camera = self._static_camera(scene)`, so a solved camera never survived
+  to export and every artifact carried a synthetic tiled BROADCAST pose. New
+  `src/pitch3d/core/scene/plane_camera.py` recovers the real one from the calibration itself:
+  `scene.camera = self._measured_camera(scene, clip) or self._static_camera(scene)`.
+  - **A plane homography *is* a camera, once the focal is known — and the focal comes from the same
+    homographies for free.** For `Z = 0`, `H ≃ K [r₁ r₂ t]`, so `K⁻¹H` hands back two rotation
+    columns and the translation, up to a scale fixed by `‖r₁‖ = 1` and a sign fixed by putting the
+    pitch in front of the lens. `r₁` and `r₂` must be unit and orthogonal (Zhang) — two equations
+    per frame on one unknown, so nothing but the calibration goes in. No scipy: 96-point log grid
+    over 300–20000 px, then golden-section (the residual is smooth but not convex over three
+    octaves, and a local search from a fixed start lands in the wrong basin).
+  - **#107 was never a decision. It was a measurement, and the measurement says the old calibration
+    had no camera to render.** The issue framed it as "measured or synthetic?"; the answer is that
+    for *free* per-frame homographies **neither** — no focal exists that makes `r₁·r₂` vanish,
+    because nothing ever asked the 60 frames to share a `K`. Control experiment, same code on both:
+
+    | scene | Zhang focal | residual cost | worst ground reprojection | verdict |
+    |---|---|---|---|---|
+    | `scene.json` (480 free params) | 4006 px | 6.41e-01 | **5048 px** | **not a camera** |
+    | `scene_rigid.json` (#119, 184 params) | **4169 px** | **1.85e-16** | **0.0003 px** | **is a camera** |
+
+    So `camera_from_calibration` returns a `PlaneCameraFit` whose `camera` is `None` rather than a
+    plausible-looking wrong one, and the caller keeps its *labelled* synthetic fallback. A
+    wrong-but-plausible camera is exactly what shipped for months (#61).
+  - **The SVD orthonormality snap is what makes the refusal work**, and finding that cost two failed
+    hypotheses. First I predicted the decomposition would be focal-independent on the ground plane
+    (it is not: 12730 px at f=1158, and the centre came out at z = −16 m, *below* the pitch — that
+    was #118's mirror, fixed with `M = diag(1,−1,1)`). Then, with the mirror applied, the centre
+    became physically right (18 m up, 77 m back) and the ground error *stayed* at 1022 px. The
+    cause: at a wrong focal the columns are not orthonormal, the snap to the nearest rotation moves
+    them, and the fit visibly breaks. At the right focal the snap is a no-op. That is why one
+    number — `reprojection_px`, worst over frames and image corners — doubles as the honesty test,
+    and why the manual focal override cannot become a back door around it.
+  - **The round-trip is exact and unassisted.** Handed only `scene_rigid.json`'s stored
+    homographies — no video, no #119 fit file — it returns focal **4169.3** and centre
+    **(−2.29, −70.13, 17.22) m**, byte-matching #119's ground truth, and independently rediscovers
+    that the camera is *rigid*: centre spread over 60 frames = `[0, 0, 0]` m. A third confirmation
+    of the focal: 4006 from the old scene's homographies, ~3.5 % from 4169.
+  - **The UI now names which camera you are looking at** (#61's missing check, in the header beside
+    `mirrored world`): `one camera · N px` or, in amber, `two cameras · N px apart` — the distance
+    between where `scene.camera` and the calibration put the same pitch landmarks. Verified live in
+    Chrome by switching clips: `default` and `raw-pose` → `two cameras · 6220.64 px apart`,
+    synthetic, focal 772, static track; `rigid-camera` → **`one camera · 0 px`**, measured, focal
+    4169, `cam −2.3, −70.1, 17.2 m`, and the `mirrored world` badge gone. Nothing checked this
+    before, which is how 6220 px shipped: every consumer reads only one of the two cameras.
+  - `tests/unit/test_plane_camera_recovery.py` pins **both halves** — recovery (focal read back to
+    1e-6, projections anchored against `scene.project`, not merely self-consistent) *and* refusal
+    (5 % per-frame homography noise → `camera is None`; an override 3.6× short → `None`). Plus an
+    anti-vacuity test: a **2 %** focal error must be caught, so the probe is not too blunt to see
+    anything. The #107 regression itself is pinned through the #61 invariant — `scene.camera is
+    fit.camera`, and camera ≡ calibration on pitch landmarks to 1e-6.
 
 - **2026-07-31 (#119 — the clip is one camera, and that is measurably a better fit than 480 free
   parameters; this also closes #61)** —
@@ -871,6 +929,11 @@ fabricate or silently hide.
   so it cannot be compared pixel-to-pixel against the source clip — which is exactly what #60/#61 want
   to do. Decide before v2 photoreal: fix #61 and render the measured camera, or keep the synthetic one
   and drop pixel-comparison as an acceptance test.
+  **Answered 2026-07-31 (top of this log), and the dichotomy above was false.** Both branches assume a
+  measured camera existed to choose against. It did not: this artifact's 480 free per-frame homographies
+  are not a camera at any focal (best-case reprojection **5048 px**), so "render the measured camera"
+  had no referent here. Both halves of the resolution were needed — recover the camera where one exists
+  (#119's rigid solve: **0.0003 px**) *and* refuse where it does not.
 
 - **2026-07-30 (#94 / R2 — camera propagation SHIPPED as a trade, not as a win)** —
   the calibration swims: **median 0.119 m / p95 0.468 m** of frame-to-frame scene slide on a camera

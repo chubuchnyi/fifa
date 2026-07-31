@@ -62,6 +62,7 @@ from .camera import (
     world_to_image,
 )
 from .config import load as load_config
+from pitch3d.core.scene.projection import quat_to_rotation_matrix
 from pitch3d.core.scene.pitch import (
     pitch_line_world_points,
     pitch_polylines,
@@ -364,6 +365,46 @@ def _clip_focal(cal, width: int, height: int) -> float | None:
     return float(np.median(good)) if good else None
 
 
+#: Pitch landmarks pushed to the corners. Two cameras that disagree in focal still agree near the
+#: principal point, so a centre-huddled probe reads ~0 px on a scene that is 12686 px out.
+_AGREE_PROBE = np.array(
+    [[0.0, 0.0], [52.5, 34.0], [-52.5, -34.0], [52.5, -34.0], [-52.5, 34.0], [0.0, 34.0]]
+)
+
+
+def _camera_provenance(scene, w2i: np.ndarray, frame: int, width: int) -> dict:
+    """How far ``scene.camera`` is from the calibration it is supposed to *be*, in pixels.
+
+    ``real`` here means "the same camera the pitch is drawn through", which is the only sense the
+    overlay can check. A scene whose camera was measured from this clip reads ~0; one carrying the
+    synthetic broadcast pose (#107) reads thousands, and the players sit off their own feet.
+
+    Both sides are read at *this* frame: a real camera pans, so comparing its frame-0 pose against
+    this frame's homography would report the pan itself as disagreement.
+    """
+    cam = getattr(scene, "camera", None)
+    if cam is None:
+        return {"source": "none", "agree_px": None}
+    row = int(np.argmin(np.abs(np.asarray(cam.frames, dtype=int) - int(frame))))
+    rot = quat_to_rotation_matrix(cam.rotation_quat[row])
+    ground = np.column_stack([_AGREE_PROBE, np.zeros(len(_AGREE_PROBE))])
+    p = (ground @ rot.T + cam.translation[row]) @ cam.intrinsics.matrix().T
+    with np.errstate(invalid="ignore", divide="ignore"):
+        through_cam = p[:, :2] / p[:, 2, None]
+    # The camera may be stored at a render size; compare in ITS pixel space, not the video's.
+    scale = float(cam.intrinsics.width) / float(width)
+    through_hom = project_ground(_AGREE_PROBE, w2i) * scale
+    d = np.linalg.norm(through_cam - through_hom, axis=1)
+    agree = float(np.nanmax(d)) if np.isfinite(d).any() else None
+    return {
+        "source": "measured" if (agree is not None and agree <= 1.0) else "synthetic",
+        "agree_px": None if agree is None else round(agree, 2),
+        "focal_px": round(float(cam.intrinsics.fx), 1),
+        "size": [int(cam.intrinsics.width), int(cam.intrinsics.height)],
+        "static": bool(np.ptp(np.asarray(cam.translation, dtype=float), axis=0).max() == 0.0),
+    }
+
+
 @app.get("/api/pitch/calibrated/{frame}")
 def api_pitch_calibrated(
     frame: int,
@@ -459,6 +500,11 @@ def api_pitch_calibrated(
     return {
         "polylines": polylines,
         "uprights": uprights,
+        # Whether the players and these markings are drawn through the SAME camera (#61/#107).
+        # The pitch above comes from the homography; the players come from ``scene.camera``. For
+        # months those were two different cameras 12686 px apart and every consumer read only one
+        # of them, so nothing could see it. This is where it becomes visible without a script.
+        "camera": _camera_provenance(st.scene, w2i, frame, vw),
         "focal_px": used_focal,
         "focal_auto_px": auto_focal,
         # Where the chosen focal puts the camera, in metres. A broadcast rig is ~15-25 m up and

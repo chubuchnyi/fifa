@@ -104,6 +104,25 @@ between frames. A focal that buries it underground or plants it on the pitch is 
 whatever the overlay looks like — so read this before trusting a hand-set number."
           x-text="pitchCamera ? 'cam ' + pitchCamera[0] + ', ' + pitchCamera[1]
                 + ', ' + pitchCamera[2] + ' m' : ''"></span>
+    <span x-show="showPitch && pitchSource === 'calib' && pitchCamSource"
+          class="sep" :style="pitchCamSource === 'measured' ? '' : 'color:var(--edited)'"
+          :title="pitchCamSource === 'measured'
+            ? 'The players and these markings are drawn through the SAME camera: scene.camera '
+              + 'reproduces this clip\'s calibration to ' + pitchCamAgree + ' px on the pitch, at '
+              + 'focal ' + pitchCamFocal + ' px' + (pitchCamStatic ? '' : ', and it pans with the clip')
+              + '. This is the state #61 and #107 were about — the overlay can now be judged '
+              + 'pixel-to-pixel against the source.'
+            : 'A scene holds TWO descriptions of one camera — scene.camera (which the PLAYERS are '
+              + 'drawn through) and the homography (which these MARKINGS are drawn through) — and '
+              + 'here they are ' + pitchCamAgree + ' px apart on the pitch, so they are not the same '
+              + 'camera at all (#61). scene.camera is the synthetic frozen broadcast pose the '
+              + 'pipeline substituted (#107) at focal ' + pitchCamFocal + ' px. The markings are '
+              + 'still right; the players are not where this pitch says they are. Not fixable by '
+              + 'eye — free per-frame homographies are not a camera at ANY focal. Switch to the '
+              + 'one-fitted-camera clip, or re-solve.'"
+          x-text="pitchCamSource === 'measured'
+                ? 'one camera · ' + pitchCamAgree + ' px'
+                : 'two cameras · ' + pitchCamAgree + ' px apart'"></span>
     <span x-show="showPitch && pitchSource === 'calib' && pitchFrameHanded === 'mirrored'"
           class="sep" style="color:var(--edited)"
           title="This calibration was solved in PnLCalib's top-down TEMPLATE frame, whose Y
@@ -796,6 +815,10 @@ Alpine.data("poseAnnot", () => ({
     pitchFocalAuto: null,     // what the homographies imply (clip median) — the default
     pitchCamera: null,        // [X, Y, Z] m: where that focal puts the camera
     pitchFrameHanded: null,   // 'right' | 'mirrored' — which world the solve lives in (#118)
+    pitchCamSource: null,     // 'measured' | 'synthetic' — is scene.camera THIS clip's camera (#107)
+    pitchCamAgree: null,      // px between scene.camera and the calibration on the pitch (#61)
+    pitchCamFocal: null,
+    pitchCamStatic: null,     // a frozen track is the tell-tale of the synthetic substitution
     focalOverride: "",        // user-typed focal; empty = use the auto one
     // Stance handles — one per subject, at the pixel where the SOLVED calibration puts
     // their feet. Drag one onto the player's real feet to correct the world position.
@@ -1127,7 +1150,7 @@ Alpine.data("poseAnnot", () => ({
         this.pitchLines = []; this.pitchConf = null;
         this.pitchFit = null; this.pitchCounts = null;
         this.pitchUprights = []; this.pitchCamera = null;
-        this.pitchFrameHanded = null;
+        this.pitchFrameHanded = null; this.pitchCamSource = null;
         this.rebuildOverlay();
         return;
       }
@@ -1142,6 +1165,12 @@ Alpine.data("poseAnnot", () => ({
       this.pitchFocalAuto = d.focal_auto_px;
       this.pitchCamera = d.camera_m;
       this.pitchFrameHanded = d.frame_handed || null;
+      const cam = d.camera || {};
+      this.pitchCamSource = cam.agree_px === null || cam.agree_px === undefined
+        ? null : cam.source;
+      this.pitchCamAgree = cam.agree_px;
+      this.pitchCamFocal = cam.focal_px;
+      this.pitchCamStatic = cam.static;
       this.rebuildOverlay();
     },
 
