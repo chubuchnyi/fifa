@@ -247,7 +247,9 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 
 | ID | Open item | Status | Why it is open |
 |----|-----------|--------|----------------|
-| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | pending, **user-requested** | The user's own ask alongside #116. The #114 ridge detector is already a working paint extractor; mowing stripes are a *second, independent* family of parallel world lines, so they constrain the vanishing point without touching the painted markings. Nothing built yet. |
+| #118 | **The exported calibration is mirrored in world Y** | open, **blocks everything 3D** | Found by #117's research. Every frame decomposes to a camera whose optical axis points *up* and whose centre sits *under* the pitch, at every focal; negating world Y makes it a real camera and moves not one pixel. The pitch is symmetric about Y = 0, so no marking metric can ever catch it — which is why `lift_homography` needed a hand-forced "up" sign and why goalposts drew buried. Fix at the source (the export / PnLCalib world frame), not with another sign patch. |
+| #119 | **Re-solve the calibration as ONE camera, not 60 free homographies** | open, the #117 payoff | The clip's 60 homographies are 480 free parameters with nothing tying them together. Measured consequences: 5.3 px jitter (62% of the real frame-to-frame move), a camera centre that wanders 7–11 m for a bolted-down rig, and a focal that reads 2700 or 3903 or 4277 depending on which functional you use. The raw material exists: pixel-derived inter-frame homographies are 0.16–0.77 px accurate, 10–30× better than the solve's own relative motion. |
+| #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**, build not started | Measured (§6): the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins are #118 and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | pending, **user-requested** | The manual-override half of the standing request ("пользователь должен провалидировать, перемещая поверх фрэймов лэйоут поля"). #111 shipped dragging *players*; the pitch itself is still read-only. Needs a new calibration `TargetKind` — `layers.py` has none today (only POSE_BODY_JOINT / ROOT_ORIENTATION / ROOT_TRANSLATION / SHAPE_BETA / BALL_POSITION). |
 | #61 | Camera-calibration accuracy (offset + ~3× scale) | in_progress, **premise largely disproved** | Was "the project's dominant error source (~55%)". #110/#113/#114 measured the overlay at **1.4 px** against real paint, so the 3× scale claim does not survive; what is left is a uniform ~1–1.5 px bias. Do not re-open as written — re-scope it against the numbers in §6. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, needs the pod | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). Which branch trips is in `/workspace/carry_ab_full.log` on the **stopped** pod; no local PnLCalib weights, so it cannot be reproduced on CPU. Cheap to grab on the next pod session (no GPU render needed). |
@@ -403,6 +405,50 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-31 (#117 — research: what frame preprocessing would actually buy, and what it would not)** —
+  User asked to take on #117 and estimate the payoff *before* building. Measured on the target clip:
+  `scripts/bench_frame_preprocessing.py` (A–D) and `scripts/bench_rigid_camera.py`. The answer is that
+  the premise was wrong in an interesting way, and two bigger items (#118, #119) fell out of it.
+  - **More per-frame evidence buys almost nothing.** #114 already scored the overlay at 1.4 px against
+    real paint and this re-measures 1.69 px on the marking sample set. The ground plane is not where
+    the error is, so a better paint/stripe detector is polishing the one thing that already works.
+  - **The error is *temporal*, and it is large.** Pitch points that stay in shot the whole clip wobble
+    **5.31 px** (p90 14.3, max 59) against a cubic-in-time — a deliberately generous noise model, since
+    a real pan is smoother than a cubic. Real inter-frame motion is 8.55 px, so **62% of the apparent
+    camera move is estimation noise**. In metres: the recovered camera centre wanders **7–11 m** across
+    2 s for a rig bolted to a gantry.
+  - **The exported calibration is mirrored in world Y (#118).** Every frame decomposes to a camera whose
+    optical axis points **up** (`R[2,2] = +0.175`) with its centre **under** the pitch, at every candidate
+    focal. Negating world Y gives `−0.175` and a centre at `(−8.6, −72.0, 18.0) m` — a real broadcast
+    gantry — and moves **not one pixel**, because the pitch is mirror-symmetric about Y = 0. No marking
+    metric can ever catch this; only something with height can. This is the actual root cause behind
+    #116's "two sign decisions that disagree" and behind goalposts drawing buried.
+  - **Three focal instruments disagree by 45%, and it is not noise.** Per-frame plane decomposition says
+    **3903** px (p10 3715, p90 4364); one rigid pinhole fitted to all 60 homographies says **4277**;
+    the pan itself — SIFT+MAGSAC image→image homographies, no calibration and no world model — says
+    **2700**, stably across every baseline (2625/2650/2675/2700/2725) and every `K` parametrisation
+    (free principal point → 2700; free `fx`/`fy` → 2697). Controls rule out the easy explanations:
+    the pan criterion recovers a synthetic 4277 **exactly** at up to 1.0 px homography noise, and rig
+    drift biases it **upward** (2 m of drift → 4575), never down. A free world X-scale does not rescue
+    2700 either (35.2 → 30.0 px, still 3× worse than 4277).
+  - **What that disagreement means.** The pan is blind to any fixed world-side transform — it cancels in
+    `H_j H_i⁻¹` — and the per-frame decomposition is not. So the inconsistency lives in *how the
+    homographies attach to the world*, i.e. **they are not one camera at all**. Confirmed directly: the
+    best single pinhole reproduces the 60 homographies only to **11.5 px** median (p90 30), and lands at
+    f = 4277 with the camera at `(−0.3, −73.2, 17.8) m` — textbook halfway-line gantry, 3.7 px from the
+    paint with **41 parameters against 480**. At f = 2700 the same fit wants 11.8 m up and 46 m out and
+    fits 3× worse. So the focal cannot be *re-read* out of the current solve; the solve has to be
+    **constrained to be one camera** (#119).
+  - **Mowing stripes: real, but they cannot anchor a pose.** 63% of the visible playing surface lies
+    >30 px from any painted line, and it is not featureless — turf tone spans 15–21/255 there against a
+    2.0–2.5/255 texture floor, so the modulation is 6–8% of full scale, an order above the noise. But a
+    stripe has **no known world coordinate**: it constrains a *direction* (its vanishing point), never a
+    position. Useful for the focal and the rotation, useless for the translation.
+  - **Rejected on measurement:** lens undistortion — the inlier residual is flat at 0.27–0.33 px from
+    r = 0 to r = 1100 with a signed radial component of ±0.05 px. There is no distortion to remove.
+  - **Raw material for #119 exists and is good:** pixel-derived inter-frame homographies reproject
+    held-out points to **0.163 px** (gap 1), 0.516 px (gap 15), 0.765 px (gap 45), ~4000 inliers at a
+    96% inlier rate — **10–30× better** than the solve's own relative motion.
 - **2026-07-31 (#116 — goal frames + corner flags overlaid in 3D; the focal is an eyeball control)** —
   User asked for the goal mouths and corner flags drawn over the frame, to help both manual and
   automatic camera tuning. Shipped, and the interesting part is *why* it helps.
