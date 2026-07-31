@@ -1,8 +1,9 @@
-"""Pixel evidence for the pitch overlay — a player must never read as a painted line.
+"""Pixel evidence for the pitch overlay — what counts as paint, and what does not.
 
-Guards the failure that made the penalty arc score a perfect 0.0 px while it visibly
-lagged: the "white on grass" mask caught players' socks and shorts, and the arc runs
-through a cluster of them. Paint is a few px wide, a player is tens.
+Both directions have already burned us. A player's socks reading as a painted line let the
+penalty arc score a perfect 0.0 px while it visibly lagged; rejecting those players by
+cutting out thick white blobs then deleted the far touchline, which hugs the advertising
+boards, and the missing line made the far field measure 37 px out when it was 4.
 """
 
 from __future__ import annotations
@@ -14,13 +15,17 @@ from poseannot.pitch_evidence import _bridge, _masks, classify
 
 _CROWD_ROWS = 200
 _LINE_V = 302
+_BOARD_V = 240
+_BESIDE_BOARD_V = 269
 
 
 def _synthetic_frame() -> np.ndarray:
-    """Grass under a dark crowd band, with one thin painted line and one fat white blob."""
+    """Turf under a dark crowd, with paint, a fat white player, and a white board to dodge."""
     hsv = np.zeros((480, 640, 3), np.uint8)
     hsv[:_CROWD_ROWS] = (0, 0, 40)                      # crowd: unsaturated and dark
-    hsv[_CROWD_ROWS:] = (60, 180, 120)                  # grass: green, saturated, not bright
+    hsv[_CROWD_ROWS:] = (60, 180, 120)                  # turf: green, saturated, not bright
+    hsv[220:260, :] = (0, 0, 255)                       # advertising board: 40 px tall
+    hsv[268:272, 50:600] = (0, 0, 255)                  # touchline, 9 px clear of the board
     hsv[300:306, 50:600] = (0, 0, 255)                  # painted line: 6 px wide
     hsv[380:420, 100:140] = (0, 0, 255)                 # a player: 40 px across
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
@@ -44,6 +49,16 @@ def test_labels_separate_confirmed_from_extrapolated_from_unknown(monkeypatch):
         [300.0, 100.0],            # off the grass entirely — no evidence either way
     ])
     assert list(_classify(monkeypatch, uv)) == ["ok", "off", "unknown"]
+
+
+def test_a_line_running_beside_the_boards_is_still_evidence(monkeypatch):
+    """The far touchline hugs the advertising boards, and it anchors the far half of the frame.
+
+    Rejecting players by cutting out thick white blobs plus a margin also cut out this line,
+    which is why the far field measured 37 px out when it was 4.
+    """
+    uv = np.array([[300.0, float(_BOARD_V)], [300.0, float(_BESIDE_BOARD_V)]])
+    assert list(_classify(monkeypatch, uv)) == ["off", "ok"]
 
 
 def test_bridging_needs_confirmation_on_both_sides_of_the_gap():

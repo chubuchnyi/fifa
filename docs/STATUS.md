@@ -379,6 +379,50 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-07-31 (#114 — the far field was never 37 px out; the line detector could not see it)** —
+  #113 handed over "B: fix the solve so the far field stops being extrapolated". There is nothing
+  to fix. The 37 px far-field error #113 reported was an artefact of its own line detector, and the
+  homography is good everywhere the frame actually shows a marking.
+  - **What the detector was doing.** #113 found paint by thresholding "white on grass", then removed
+    players by a 13×13 opening plus a **31×31 dilation margin**. The far touchline runs within a few
+    px of the advertising boards, which are a big white blob, so the margin deleted the one marking
+    that pins down the far half of the frame. Everything the overlay drew out there was then scored
+    against whatever paint remained — hence 37 px. Second bug in the same function: `grass` used a
+    fixed hue band of 25..95, which admits a stand full of yellow shirts, so the "grass" mask covered
+    **the entire frame including the crowd** and the `unknown` verdict essentially never fired.
+  - **The replacement.** Paint is a **bright ridge with turf on both sides**. Probe ±d perpendicular
+    at d ∈ {2, 4, 7}: the pixel must beat both probes by 16 levels and both probes must be turf. A
+    board is flat inside and has board, not turf, on one side of its edge; a player's shorts have
+    shirt or skin beside them. No margin is needed, so nothing adjacent to the boards is lost. Turf
+    hue is taken from the frame's own dominant hue rather than hard-coded, and the playing surface is
+    the largest closed turf component, which stops at the boards.
+  - **Third metric bug, same flattering direction.** Distance was measured to the nearest painted
+    *pixel*. Paint near the goal is 8–10 px wide, so an overlay visibly riding the edge of its own
+    marking scored **0.0 px** — this is why #113's numbers said the penalty arc was perfect while the
+    user could see it sitting inside the paint. Distance is now measured to the paint's
+    **centreline** (ridge of the in-band distance transform).
+  - **Measured, per marking, against the centreline** (frames 0/15/30/46): far touchline 1.0 / 3.0 /
+    3.4 / 2.2 px; goal line 3.0 / 3.1 / 3.6 / 2.2; penalty box top 2.0 / 2.0 / 1.0 / 1.0; box front
+    2.8 / 3.0 / 2.2 / 2.0; D arc 2.0 / 2.1 / 3.2 / 1.0. **Everything in shot is 1–4 px.** The lone
+    outlier is the centre-circle sliver: **135–288 px**, ~40 m past the nearest confirmed marking.
+  - **The D arc is not a model error.** Back-projecting the painted arc through the homography and
+    fitting a circle gives centre (−41.2 … −41.7, ±0.23) and radius **8.96–9.42 m** against the
+    model's (−41.5, 0) and 9.150 m — right to ±0.27 m, and not consistently biased. The arc reads as
+    "lagging" only because a one-sided offset is visible on a curve and invisible on a straight line.
+  - **No headroom left, and this was checked honestly.** ICP against the paint's centreline, scored
+    on a **held-out** marking (fit with the penalty-box top line removed, then measure it): 1.70 →
+    1.00 px median over 10 frames, better on 5, worse on 3, tied on 2. Sub-pixel and inside the
+    quantisation noise, so the refinement is **not shipped**. Fitting to distance-to-paint and then
+    reporting distance-to-paint always "improves" — the held-out witness is the only honest score.
+  - Lens distortion was ruled out first: painted lines are straight to ~1.0–1.3 px RMS over 300–742
+    px spans, so one homography *can* fit the whole frame. It already does.
+  - Live in-browser after the change: f0 `fit 1.4 px, ok 281 / off 22`; f15 `2.0, 286 / 18`; f30
+    `2.2, 291 / 48`; f46 `1.4, 339 / 2` — against #113's 251/51, 256/47, 245/93, 287/51. `off` now
+    lands almost entirely on the centre circle. Endpoint 36–46 ms warm, ~550 ms cold.
+  - **This did not need the pod.** PnLCalib is not installed locally and was not required.
+  - **Next:** the remaining honest gap is #112 (drag the pitch to correct the homography), which is
+    now clearly a *manual-override* feature rather than a rescue for a broken solve.
+
 - **2026-07-31 (#113 — the pitch overlay now says which of its lines are measured and which are
   extrapolated)** — The user reported three defects in the overlay: the lines do not sit cleanly on
   the paint, the penalty arc "lags" the box, and the centre circle is drawn on grass where no circle
@@ -415,6 +459,9 @@ fabricate or silently hide.
     trailing gap after a lone confirmed sample must not be bridged.
   - **Next (#114):** feed the far touchline / halfway line into the solve so the far field stops being
     extrapolated. That is the substance of #108 and #61.
+  - **Superseded by #114 (above).** The "37.1 px beyond 25 m" figure and the two metric bugs listed
+    here were themselves measured with a detector that deleted the far touchline. The real far-field
+    error is 1–3.4 px. Keep this entry for the reasoning; do not reuse its numbers.
 
 - **2026-07-30 (#111 — players can be dragged onto their real feet; the drop pixel becomes a world
   position)** — Second half of the auto-calibration-with-manual-fine-tuning loop the user asked for.
