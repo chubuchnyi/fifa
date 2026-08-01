@@ -11,7 +11,7 @@
   rehydrate fast, not for prose.
 -->
 
-**Last updated:** 2026-07-31 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
+**Last updated:** 2026-08-01 · **Branch:** main · **Repo:** /home/chubuchnyi/AVATAR
 
 ---
 
@@ -21,7 +21,19 @@
 - **What is still open → [§3.1](#31-open-items-1xx--poseannot-ui-calibration-pipeline).** That table is the only durable open-item list; the CC task list dies with the session.
 - **Mode:** results over process. Do NOT tick milestones / wire seams / pass tests on fake adapters. Only do work that makes the real-clip output visibly better.
 - **Current focus:** **v2 (photoreal) — STARTED 2026-06-28.** v1 (recognizability) COMPLETE; v0 geometry DONE. Plan «A через B, 1→2→3, свет из клипа» (port photoreal levers into the deliverable video path, share Blender scripts at the data layer). **Levers 1 (measured per-vertex body texture), 2 (grass-PBR via the shared `scene_builders.py`, the "B" refactor — ~5 m mowing stripes) + 3 (light-from-clip — floodlit-NIGHT, auto-detected colour + manual override) all DONE & eye-validated. The agreed 1→2→3 plan is complete.**
-- **NEXT ACTION:** **CROWD STRUCTURE LANDED 2026-07-04 (§6): tier walkway/railing/offset
+- **NEXT ACTION (2026-08-01):** the current work stream is **geometry honesty**, not v2 photoreal —
+  see §3.1 rows #61/#125/#126. Landed today: #61 root-caused (PnLCalib's free homographies are not a
+  *bad* camera but **no** camera — nearest realizable pinhole 525 px away at every focal; #119's
+  single-camera fit is 1.36 px) and every scene variant now carries that measured camera; **#125**
+  closed — a run that solved 0/60 calibration frames used to export a finished scene, and the cause
+  was the pod script silently reconstructing the wrong video. Both holes are now gated in code
+  (`require_solved_calibration`, `PITCH3D_CLIP` required). **Healthy reference artifact:**
+  `out/pod_0801b/export/scene.json` (Colombia 60f, 23 subjects, 60/60 solved, conf 0.54).
+  **Open next:** #126 (confidence is scored *before* `carry_on_motion` replaces the homography, so it
+  describes a different matrix — affects every default run), then #120(b)/#121/#108.
+  **Awaiting the user's eye** on #61/#112/#119/#124 overlays.
+
+- **v2 photoreal state (as of 2026-07-05, unchanged since):** **CROWD STRUCTURE LANDED 2026-07-04 (§6): tier walkway/railing/offset
   aisles/top-fade overlay (`apply_stand_structure`; exporter flag `--crowd-structure` /
   `PITCH3D_CROWD_STRUCTURE`, default on) + `tile_gain` emission compensation — the renderer's
   unit-mean tile norm is scale-invariant, so darkening part of the texture silently BRIGHTENS
