@@ -252,7 +252,9 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #117 | **Frame preprocessing to feed auto-calibration** — markings, mowing stripes, other fixed field objects | **research done 2026-07-31**; its payoff #119 is now built, and it read the focal wrong | Its "focal = 2700 or 3903 or 4277" is **superseded** — #119 used the same pixel data as a direct reprojection residual instead of through `rotation_cost`'s singular-value spread and got a single-valued 4169 ±10 % at 1.44 px. The spread was the functionals disagreeing, not the data — and the #119 sweep says which functional was wrong: the pixel-motion residual is **monotone** in the focal (0.85 px at f=2700 rising to 1.64 at 5200, no interior minimum anywhere), so it can never name a focal on its own, while the paint's minimum is bracketed on both sides. #117 read the flat instrument. The rest stands: the ground plane is *not* where the error is (1.4–1.7 px against paint), so more per-frame evidence buys almost nothing. The real wins were #118 (done) and #119. Mowing stripes are real — 63% of the visible surface lies >30 px from any paint, with a 6–8% tone modulation — but a stripe has **no known world coordinate**, so it constrains a direction, never a position. Lens undistortion is **rejected on measurement** (residual flat 0.27–0.33 px from r=0 to r=1100). |
 | #112 | **Drag the pitch layout to correct the homography** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): the manual-override half of the standing request, alongside #111's per-player drags. The gesture must exist because **no residual we compute can see this error** — every one is scored against the same lines that placed the model, so the operator's eye is the only instrument. The design choice that makes it safe is composing the edit on the **world plane** (`H @ B`, a 4-DOF similarity) rather than in image space (`A @ H`): `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']`, so the drag provably cannot turn a camera-realizable calibration unrealizable, and K is never touched so the focal is unchanged. Live drag: `fit_px` 1.0 → 19.38 with the camera badge held at `measured · 0.0 px · f 4169.3`; undo restores `edits.json` byte-identical. The `turn` handle is pinned by unit test and by curl but **not yet watched in a browser** (session died, #122). |
 | #122 | **An expired session silently degrades the UI instead of asking for a re-login** | **done 2026-07-31** | The `poseannot_token` cookie lasts `jwt_expire_hours: 24`; when it lapses mid-session every layer just empties, because all ~50 call sites end `if (!r.ok) { clear the layer; return; }` — right for "no data on this frame", wrong for "your token died". The storm was live and measured: **~0.8 req/s of 401s on `/api/frame/1/ground` for hours**, 48 821 when first seen and 56 000+ still climbing a session later, while the frame the operator was judging alignment against kept rendering from cache. Fixed by wrapping `window.fetch` **once**: latch on the first 401, raise a blocking re-login card, short-circuit every later request. **Deliberately driver-agnostic** — no timer, retry, recursion or observer in `index.html` (nor anywhere in its git history) can re-issue that call, and the storming tab ran a build we can no longer read, so the repeat was never pinned to a line; interception at the one boundary every caller shares stops it regardless. The frame `<img>` bypasses `fetch`, so its `@error` re-requests through the wrapper — as a **GET**, since FastAPI's `APIRoute` answers HEAD with 405 and a HEAD probe would miss the very 401 it hunts. Mechanism verified in a real page: 502 calls → **1** network call, event latched once, callers still get a readable 401 `Response`. |
-| #61 | Camera-calibration accuracy (offset + ~3× scale) | **diagnosed and fixed by #119**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint). It was that the scene's `CameraTrack` and its `FieldCalibration` **are two different cameras** — 12686 px apart on pitch landmarks, with stored intrinsics 3.6× too short (1158 vs a measured 4169 in 1920-space), which is the whole "~3× scale" symptom. `scene_rigid.json` has them agreeing to 0.00 px by construction. **#107 added the check that was missing** — the pipeline now recovers `scene.camera` *from* the calibration and the UI shows the two-camera distance in the header, so this defect can no longer ship silently a second time. Close once the user has looked. |
+| #61 | Camera-calibration accuracy (offset + ~3× scale) | **root cause exact + fixed for every clip 2026-08-01**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint), and it was not a *wrong* camera either. PnLCalib solves each frame as a free 8-DOF DLT with nothing tying it to a pinhole, and on this clip the result is **no camera at all**: swept over every focal from 200 to 12000 px, the nearest realizable pinhole is still **~525 px** away (#119's fit: 1.36 px). So `camera_from_calibration` refuses (`REALIZABLE_PX = 1.0`), `controller.py:296` substitutes a synthetic `Viewpoint.BROADCAST` at 1280×720 / fx 772, and the scene draws its pitch through the measured homography and its players through a camera **3.9× too small** — marks land, bodies do not. Fixed by applying the one measured fit (`calib/…npz`, committed) to **every** scene variant via `apply_rigid_camera.py`; live API agrees to `fit 1.0–1.4 px` on all of them. Close once the user has looked. |
+| #125 | **A "fresh" pipeline run silently re-used a months-old calibration** | opened 2026-08-01, **not yet adjudicated** | `out/fresh60`'s homographies match `mirror · carry_off`'s to **7.560e-12** — float round-trip, not arithmetic — so the 2026-07-31 run never re-solved the camera; it read a cache. (`out/anim_full_realism` matches at exactly 0.) The 2026-08-01 run *did* solve, landing **3.804e+02** away, and returned **11 subjects where the cached run returned 23**. Two questions, both open: **(a)** where the cache lives and why a full run hits it — a stale calibration is the one input that can never be caught by eye, because the pitch will always look right (it is fit to the paint) while everything else is silently wrong; **(b)** which of 11 vs 23 is correct. The `_rigid` clips cannot answer (b) — `apply_rigid_camera.py` overwrites both calibrations with #119's, so what is comparable there is the poses and the tracking, not the camera. |
+| #124 | **The pitch-layout drag is unverifiable** | **done 2026-08-01** | The #112 gesture worked; nothing about it was legible (§6). Unlabeled handles among ~23 same-coloured player markers, a handle that springs back on release so a good drag reads as a failed one, instructions in a hover tooltip, and the numbers that prove it worked in 10 px grey type ~500 px away. Fixed with on-frame labels + an in-panel HUD carrying the gesture, the live `fit px` / on-paint score (red when worse than at open), the last delta, `undo` and `done`. Verified with real pointer events: drag → `32.1 px · 22/261` red, undo → `1.0 px · 278/25`. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, **needs instrumentation, not the pod** | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). The plan was to read which branch trips out of `carry_ab_full.log`; checked on the live pod 2026-07-31 and **the log cannot answer it** — 1.4 MB with *zero* mentions of the agreement test, because the branch emits nothing. So this was never blocked on pod access: it needs a log line at the decision first, and only then a run. |
 | #107 | Render the **measured** camera, not the synthetic one | **done 2026-07-31** | Was framed as a decision; it was a measurement, and it came out **neither** for the old scene (§6). `core/scene/plane_camera.py` decomposes the calibration into a real `CameraTrack` (focal from Zhang's constraint, no extra input) and **refuses** — `camera is None` — when no camera explains the homographies. Control: `scene_rigid.json` → focal 4169, reprojection **0.0003 px**; `scene.json`'s 480 free params → **5048 px**, so #107 was never an oversight, there was nothing to render. `AppController` now keeps the solved camera and falls back only when the refusal fires; the header badge names which you are looking at (`one camera · 0 px` vs amber `two cameras · 6220.64 px apart`). Unblocks #109. |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, **unblocked by #107** | 0/23 usable crops: it projects through `scene.camera`, which used to be synthetic *and* whose intrinsics are the 1280×720 **render** size, so the 1920×1080 source is downscaled 1.5× before cropping → subjects 18 px tall against a 45 px floor. #107 fixes the *identity* of the camera but not the resolution — on `rigid-camera` the recovered camera is native 1920×1080, on the old scene it is still the synthetic fallback. Fix = crop via `field.calibration.homographies` at native res, which works either way. |
@@ -412,6 +414,63 @@ fabricate or silently hide.
 ---
 
 ## 6. Progress log (newest first)
+
+- **2026-08-01 (#61 root cause is "no camera at all", not "a wrong camera"; #124 makes the #112 drag
+  verifiable; and a "fresh" pod run turns out to have re-used a months-old calibration)** —
+  User: *"вот этот локальный скрипт, который ты упоминаешь. Назови его конкретно, и почему он
+  локально. Сделай так чтобы у нас все варианты оверлэя отображались корректно. прогони еще раз на
+  поде. #112 не понял как работает, не смог проверить"*
+  - **#61's cause, finally exact.** PnLCalib solves every frame as a free 8-DOF DLT with nothing
+    tying it to a pinhole, and on this clip the stored homographies are not a *bad* camera — they
+    are **no camera**. Swept over every focal from 200 to 12000 px, the nearest realizable pinhole
+    is still **~525 px** away (#119's fit: **1.36 px**). So `camera_from_calibration`
+    (`REALIZABLE_PX = 1.0`) correctly returns `None`, `controller.py:296` falls back to
+    `_static_camera` — a synthetic 1280×720 `Viewpoint.BROADCAST`, fx = 772 — and the scene then
+    draws its **pitch through the measured homography** and its **players through a camera 3.9×
+    too small**. The homographies still fit the visible paint, which is why the ground marks land;
+    they just extrapolate to a pitch 9157 px wide inside a 1920 px frame. "Метки контакта с землёй
+    корректны, а игроки нет" is that split, stated in one sentence.
+  - **Every overlay variant now renders through the one measured camera** (the user's second ask).
+    A camera is a property of the **video**, not of a scene, so one fit serves every variant and
+    any frame subset: `calib/Colombia-1-0-Congo-DR1080p.npz` (7.3 kB, committed — see `.gitignore`'s
+    `!calib/*.npz` exception) is applied by `scripts/apply_rigid_camera.py`, which now takes several
+    `--scene` at once, slices by each scene's own frame list, and **measures** handedness per scene
+    (`scene_is_mirrored()` off `plane_orientation`) instead of assuming it. Verified through the live
+    API on both pod runs: `f0 fit 1.0 px · on-paint 278/off 25`, `f30 1.0 px · 316/0`, `f59 1.4 px ·
+    339/15`, camera `(−2.3, −70.1, +17.2) m` — identical readings, and the skeletons are sized and
+    placed on the players in the browser.
+  - **The local script is `scripts/fit_rigid_camera.py`,** and it is local by construction, not by
+    accident: its inputs are hard-coded module constants (`SCENE`, `VIDEO`, `WIDTH/HEIGHT`,
+    `SAMPLES_PER_M`, `PAN_GAPS` at lines 58–79), it is a **whole-clip batch** optimisation (one
+    focal + one centre + one rotation per frame = 184 params, and its pan baseline must span the
+    clip, so it cannot be expressed as the per-frame calibrator the pipeline runs), and it is
+    CPU-bound and minutes long. Run: `PYTHONPATH=src .venv/bin/python scripts/fit_rigid_camera.py
+    --pan`. Its **output** is what ships; the fit itself is a research instrument, re-run only when
+    the clip changes.
+  - **#124 — the #112 gesture worked; it was simply unreadable.** Four defects, all legibility:
+    the two handles were unlabeled pink shapes among ~23 pink player markers; the grabbed handle
+    **springs back on release** (by design — the world moved under it, not the handle), so a
+    successful drag looks like a failed one; the instructions lived only in a hover tooltip; and the
+    numbers that prove the drag worked (`fit_px`, on-paint/off) sat in 10 px grey type ~500 px away
+    at the far end of the top bar. That last one is exactly *"не смог проверить"*. Fixed by putting
+    the instrument next to the thing it measures: on-frame handle labels, plus a HUD with the
+    gesture, the live score **in red when worse than when layout mode opened**, the last delta
+    (`last: 6.26 m · 0° · x1`), `undo` and `done`. Verified with real pointer events in Chrome:
+    drag → `fit 32.1 px · on paint 22 / off 261` red; undo → `1.0 px · 278 / off 25` and the undo
+    button disappears. Also hit **#82's trap again** — `.main` has `@pointerdown="onPanStart"`, so
+    any panel not in the exclusion selector loses its clicks to `setPointerCapture`; `.layout-hud`
+    is now listed in both `onPanStart` and `onWheel`.
+  - **The pod re-run, and what it exposed.** `FRAMES=60 OUT=out/pod_0801 STITCH=1 COHERENCE=1
+    PHYSICS=1` → 197 s (plus a 12 s `FORMAT=json` re-pass: `FORMAT=smplx_npz` writes only
+    `export/scene.smplx_npz/subject_*.npz`, no `scene.json`). Registered as clip `pod-0801`. Pod
+    `jd9syxkau3rqzm` **stopped**. The finding is uncomfortable: **the 2026-07-31 "fresh" run never
+    re-solved the camera.** Its homographies match `mirror · carry_off`'s to **7.560e-12** — float
+    round-trip, not arithmetic — i.e. they came from a cache, not from PnLCalib.
+    `out/anim_full_realism` matches at **0.000e+00**. Today's run is a genuine new solve, **3.804e+02**
+    away (~1500 px on a 1920 px frame at pitch scale) — and it found **11 subjects where the cached
+    run found 23**. Which is right is **not yet adjudicated**, and the `_rigid` variants cannot
+    answer it, because `apply_rigid_camera.py` overwrites both calibrations with #119's. What is
+    left to compare between those two clips is the poses and the tracking. Logged as **#125**.
 
 - **2026-07-31 (#120a — mirroring a human takes two parameters, not one; and the user's eye
   independently caught #61 in the fresh run)** —
