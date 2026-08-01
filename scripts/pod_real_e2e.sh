@@ -11,7 +11,7 @@
 #   PITCH3D_VOL=<auto>                      network-volume mount; set it to skip the search
 #   PITCH3D_REPO=$VOL/fifa                  repo root (PYTHONPATH=src is set from here)
 #   PITCH3D_PY=$VOL/.venv/bin/python        interpreter with cuda torch + rfdetr + smplx
-#   PITCH3D_CLIP=$VOL/clip.mp4              input broadcast clip
+#   PITCH3D_CLIP=<required>                 input broadcast clip — no default, see below
 #   FRAMES=8                                --frames
 #   OUT=out/run                             --out-dir (relative to repo)
 #   FORMAT=smplx_npz                        --format (json carries the ball; smplx_npz = bodies)
@@ -36,7 +36,19 @@ fi
 
 REPO="${PITCH3D_REPO:-$VOL/fifa}"
 PY="${PITCH3D_PY:-$VOL/.venv/bin/python}"
-CLIP="${PITCH3D_CLIP:-$VOL/clip.mp4}"
+# No default clip, deliberately. This used to be `${PITCH3D_CLIP:-$VOL/clip.mp4}`, and twice
+# (2026-07-03, 2026-08-01) that default quietly reconstructed a stale stock video that happens to
+# sit at that path instead of the target match. Nothing downstream can catch it: PnLCalib finds no
+# pitch in the wrong footage, so every homography is the identity carry — "one pixel is one metre" —
+# and the scene still exports, with phantom subjects and hundred-metre teleports. The operator has
+# to name the footage, because only the operator knows which footage was meant.
+CLIP="${PITCH3D_CLIP:-}"
+if [ -z "$CLIP" ]; then
+  echo "pod_real_e2e.sh: set PITCH3D_CLIP to the clip you mean to reconstruct." >&2
+  ls -la "$VOL"/*.mp4 2>/dev/null >&2 || true
+  exit 2
+fi
+[ -f "$CLIP" ] || { echo "pod_real_e2e.sh: clip not found: $CLIP" >&2; exit 2; }
 FRAMES="${FRAMES:-8}"
 OUT="${OUT:-out/run}"
 FORMAT="${FORMAT:-smplx_npz}"

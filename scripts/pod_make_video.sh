@@ -10,7 +10,7 @@
 #   4) ffmpeg: stitch each camera's PNG sequence into out/anim/video/<camera>.mp4.
 #
 # Env (sensible pod defaults; override to taste):
-#   PITCH3D_REPO=/workspace/fifa   PITCH3D_PY=/workspace/.venv/bin/python   PITCH3D_CLIP=/workspace/clip.mp4
+#   PITCH3D_REPO=/workspace/fifa   PITCH3D_PY=/workspace/.venv/bin/python   PITCH3D_CLIP=<required>
 #   FRAMES=60   OUT=out/anim
 #   ANIM_DEVICE=gpu  ANIM_RES_X=1280  ANIM_RES_Y=720  ANIM_SAMPLES=32  ANIM_FPS=25
 #   ANIM_STEP=1  ANIM_CAMERAS=broadcast,sideline,top,goal
@@ -23,7 +23,10 @@ set -euo pipefail
 
 REPO="${PITCH3D_REPO:-/workspace/fifa}"
 PY="${PITCH3D_PY:-/workspace/.venv/bin/python}"
-CLIP="${PITCH3D_CLIP:-/workspace/clip.mp4}"
+# Required, not defaulted — this wrapper is how the 2026-07-03 wrong-clip run happened
+# (see pod_real_e2e.sh, same knob). Name the footage you mean.
+CLIP="${PITCH3D_CLIP:-}"
+[ -n "$CLIP" ] || { echo "pod_make_video.sh: set PITCH3D_CLIP to the clip you mean to render." >&2; exit 2; }
 FRAMES="${FRAMES:-$VIDEO_FRAMES_DEFAULT}"
 OUT="${OUT:-out/anim}"
 ANIM_DEVICE="${ANIM_DEVICE:-$VIDEO_DEVICE_DEFAULT}"
