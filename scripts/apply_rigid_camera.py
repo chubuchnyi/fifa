@@ -15,6 +15,17 @@ two things #118 and #119 measured instead of assuming:
   focal comes from image→image homographies over gaps of up to 59 frames, where ``K Rⱼ Rᵢᵀ K⁻¹``
   is no longer degenerate in f.
 
+**Why every scene needs this, not just the one it was fitted on.** PnLCalib solves each frame as a
+free 8-DOF DLT, with nothing tying the result to a pinhole. On this clip the result is not merely
+an inaccurate camera — it is *no camera at all*: swept over every focal from 200 to 12000 px, the
+closest realizable pinhole is still **525 px** away from the stored homographies (#119's are
+1.4 px). So ``camera_from_calibration`` rightly refuses, ``app/controller.py`` falls back to an
+invented ``Viewpoint.BROADCAST`` camera, and the scene ends up drawing its pitch through the
+measured homography and its players through a synthetic camera 3.9x too small — which is #61,
+and exactly what "the ground marks are right but the players are not" looks like from the UI.
+The homographies still fit the *visible paint* (that is why the marks land), they just extrapolate
+to a pitch 9157 px wide in a 1920 px image. There is no cheaper repair than a real camera.
+
 **The frame flip.** The fit works in the honest right-handed Z-up world; the stored scene is in
 PnLCalib's mirrored top-down template (#118, #120). A camera cannot be written in a mirrored
 world at all — ``M·R`` with ``M = diag(1, −1, 1)`` has determinant −1 and is not a rotation — so
@@ -29,8 +40,13 @@ measurement that pins each one.
 Writes to a NEW scene by default: the user judges the camera by eye against the old one
 (memory: the user is ground truth on pixel alignment), so both have to exist at once.
 
-    python scripts/apply_rigid_camera.py /tmp/rigid_pan.npz \\
-        --scene out/carry_off/export/scene.json --out out/carry_off/export/scene_rigid.json
+The fit itself is kept in ``calib/`` — a few kB, minutes to recompute, and only reproducible from
+a video that is not in the repo. One camera serves every scene of that clip, so pass them all::
+
+    python scripts/apply_rigid_camera.py calib/Colombia-1-0-Congo-DR1080p.npz \\
+        --scene out/carry_off/export/scene.json out/anim_full_realism/scene.json \\
+                out/fresh60/export/scene.json out/physics_debug/scene_replayed_v2.json \\
+                poseannot/clips/A_smplestx/scene.json poseannot/clips/B_sam3dbody/scene.json
 """
 
 from __future__ import annotations
@@ -88,6 +104,24 @@ def local_mirror() -> np.ndarray:
     from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD as r_c2w
 
     return r_c2w.T @ M @ r_c2w
+
+
+def scene_is_mirrored(calibration, width: int, height: int) -> bool:
+    """Is this scene's world the mirrored template one (#118), rather than right-handed Z-up?
+
+    Measured off the scene's own calibration, because it is not a property of the file format or
+    of the producer version — ``out/fresh60`` was written after the #118 fix and is right-handed,
+    ``out/anim_full_realism`` before it and is not, and both otherwise look identical. Mirroring a
+    scene that is already right-handed is just as wrong as not mirroring one that is not.
+    """
+    from poseannot.camera import plane_orientation
+
+    w2i = np.linalg.inv(np.asarray(calibration.homographies, dtype=float))
+    signs = np.array([plane_orientation(h, width, height) for h in w2i])
+    assert (signs > 0).all() or (signs < 0).all(), (
+        f"the clip changes frame mid-way: {int((signs < 0).sum())}/{len(signs)} mirrored"
+    )
+    return bool(signs[0] < 0)
 
 
 def camera_track(blob, width: int, height: int):
@@ -148,50 +182,67 @@ def mirror_subjects(scene) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("camera", type=Path, help="npz from fit_rigid_camera.py --out")
-    ap.add_argument("--scene", type=Path, default=ROOT / "out/carry_off/export/scene.json")
-    ap.add_argument("--out", type=Path, default=None, help="defaults to <scene>_rigid.json")
+    ap.add_argument("camera", type=Path, nargs="?",
+                    default=ROOT / "calib/Colombia-1-0-Congo-DR1080p.npz",
+                    help="npz from fit_rigid_camera.py --out")
+    ap.add_argument("--scene", type=Path, nargs="+",
+                    default=[ROOT / "out/carry_off/export/scene.json"],
+                    help="one or more scenes of the SAME clip and frame range — the camera is a "
+                         "property of the video, so one fit serves every variant of it")
+    ap.add_argument("--out", type=Path, default=None,
+                    help="single --scene only; otherwise each goes to <scene>_rigid.json")
     ap.add_argument("--focal", type=float, default=None,
                     help="override the measured focal (auto npz → this flag, per project rule); "
                          "the rotations and centre are the fit's either way")
-    ap.add_argument("--no-mirror", action="store_true",
-                    help="leave the subjects in the stored frame — for isolating whether a visual "
-                         "regression came from the camera or from the flip")
+    ap.add_argument("--mirror", choices=("auto", "on", "off"), default="auto",
+                    help="mirror the subjects into the right-handed world. 'auto' measures the "
+                         "scene's own frame (see scene_is_mirrored); 'off' isolates whether a "
+                         "visual regression came from the camera or from the flip")
     args = ap.parse_args()
 
     from pitch3d.core.scene.serialization import load_scene, save_scene
+
+    assert args.out is None or len(args.scene) == 1, "--out takes a single --scene"
 
     blob = dict(np.load(args.camera))
     if args.focal is not None:
         print(f"focal overridden: {float(blob['focal']):.1f} -> {args.focal:.1f}")
         blob["focal"] = np.array(args.focal)
-
-    scene = load_scene(str(args.scene))
-    assert scene.field is not None and scene.field.calibration is not None, "scene has no field"
-    cal = scene.field.calibration
-    frames = np.asarray(blob["frames"], dtype=int)
-    assert (np.asarray(cal.frames, dtype=int) == frames).all(), (
-        f"the fit covers frames {frames.min()}-{frames.max()} ({len(frames)}), the scene "
-        f"{len(cal.frames)} — refit with --frames {len(cal.frames)}"
-    )
-
     width, height = int(blob.get("width", 1920)), int(blob.get("height", 1080))
-    scene.camera = camera_track(blob, width, height)
-    # The calibration has to be the SAME camera, or the pitch overlay and the players would be
-    # drawn through two different ones — the split #61 is a symptom of.
-    cal.homographies = np.stack([np.linalg.inv(h) for h in blob["world_to_image"]])
-    if not args.no_mirror:
-        print(f"mirrored {mirror_subjects(scene)} subjects into the right-handed world")
+    frames = np.asarray(blob["frames"], dtype=int)
+    print(f"fit: focal {float(blob['focal']):.0f} px @ {width}x{height}   frames "
+          f"{frames.min()}-{frames.max()} ({len(frames)})   centre "
+          f"{np.asarray(blob['centre'], dtype=float).round(1)} m (fixed, by construction)")
 
-    out = args.out or args.scene.with_name(args.scene.stem + "_rigid.json")
-    save_scene(scene, str(out))
+    for path in args.scene:
+        scene = load_scene(str(path))
+        assert scene.field is not None and scene.field.calibration is not None, f"{path}: no field"
+        cal = scene.field.calibration
+        # A subset is fine and is not a special case: the fit is one focal, one centre and a
+        # rotation per frame OF THE VIDEO, so a scene covering frames 0-47 of a 0-59 fit wants
+        # exactly those 48 rotations. Only frames the fit never saw are a refit.
+        want = np.asarray(cal.frames, dtype=int)
+        idx = np.searchsorted(frames, want)
+        assert (idx < len(frames)).all() and (frames[np.minimum(idx, len(frames) - 1)] == want).all(), (
+            f"{path}: needs frames {want.min()}-{want.max()} ({len(want)}), the fit covers "
+            f"{frames.min()}-{frames.max()} ({len(frames)}) — refit with --frames {want.max() + 1}"
+        )
+        cut = {**blob, "frames": want, "rvecs": np.asarray(blob["rvecs"])[idx],
+               "world_to_image": np.asarray(blob["world_to_image"])[idx]}
 
-    cam = scene.camera
-    print(
-        f"OK   {out}\n"
-        f"     focal {cam.intrinsics.fx:.0f} px @ {width}x{height}   frames {cam.n_frames}\n"
-        f"     centre {np.asarray(blob['centre'], dtype=float).round(1)} m (fixed, by construction)"
-    )
+        mirrored = scene_is_mirrored(cal, width, height)
+        do_mirror = mirrored if args.mirror == "auto" else args.mirror == "on"
+        scene.camera = camera_track(cut, width, height)
+        # The calibration has to be the SAME camera, or the pitch overlay and the players would be
+        # drawn through two different ones — the split #61 is a symptom of.
+        cal.homographies = np.stack([np.linalg.inv(h) for h in cut["world_to_image"]])
+        n = mirror_subjects(scene) if do_mirror else 0
+
+        out = args.out or path.with_name(path.stem + "_rigid.json")
+        save_scene(scene, str(out))
+        print(f"OK   {out}\n"
+              f"     stored frame {'mirrored template' if mirrored else 'right-handed'} "
+              f"({args.mirror}) -> mirrored {n} subjects")
 
 
 if __name__ == "__main__":

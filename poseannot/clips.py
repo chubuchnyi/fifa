@@ -68,14 +68,17 @@ def _discover() -> list[Clip]:
         if not d.is_dir():
             continue
         vids = [p for p in sorted(d.iterdir()) if p.suffix.lower() in _VIDEO_EXTS]
-        scene = d / "scene.json"
+        # ``scene_rigid.json`` wins when it is there: same poses, but a camera that exists (see
+        # _CURATED). Written by scripts/apply_rigid_camera.py, so a clip is upgraded by running
+        # that against it — no re-upload, and the original stays for comparison.
+        scene = next((d / n for n in ("scene_rigid.json", "scene.json") if (d / n).exists()), None)
         out.append(Clip(
             id=d.name,
             label=d.name,
             source_video=str(vids[0]) if vids else None,
-            scene_json=str(scene) if scene.exists() else None,
-            corrections_out=str(d / "edits.json"),
-            has_scene=scene.exists(),
+            scene_json=str(scene) if scene else None,
+            corrections_out=str(d / (f"{scene.stem}_edits.json" if scene else "edits.json")),
+            has_scene=scene is not None,
             builtin=False,
         ))
     return out
@@ -85,21 +88,26 @@ def _discover() -> list[Clip]:
 # correction re-run has an inverted-body scene to fix (the flagship demo) and the
 # operator can compare a raw pose against the finished, physics-corrected default.
 # (id, label, scene.json relative to repo root); listed only if the file exists.
+#
+# Every entry is a ``_rigid`` scene: the producer's own camera cannot be used. PnLCalib solves
+# each frame as a free 8-DOF homography with nothing tying it to a pinhole, and on this clip the
+# result is not a bad camera but *no* camera — the nearest realizable one is 525 px away at every
+# focal from 200 to 12000 px. ``camera_from_calibration`` therefore refuses, ``app/controller.py``
+# invents a ``Viewpoint.BROADCAST`` camera instead, and the players come out 3.9x too small while
+# the pitch (drawn through the homography) stays right. That is #61, and it is what "the ground
+# marks land but the players do not" looks like. ``scripts/apply_rigid_camera.py`` swaps in the
+# one camera #119 measured off the video; the pose content is untouched.
 _CURATED: list[tuple[str, str, str]] = [
-    ("raw-pose", "Colombia · uncorrected pose (inverted bodies)",
-     "out/anim_full_realism/scene.json"),
-    # The same 60 frames re-solved as ONE camera (#119): 4 + 3F parameters instead of 8F, so the
-    # pitch overlay and the players are at last drawn through the same camera (#61 — in the
-    # default scene those two disagree by 12686 px). Listed beside the original rather than
-    # replacing it: which one aligns better is the user's call to make, by eye.
-    ("rigid-camera", "Colombia · one fitted camera (#119)",
+    ("raw-pose", "Colombia · uncorrected pose (inverted bodies) · #119 cam",
+     "out/anim_full_realism/scene_rigid.json"),
+    ("carry-off", "Colombia · carry_off export · #119 cam",
      "out/carry_off/export/scene_rigid.json"),
     # The same 60 frames through today's producer (pod, 2026-07-31, every real backend:
     # RF-DETR → ByteTrack → PnLCalib → SMPLest-X → WASB). The two scenes above were written
     # by older code and carry its fixed-in-tree defects; this one is the honest baseline to
-    # judge current output against, and the only one whose provenance matches the source.
-    ("fresh-60", "Colombia · fresh pod run (2026-07-31)",
-     "out/fresh60/export/scene.json"),
+    # judge current output against, and the only one whose poses match the source.
+    ("fresh-60", "Colombia · fresh pod run 2026-07-31 · #119 cam",
+     "out/fresh60/export/scene_rigid.json"),
 ]
 
 
@@ -113,7 +121,9 @@ def _extra_builtins() -> list[Clip]:
             id=cid, label=label,
             source_video=_DEFAULT.source_video,
             scene_json=str(scene),
-            corrections_out=str(scene.parent / "edits.json"),
+            # Per-scene, not per-directory: a correction is a delta in the scene's own world, so
+            # edits made against a mirrored scene mean something else in a right-handed one.
+            corrections_out=str(scene.with_name(scene.stem + "_edits.json")),
             has_scene=True, builtin=True,
         ))
     return out

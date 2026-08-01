@@ -1,7 +1,9 @@
 # poseannot config — one clip per deployment.
 # Env vars POSEANNOT_<UPPER_KEY> override any field (RunPod .env-friendly).
 
-scene_json: out/physics_debug/scene_replayed_v2.json
+# The _rigid variant: the same poses, but the one camera #119 measured off the video instead of
+# the one the producer invents when it cannot build a camera from PnLCalib's homographies (#61).
+scene_json: out/physics_debug/scene_replayed_v2_rigid.json
 source_video: samples/video/Colombia-1-0-Congo-DR1080p.mp4
 smplx_models: SMPL-X/models
 fps: 29.97
@@ -12,5 +14,7 @@ users_yaml: poseannot/users.yaml
 jwt_secret: change-me-before-deploy
 jwt_expire_hours: 24
 
-# Where user edits are persisted (separate from immutable scene.json)
-corrections_out: out/physics_debug/edits.json
+# Where user edits are persisted (separate from immutable scene.json). Keyed to the scene, not the
+# run: a correction is a delta in that scene's own world, so edits recorded against the mirrored
+# scene above would mean something else here.
+corrections_out: out/physics_debug/scene_replayed_v2_rigid_edits.json

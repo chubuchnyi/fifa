@@ -24,6 +24,9 @@ venv/
 out/
 *.npz
 !tests/**/*.npz
+# Measured camera fits (kB-sized, minutes to recompute, and only reproducible from a video
+# that is not in the repo — see scripts/fit_rigid_camera.py).
+!calib/*.npz
 
 # Local sample media (large; not part of the repo)
 samples/
