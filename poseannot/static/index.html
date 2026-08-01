@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>poseannot</title>
-  <link rel="stylesheet" href="/static/style.css?v=diag1" />
+  <link rel="stylesheet" href="/static/style.css?v=clipwarn2" />
   <script type="importmap">
   {
     "imports": {
@@ -50,11 +50,20 @@
     <span class="sep">|</span>
     <select class="clip-select" x-model="activeClipId" @change="switchClip($event.target.value)">
       <template x-for="c in clipList" :key="c.id">
-        <option :value="c.id" x-text="c.label + (c.builtin ? '  (default)' : '')"></option>
+        <option :value="c.id"
+                x-text="(c.source_mismatch ? '⚠ ' : '') + c.label + (c.builtin ? '  (default)' : '')"></option>
       </template>
     </select>
     <button @click="showUpload = !showUpload" title="upload a clip bundle (video + scene.json)">＋</button>
     <span style="color: var(--fg-dim); font-size: 0.8em;" x-text="clipLabel"></span>
+    <!-- #125: the scene names the video it was reconstructed from; when that is not the video it is
+         being drawn over, every overlay is still plausible and nothing else will say so. -->
+    <span x-show="activeClip && activeClip.source_mismatch" class="clip-warn"
+          :title="'scene was reconstructed from &quot;' + (activeClip && activeClip.scene_source_id)
+                  + '&quot;, but is being drawn over ' + (activeClip && activeClip.video)
+                  + ' — the overlay is meaningless'">
+      ⚠ wrong video
+    </span>
     <span class="sep">|</span>
     <button @click="prevFrame()" title="prev frame (K)">◀</button>
     <span x-text="'frame ' + (frame+1) + ' / ' + nFrames"></span>
@@ -849,6 +858,7 @@ Alpine.data("poseAnnot", () => ({
     clipLabel: "loading…",
     clipList: [],
     activeClipId: "default",
+    get activeClip() { return this.clipList.find(c => c.id === this.activeClipId) || null; },
     showUpload: false,
     upl: { name: "", video: null, scene: null, edits: null, busy: false, msg: "" },
     nFrames: 0,

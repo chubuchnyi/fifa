@@ -56,6 +56,10 @@ body.login { display: flex; align-items: center; justify-content: center; }
 }
 .toolbar .brand { font-weight: 500; letter-spacing: 0.4px; color: var(--fg); }
 .toolbar .sep { color: var(--fg-dim); }
+.toolbar .clip-warn {
+  color: #ffb454; border: 1px solid #ffb454; border-radius: 3px;
+  padding: 0.15rem 0.4rem; font-size: 0.8em; cursor: help; white-space: nowrap;
+}
 .toolbar button {
   background: none; border: 1px solid var(--border); color: var(--fg);
   padding: 0.3rem 0.6rem; border-radius: 3px; cursor: pointer; font-family: inherit;

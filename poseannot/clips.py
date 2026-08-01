@@ -29,6 +29,8 @@ from .config import REPO_ROOT
 
 CLIPS_DIR = REPO_ROOT / "poseannot" / "clips"
 _VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v")
+#: Filename an upload is stored under — normalised, so it says nothing about the footage.
+_UPLOAD_VIDEO_STEM = "video"
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,53 @@ class Clip:
     corrections_out: str
     has_scene: bool
     builtin: bool = False
+    #: ``source_id`` the scene records for itself — the video it was actually reconstructed from.
+    #: ``None`` when the file does not say (old scenes), which is *unknown*, not *mismatched*.
+    scene_source_id: str | None = None
+
+    @property
+    def source_mismatch(self) -> bool:
+        """True when this scene provably came from a video other than the one it is paired with.
+
+        A scene carries no pixels, so poseannot draws it over whatever video the clip points at, and
+        every overlay looks plausible either way — that is exactly how #125's wrong-clip run reached
+        the switcher scoring a healthy 1.0 px. The scene had said so all along: `source_id` was
+        ``"clip"`` where every good scene says ``"Colombia-1-0-Congo-DR1080p"``. Marked, not refused
+        (R-6) — comparing two reconstructions of *different* footage is a legitimate thing to want.
+
+        Only the **provable** case is reported. Uploads are stored under a normalised ``video.<ext>``
+        (see :func:`create_clip_from_upload`), so for those the filename is not evidence of anything
+        and this stays False; ``scene_source_id`` is surfaced regardless so the operator can judge.
+        The case this does catch is the one that bit us: a builtin that *borrows* the default clip's
+        video and pairs it with a scene reconstructed from something else.
+        """
+        if not self.scene_source_id or not self.source_video:
+            return False
+        stem = Path(self.source_video).stem
+        if stem == _UPLOAD_VIDEO_STEM:
+            return False
+        return stem != self.scene_source_id
+
+
+_SOURCE_ID_RE = re.compile(r'"source_id"\s*:\s*"([^"]*)"')
+
+
+def _scene_source_id(scene_json: str | Path | None) -> str | None:
+    """Read the scene's own ``source_id`` without parsing the file.
+
+    A scene is ~7 MB and this runs for every clip on every list request, so it is a bounded head
+    read: ``source_id`` is a top-level field the serializer writes at byte ~90. Anything unreadable
+    returns ``None`` = "the file does not say", which must not be reported as a mismatch.
+    """
+    if not scene_json:
+        return None
+    try:
+        with open(scene_json, "rb") as fh:
+            head = fh.read(4096)
+    except OSError:
+        return None
+    m = _SOURCE_ID_RE.search(head.decode("utf-8", "replace"))
+    return m.group(1) if m else None
 
 
 def _compute_default() -> Clip:
@@ -52,6 +101,7 @@ def _compute_default() -> Clip:
         corrections_out=str(cfg.corrections_out),
         has_scene=Path(str(cfg.scene_json)).exists(),
         builtin=True,
+        scene_source_id=_scene_source_id(cfg.scene_json),
     )
 
 
@@ -80,6 +130,7 @@ def _discover() -> list[Clip]:
             corrections_out=str(d / (f"{scene.stem}_edits.json" if scene else "edits.json")),
             has_scene=scene is not None,
             builtin=False,
+            scene_source_id=_scene_source_id(scene),
         ))
     return out
 
@@ -130,6 +181,7 @@ def _extra_builtins() -> list[Clip]:
             # edits made against a mirrored scene mean something else in a right-handed one.
             corrections_out=str(scene.with_name(scene.stem + "_edits.json")),
             has_scene=True, builtin=True,
+            scene_source_id=_scene_source_id(scene),
         ))
     return out
 
@@ -222,4 +274,6 @@ def clip_to_dict(c: Clip) -> dict:
         "video": Path(c.source_video).name if c.source_video else None,
         "has_scene": c.has_scene,
         "builtin": c.builtin,
+        "scene_source_id": c.scene_source_id,
+        "source_mismatch": c.source_mismatch,
     }
