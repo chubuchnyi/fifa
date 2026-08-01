@@ -39,7 +39,7 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .app-shell {
   display: grid;
   grid-template-rows: 44px 46px 1fr 60px;
-  grid-template-columns: 200px minmax(0, 1fr) minmax(420px, 44vw);
+  grid-template-columns: 68px minmax(0, 1fr) minmax(280px, 29vw);
   grid-template-areas:
     "toolbar   toolbar   toolbar"
     "stagerail stagerail stagerail"
@@ -259,9 +259,10 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .upload-panel .upl-msg { color: var(--edited); font-size: 0.85em; }
 .upload-panel .upl-hint { color: var(--fg-dim); font-size: 0.8em; line-height: 1.35; }
 
-.sidebar { grid-area: sidebar; background: var(--bg-panel); border-right: 1px solid var(--border); overflow-y: auto; min-height: 0; min-width: 0; }
-.sidebar .section-hdr { padding: 0.6rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); }
-.sidebar .track { padding: 0.4rem 0.8rem; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; font-size: 0.9em; }
+/* Column is 68 px; a default scrollbar eats 15 of them and pushes the frame count out of the row. */
+.sidebar { grid-area: sidebar; background: var(--bg-panel); border-right: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; min-height: 0; min-width: 0; }
+.sidebar .section-hdr { padding: 0.6rem 0.4rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0; color: var(--fg-dim); }
+.sidebar .track { padding: 0.4rem 0.25rem; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; font-size: 0.85em; }
 .sidebar .track:hover { background: rgba(107, 181, 255, 0.08); }
 .sidebar .track.selected { background: rgba(107, 181, 255, 0.18); color: var(--accent-bright); }
 .sidebar .track .swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
