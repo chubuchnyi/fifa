@@ -12,7 +12,6 @@ from pitch3d.adapters.models.smplx_foot_z import (
 from pitch3d.core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from pitch3d.core.scene.scene import Subject
 
-
 smplx = pytest.importorskip("pitch3d.adapters.models.smplx_lbs")
 locate_smplx_model = smplx.locate_smplx_model
 

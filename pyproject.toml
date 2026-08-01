@@ -11,13 +11,19 @@ readme = "README.md"
 license = { text = "GPL-3.0-or-later" }  # editing platform is Blender (GPL); internal/research use
 authors = [{ name = "AVATAR project" }]
 
-# --- Core runtime dependency ---------------------------------------------------
-# The pure core needs only numerical computing. numpy is NOT an ML/render library,
-# so it is allowed inside `core/` (see ADR-0002). We use a compatible-release range
-# here so the scaffold runs on the local interpreter; EXACT pins for a reproducible
-# build live in the lockfile (see README "Reproducibility").
+# --- Core runtime dependencies ---------------------------------------------------
+# The pure core needs only numerical computing and config parsing — none of these is
+# an ML/render library, so they are allowed inside `core/` (see ADR-0002). We use
+# compatible-release ranges so the scaffold runs on the local interpreter; EXACT pins
+# for a reproducible build live in the lockfile (see README "Reproducibility").
+#
+# scipy and pyyaml were undeclared until 2026-08-01: they were present locally only by
+# way of the heavy extras, so `pip install -e ".[dev]"` into a clean env could not even
+# import `pitch3d.app`. Anything imported at module level under core/ belongs here.
 dependencies = [
   "numpy>=1.26,<3",
+  "pyyaml>=6.0",     # core/config/physics.py, core/scene/player_profile.py
+  "scipy>=1.11",     # core/correction/orient_verticality.py (Rotation)
 ]
 
 # --- Optional, heavy adapter dependencies --------------------------------------
@@ -90,11 +96,14 @@ mcp = [
   "mcp==1.2.0",                 # MIT  (Model Context Protocol Python SDK)
 ]
 
-# Tooling
+# Tooling. ruff is pinned exactly, unlike everything else in this section: it is a gate,
+# and a minor bump changes the rule set. The same version appears in
+# .pre-commit-config.yaml and .github/workflows/ci.yml — bump the three together.
 dev = [
   "pytest>=7.4,<9",
   "mypy>=1.13",
-  "ruff>=0.8",
+  "ruff==0.16.1",
+  "pre-commit>=4.0",
 ]
 
 # Visualization for the local SMPL-X mesh demos (scripts/render_smplx_mesh.py +
@@ -131,6 +140,18 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# UP042 wants `class Foo(str, Enum)` -> `class Foo(StrEnum)` on 23 core domain types.
+# That is not a refactor, it is a behaviour change: `f"{role}"` renders `Role.PLAYER`
+# under (str, Enum) and `player` under StrEnum. We interpolate these enums into agent
+# summaries and error messages (core/agent/summary.py, core/correction/engine.py) and
+# serialise them into scene.json — ruff itself classes the fix as unsafe. Migrating is a
+# deliberate task with its own tests, not something a linter should nudge us into.
+ignore = ["UP042"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's whole DI idiom is a call in an argument default, so bare B008 flags every
+# route in poseannot/. These four are the framework's, not ours.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
 
 [tool.mypy]
 python_version = "3.11"

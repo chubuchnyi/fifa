@@ -30,12 +30,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation
-
 from poseannot.camera import ProjectedFrame, project_points
 from poseannot.config import load as load_cfg
 from poseannot.scene_state import build_scene_state
 from poseannot.video import frame_size
+from scipy.spatial.transform import Rotation
 
 DEFAULT_VIDEO = "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
 PELVIS, HEAD = 0, 15
@@ -117,8 +116,9 @@ def render(scene: str, video: str, frame: int, flip: str, out_dir: str) -> None:
     """Draw pitch (green) + per-player head(red)/pelvis(yellow)/feet(cyan) under one D,
     so orientation (head-up vs head-down) and pitch placement are visible at a glance."""
     import cv2
-    from pitch3d.core.scene.pitch import pitch_line_world_points
     from poseannot.video import read_frame
+
+    from pitch3d.core.scene.pitch import pitch_line_world_points
 
     D = np.diag([float(s) for s in flip.split(",")])
     base = load_cfg()

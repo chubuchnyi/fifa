@@ -7,13 +7,12 @@ that segment obeys gravity — i.e. z(t) is a downward parabola.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
 from ..scene.scene import Scene
 from .engine import resolve_ball
-
 
 G_MPS2 = 9.81
 

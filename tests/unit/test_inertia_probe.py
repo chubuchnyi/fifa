@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.correction.inertia_probe import (
     InertiaConfig,

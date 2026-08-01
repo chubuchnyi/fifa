@@ -12,8 +12,10 @@ from __future__ import annotations
 import os
 import sys
 
-import cv2
 import numpy as np
+import pytest
+
+cv2 = pytest.importorskip("cv2")  # provided by [cv]; CI installs opencv-python-headless
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "scripts"))
 from stands_soften_pin import (  # noqa: E402

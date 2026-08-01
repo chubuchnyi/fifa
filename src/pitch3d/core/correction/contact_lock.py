@@ -27,7 +27,7 @@ foot for those anyway — the huge XY jump breaks the contact window).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 

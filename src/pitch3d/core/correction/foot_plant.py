@@ -26,8 +26,8 @@ constants here.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Callable
 
 import numpy as np
 

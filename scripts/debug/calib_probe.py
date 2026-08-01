@@ -76,6 +76,7 @@ def main() -> None:
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "src"))
     from poseannot.camera import frame_projector, project_points
+
     from pitch3d.core.scene.pitch import pitch_line_world_points
     from pitch3d.core.scene.serialization import load_scene
 

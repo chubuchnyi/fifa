@@ -21,10 +21,19 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from ..core.agent import bounded_orbit_camera, scene_summary, standard_viewpoints
+from ..core.config import PhysicsConfig
+from ..core.config.gates import IdentityConfig
 from ..core.correction.coherence import (
     CoherenceConfig,
     CoherenceReport,
     add_temporal_coherence,
+)
+from ..core.correction.collision import CollisionReport, collision_gate
+from ..core.correction.contact_lock import contact_lock_gate
+from ..core.correction.contact_probe import (
+    ContactProbeReport,
+    FootPositionProvider,
+    contact_probe,
 )
 from ..core.correction.engine import (
     make_keyframes,
@@ -35,45 +44,31 @@ from ..core.correction.engine import (
     resolve_ball,
     resolve_subject_motion,
 )
-from ..core.correction.collision import CollisionReport, collision_gate
-from ..core.correction.contact_lock import ContactLockReport, contact_lock_gate
-from ..core.correction.contact_probe import (
-    ContactProbeReport,
-    FootPositionProvider,
-    contact_probe,
-)
-from ..core.correction.facing_align import FacingAlignReport, facing_align_gate
-from ..core.correction.gravity_project import (
-    GravityProjectReport,
-    gravity_project_gate,
-)
-from ..core.correction.jerk_clamp import JerkClampReport, jerk_clamp_gate
-from ..core.correction.joint_smooth import JointSmoothReport, joint_smooth_gate
-from ..core.correction.orient_verticality import (
-    OrientVerticalityReport,
-    orient_verticality_gate,
-)
-from ..core.correction.inertia_smooth import InertiaSmoothReport, inertia_smooth_gate
-from ..core.correction.momentum_smooth import (
-    MomentumSmoothConfig,
-    MomentumSmoothReport,
-    momentum_smooth_gate,
-)
-from ..core.correction.pose_motion_sync import (
-    PoseMotionSyncReport,
-    pose_motion_sync_gate,
-)
+from ..core.correction.facing_align import facing_align_gate
 from ..core.correction.foot_floor import FootFloorReport, foot_floor_gate
 from ..core.correction.foot_plant import FootPlantReport, foot_plant_gate
+from ..core.correction.gravity_project import (
+    gravity_project_gate,
+)
+from ..core.correction.inertia_smooth import inertia_smooth_gate
+from ..core.correction.jerk_clamp import jerk_clamp_gate
 from ..core.correction.joint_kinematics import JointKinematicReport, joint_kinematic_gate
+from ..core.correction.joint_smooth import joint_smooth_gate
 from ..core.correction.kinematics import (
     KinematicConfig,
     KinematicReport,
     kinematic_gate,
 )
+from ..core.correction.momentum_smooth import (
+    momentum_smooth_gate,
+)
+from ..core.correction.orient_verticality import (
+    orient_verticality_gate,
+)
 from ..core.correction.orientation import OrientationReport, orientation_gate
-from ..core.config import PhysicsConfig
-from ..core.config.gates import IdentityConfig
+from ..core.correction.pose_motion_sync import (
+    pose_motion_sync_gate,
+)
 from ..core.orchestration import (
     ReconstructionPipeline,
     StitchConfig,
@@ -81,15 +76,15 @@ from ..core.orchestration import (
     assemble_scene,
     resolve_scene,
 )
-from ..core.orchestration.identity import AppearanceProvider, IdentityReport
+from ..core.orchestration.identity import AppearanceProvider
 from ..core.ports.export import ExportFormat, ExportResult
 from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
 from ..core.scene.assets import RenderAssetRef, SynthViewRef, SynthViewSeam
 from ..core.scene.camera import CameraTrack
-from ..core.scene.plane_camera import PlaneCameraFit, camera_from_calibration
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
+from ..core.scene.plane_camera import PlaneCameraFit, camera_from_calibration
 from ..core.scene.review import AttentionItem, attention_list
 from ..core.scene.scene import Episode, EpisodeSource, Scene, Source, SourceKind
 from ..core.scene.units import TimeBase

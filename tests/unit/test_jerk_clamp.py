@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.correction.jerk_clamp import (
     JerkClampConfig,
     jerk_clamp_gate,
 )
-from pitch3d.core.correction.momentum_smooth import _peak_jerk
 from pitch3d.core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from pitch3d.core.scene.scene import Scene, Subject
 

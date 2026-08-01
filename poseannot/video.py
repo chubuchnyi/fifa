@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import subprocess
 import threading
 from functools import lru_cache
-from pathlib import Path
 
 import cv2
 import numpy as np

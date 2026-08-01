@@ -28,15 +28,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict
 from pathlib import Path
 
 import numpy as np
 
 from pitch3d.core.config import load_physics_config
 from pitch3d.core.correction.coherence import add_temporal_coherence
-from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.collision import collision_gate
+from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.foot_floor import foot_floor_gate
 from pitch3d.core.correction.joint_kinematics import joint_kinematic_gate
 from pitch3d.core.correction.kinematics import kinematic_gate
@@ -220,6 +219,7 @@ def main() -> int:
         # discover all profiles from the config
         cfg_path = Path(args.config) if args.config else None
         import yaml
+
         from pitch3d.core.config.physics import DEFAULT_CONFIG_PATH
         raw = yaml.safe_load((cfg_path or DEFAULT_CONFIG_PATH).read_text())
         profiles = list(raw.get("profiles", {}))

@@ -17,8 +17,6 @@ import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
-import pytest
-
 from pitch3d.app.cli import run_dry_run
 
 

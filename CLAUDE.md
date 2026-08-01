@@ -118,15 +118,33 @@ When adding tests, prefer one assertion against real captured data over ten agai
 add tests that re-implement the function under test in the assertion, or that only check a call
 does not raise.
 
-## Lint
+## Lint, hooks and CI
 
-311 ruff errors exist repo-wide (87 E501, 71 F401, 45 E702, 34 I001) and there is no CI or
-pre-commit. Lint **only the lines you changed** — baseline-diff rather than "fixing" unrelated
-violations:
+The rule is **"a file may not gain violations"**, not "a file must be clean". A 152-error
+backlog remains (87 E501, 45 E702, plus a tail) and is not being fixed in one go — so leave
+unrelated violations alone and just don't add any. `scripts/lint_changed.py` diffs each changed
+file against its previous version and fails only on an increase; `pre-commit` and
+`.github/workflows/ci.yml` both call that same script, so they cannot disagree.
 
 ```bash
-git show HEAD:<file> | .venv/bin/ruff check --stdin-filename <file> -
+pre-commit install                       # once per clone, before your first commit
+.venv/bin/python scripts/lint_changed.py # the exact verdict the hook and CI will give
 ```
+
+ruff is pinned to **0.16.1** in three places — `[dev]`, `.pre-commit-config.yaml`,
+`.github/workflows/ci.yml`. Bump them together or the hook and CI disagree.
+
+Two deliberate gaps, so you do not mistake them for working:
+
+- **`ruff format` is not wired up.** It would rewrite 269 of 358 files (~10 300 lines) in one
+  commit and destroy `git blame` on code whose history is the main record of why it looks the
+  way it does.
+- **`UP042` is switched off.** It wants `(str, Enum)` → `StrEnum` on 23 core domain types, which
+  changes what `f"{role}"` renders (`Role.PLAYER` → `player`) — and those enums land in
+  `scene.json` and in agent summaries. A real migration with tests, not a lint autofix.
+- **`mypy` currently checks nothing.** Modern numpy stubs use 3.12 `type` statements, which mypy
+  rejects under our `python_version = "3.11"` and then stops at the first error. It is in `[dev]`
+  and out of CI. Treat a clean `mypy` run as meaningless until this is fixed.
 
 ## GPU pod (RunPod)
 

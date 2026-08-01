@@ -22,7 +22,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-
 from poseannot.config import load as load_cfg
 from poseannot.scene_state import build_scene_state
 

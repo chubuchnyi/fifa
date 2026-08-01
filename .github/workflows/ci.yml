@@ -1,0 +1,102 @@
+name: ci
+
+# The mechanical half of the fence. `.pre-commit-config.yaml` is the same gate run
+# locally; CI exists because a hook can be skipped and a branch can be pushed from a
+# machine that never ran `pre-commit install`.
+#
+# Two things are deliberately NOT gated:
+#   - the repo-wide ruff backlog (152 errors, docs/STATUS.md §5). Gating it would mean
+#     fixing 152 errors before any other work could merge. Instead each changed file is
+#     compared against its own previous version, so the backlog can shrink but not grow.
+#   - mypy. It is declared in [dev] but currently checks nothing: modern numpy ships
+#     stubs using 3.12 `type` statements, which mypy rejects under our
+#     `python_version = "3.11"` and then stops. Wiring it in would gate on a tool that
+#     is not actually running. See docs/STATUS.md §5.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned, and identical to `.pre-commit-config.yaml` and the [dev] extra. A ruff
+  # minor bump changes the rule set, which would silently move the gate.
+  RUFF_VERSION: "0.16.1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the changed-files diff needs history, not a shallow tip
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install "ruff==${RUFF_VERSION}"
+
+      - name: Resolve the base commit
+        id: base
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          # A new branch, a force-push or the very first commit leaves `before` empty
+          # or all-zeros, and the object may simply not exist. Fall back to the parent.
+          if [ -z "${base:-}" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+          echo "Comparing against $base"
+
+      # Same script the pre-commit hook runs, so the hook and CI cannot disagree.
+      - name: ruff — no new violations (gating)
+        run: python scripts/lint_changed.py --base "${{ steps.base.outputs.sha }}"
+
+      - name: ruff — whole repo (reporting only)
+        run: |
+          echo "Backlog snapshot; does not gate. Lower is better."
+          ruff check . --statistics || true
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install declared dependencies only
+        run: pip install -e ".[dev]"
+
+      # Guards the fix that made this file honest: `pyyaml` and `scipy` are imported at
+      # module level under core/ but went undeclared, so a clean install could not even
+      # reach the first test. Anything new that core/ imports has to land in
+      # [project.dependencies] or this step goes red.
+      - name: Core imports with no heavy extras
+        run: python -c "import pitch3d.app"
+
+      - name: Collect with no heavy extras
+        run: pytest --collect-only -q
+
+      # Three tests `pytest.importorskip("cv2")`. Without this they would report as
+      # skipped and CI would look green while testing nothing. Version matches the
+      # `opencv-python` pin in the [cv] extra.
+      - name: Install headless OpenCV
+        run: pip install "opencv-python-headless==5.0.0.93"
+
+      - name: pytest
+        run: pytest -q

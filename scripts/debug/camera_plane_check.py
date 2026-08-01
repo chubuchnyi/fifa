@@ -27,12 +27,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
-from pitch3d.core.scene.pitch import pitch_line_world_points
 from poseannot.camera import frame_projector, project_points
 from poseannot.config import load as load_cfg
 from poseannot.scene_state import build_scene_state
 from poseannot.video import frame_size, read_frame
+
+from pitch3d.core.scene.pitch import pitch_line_world_points
 
 DEFAULT_VIDEO = "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
 

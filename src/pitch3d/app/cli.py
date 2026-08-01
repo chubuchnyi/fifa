@@ -14,7 +14,6 @@ manifest, canonical-JSON export) and the process exits 0 when the path completes
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -23,9 +22,7 @@ import numpy as np
 from ..adapters.io import FFmpegIngestor
 from ..core.agent import EditBudget, auto_correct
 from ..core.correction.anchor import validate_against_anchor
-from ..core.correction.coherence import CoherenceConfig
 from ..core.correction.engine import make_offset, make_smoothing
-from ..core.correction.kinematics import KinematicConfig
 from ..core.orchestration import StitchConfig
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
@@ -173,7 +170,7 @@ def run_dry_run(
         _priors_cache["store"] = store
         print(f"== profiles: dir={player_profiles_dir!r} priors={priors.policy}")
 
-        def _team_key(subject) -> tuple[str, int, "Position"]:
+        def _team_key(subject) -> tuple[str, int, Position]:
             team = str(subject.team_id if subject.team_id is not None else "UNK")
             jersey = int(subject.jersey_number if subject.jersey_number is not None
                          else subject.track_id)

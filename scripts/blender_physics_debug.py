@@ -24,14 +24,12 @@ Run headless:
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
-import numpy as np
-
 import bpy
 import mathutils
+import numpy as np
 
 _argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 

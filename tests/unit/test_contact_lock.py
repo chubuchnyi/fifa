@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.config.gates import ContactProbeConfig
 from pitch3d.core.correction.contact_lock import contact_lock_gate

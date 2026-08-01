@@ -24,14 +24,12 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-
 from fastapi import (
     Depends,
     FastAPI,
     File,
     Form,
     HTTPException,
-    Request,
     Response,
     UploadFile,
 )
@@ -42,8 +40,15 @@ from fastapi.responses import (
     RedirectResponse,
 )
 from fastapi.staticfiles import StaticFiles
-
 from pydantic import BaseModel, Field
+
+from pitch3d.core.scene.layers import TargetKind
+from pitch3d.core.scene.pitch import (
+    pitch_line_world_points,
+    pitch_polylines,
+    pitch_upright_polylines,
+)
+from pitch3d.core.scene.projection import quat_to_rotation_matrix
 
 from . import clips as clips_mod
 from . import rerun as rerun_mod
@@ -63,13 +68,6 @@ from .camera import (
     world_to_image,
 )
 from .config import load as load_config
-from pitch3d.core.scene.layers import TargetKind
-from pitch3d.core.scene.projection import quat_to_rotation_matrix
-from pitch3d.core.scene.pitch import (
-    pitch_line_world_points,
-    pitch_polylines,
-    pitch_upright_polylines,
-)
 from .pitch_evidence import DEFAULT_TOLERANCE_PX, classify
 from .scene_state import (
     BODY_JOINT_NAMES,

@@ -27,10 +27,9 @@ import math
 import os
 import sys
 
-import numpy as np
-
 import bpy
 import mathutils
+import numpy as np
 
 # Shared pitch3d-free Blender modules (scene node-graphs + the export contract) — imported by
 # file so this script stays self-contained (--factory-startup, no pitch3d install needed).

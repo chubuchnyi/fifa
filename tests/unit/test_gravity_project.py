@@ -7,7 +7,6 @@ import pytest
 
 from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.gravity_project import (
-    G_MPS2,
     GravityProjectConfig,
     gravity_project_gate,
 )

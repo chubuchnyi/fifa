@@ -13,13 +13,12 @@ active frames = uncoordinated motion.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from ..scene.scene import Scene
 from .engine import resolve_subject_motion
-
 
 #: SMPL-X body joints roughly grouped (indices in body_pose[T, 21, 3]).
 JOINT_SPINE = (3, 6, 9)              # spine1/spine2/spine3

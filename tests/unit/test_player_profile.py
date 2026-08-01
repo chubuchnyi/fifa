@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from pitch3d.core.scene.player_profile import (
     AutoTunePolicy,
     Position,

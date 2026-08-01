@@ -9,7 +9,6 @@ scene said `source_id: "clip"` while it was paired with the Colombia video, and 
 from __future__ import annotations
 
 import pytest
-
 from poseannot.clips import Clip, _scene_source_id
 
 

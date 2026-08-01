@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import asdict, replace
+from dataclasses import replace
 
 from pitch3d.core.config import load_physics_config
 from pitch3d.core.correction.angular_momentum_probe import (

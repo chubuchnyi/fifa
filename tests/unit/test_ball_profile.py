@@ -8,7 +8,6 @@ import numpy as np
 
 from pitch3d.adapters.profiles import LocalJsonPlayerStore
 from pitch3d.core.scene.player_profile import (
-    ProfileField,
     ProfileSource,
     ProfileUpdateProposal,
     apply_profile_updates,

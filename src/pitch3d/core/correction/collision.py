@@ -19,7 +19,7 @@ subject that actually moved. Layered through the ADR-0002 seam, so a later
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 

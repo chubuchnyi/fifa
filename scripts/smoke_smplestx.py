@@ -21,7 +21,6 @@ os.chdir(REPO)
 
 import torch  # noqa: E402
 import torchvision.transforms as transforms  # noqa: E402
-
 from human_models.human_models import SMPLX  # noqa: E402
 from main.base import Tester  # noqa: E402
 from main.config import Config  # noqa: E402

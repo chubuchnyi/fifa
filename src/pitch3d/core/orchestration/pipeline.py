@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
+from ..config.gates import IdentityConfig
 from ..ports.cache import Cache
 from ..ports.io import ClipRef
 from ..ports.jobs import JobQueue
@@ -24,7 +25,6 @@ from ..ports.perception import (
     Tracks,
 )
 from ..ports.pose import PoseEstimator
-from ..config.gates import IdentityConfig
 from ..scene.field import FieldCalibration
 from ..scene.motion import Ball2DTrack, BallTrack, SubjectMotion
 from .ball_lift import lift_ball_to_3d

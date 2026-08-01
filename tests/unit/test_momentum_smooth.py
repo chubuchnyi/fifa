@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.momentum_smooth import (
     MomentumSmoothConfig,
     _moving_average,
-    _peak_jerk,
     momentum_smooth_gate,
 )
 from pitch3d.core.scene.motion import PoseSequence, SmplxShape, SubjectMotion

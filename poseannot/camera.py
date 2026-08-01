@@ -69,7 +69,7 @@ class CameraAdjust:
 def frame_projector(
     camera_track, frame_index: int,
     video_size: tuple[int, int] | None = None,
-    adjust: "CameraAdjust | None" = None,
+    adjust: CameraAdjust | None = None,
 ) -> ProjectedFrame:
     """Return the per-frame projection package for a given clip frame.
 

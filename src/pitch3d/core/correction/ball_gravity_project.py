@@ -10,15 +10,14 @@ Preserves the endpoints so the contact-anchored points stay fixed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from ..scene.layers import Correction, CorrectionTarget, TargetKind
+from ..scene.layers import CorrectionTarget, TargetKind
 from ..scene.scene import Scene
 from .contact_probe import _find_runs
 from .engine import make_keyframes, resolve_ball
-
 
 G_MPS2 = 9.81
 
@@ -87,7 +86,6 @@ def ball_gravity_project_gate(
     report.max_shift_m = dev
 
     # Emit a KEYFRAME_INTERP on the BALL_POSITION target.
-    from .engine import make_keyframes
     new_corr = make_keyframes(
         "auto-ball-gravity-project",
         CorrectionTarget(TargetKind.BALL_POSITION, subject_track_id=None),

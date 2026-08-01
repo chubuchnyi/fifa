@@ -1,0 +1,46 @@
+# Mechanical fence. The rule is *not* "touched files must be clean" — this repo carries a
+# lint backlog (docs/STATUS.md §5) it is deliberately not fixing in one go, so that rule
+# would make every commit start by cleaning up unrelated code. The rule is "a file may not
+# gain violations": `scripts/lint_changed.py` diffs each staged file against HEAD and fails
+# only on an increase. The backlog can shrink, never grow.
+#
+# Install once:
+#   pip install -e ".[dev]" && pre-commit install
+#
+# The ruff version is pinned here, in the [dev] extra and in .github/workflows/ci.yml, and
+# all three must match: a ruff minor bump changes the rule set, so a mismatch means the
+# hook and CI disagree about what "clean" is. Bump the three together.
+#
+# Deliberately NOT running `ruff format`. It would rewrite 269 of this repo's 358 Python
+# files (~10 300 lines) in a single commit and make `git blame` useless on code whose
+# history is the main record of why it looks the way it does.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.1
+    hooks:
+      # Tidies what it safely can. `--exit-zero` because deciding pass/fail is the next
+      # hook's job; this one must not reject a commit over inherited debt.
+      - id: ruff-check
+        args: [--fix, --exit-zero]
+
+  - repo: local
+    hooks:
+      - id: lint-changed
+        name: ruff — no new violations in changed files
+        entry: python scripts/lint_changed.py
+        language: system
+        pass_filenames: false   # the script reads the staged set itself
+        always_run: true
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      # Large files belong on the pod volume, not in git. The two model weights at
+      # the repo root (rf-detr-base.pth 355 MB, yolo11x-pose.pt 113 MB) are ignored,
+      # and .git is 32 MB — keep it that way.
+      - id: check-added-large-files
+        args: [--maxkb=2048]

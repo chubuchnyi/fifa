@@ -15,16 +15,17 @@ CLI:
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Iterable
 
 import bcrypt
 import yaml
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, HTTPException, Request, status
 from jose import JWTError, jwt
 
-from .config import PoseAnnotConfig, load as load_config
+from .config import PoseAnnotConfig
+from .config import load as load_config
 
 JWT_ALG = "HS256"
 
@@ -48,7 +49,7 @@ def hash_password(plain: str) -> str:
 
 
 def issue_token(username: str, cfg: PoseAnnotConfig) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(hours=cfg.jwt_expire_hours)
+    exp = datetime.now(UTC) + timedelta(hours=cfg.jwt_expire_hours)
     return jwt.encode(
         {"sub": username, "exp": exp}, cfg.jwt_secret, algorithm=JWT_ALG,
     )

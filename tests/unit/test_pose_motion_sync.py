@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.pose_motion_sync import (
-    JOINT_HIP_L,
-    JOINT_HIP_R,
     JOINT_KNEE_L,
     JOINT_KNEE_R,
     PATCHED_CONF,

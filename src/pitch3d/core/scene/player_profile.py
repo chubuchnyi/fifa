@@ -32,14 +32,12 @@ The adapter (``adapters/profiles/local_json.py``) handles persistence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import yaml
-
 
 DEFAULT_PRIORS_PATH = Path(__file__).resolve().parents[4] / "config" / "player_priors.yaml"
 
@@ -161,7 +159,7 @@ def load_priors(path: str | Path | None = None) -> PopulationPriors:
 
 
 def _now_iso() -> str:
-    return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(tz=UTC).isoformat(timespec="seconds")
 
 
 def _default_field(value: float) -> ProfileField:
@@ -327,8 +325,8 @@ def set_operator_field(field_: ProfileField, value: float) -> ProfileField:
 
 
 def _apply_player_update(
-    profile: PlayerProfile, u: "ProfileUpdateProposal", priors: PopulationPriors,
-) -> tuple[PlayerProfile | None, "UpdateOutcome | None"]:
+    profile: PlayerProfile, u: ProfileUpdateProposal, priors: PopulationPriors,
+) -> tuple[PlayerProfile | None, UpdateOutcome | None]:
     """Apply one player-domain proposal; return (new_profile, outcome) or (None, None) skip."""
     target = None
     section = None
@@ -359,8 +357,8 @@ def _apply_player_update(
 
 
 def _apply_ball_update(
-    profile: BallProfile, u: "ProfileUpdateProposal", priors: PopulationPriors,
-) -> tuple[BallProfile | None, "UpdateOutcome | None"]:
+    profile: BallProfile, u: ProfileUpdateProposal, priors: PopulationPriors,
+) -> tuple[BallProfile | None, UpdateOutcome | None]:
     """Apply one ball-domain proposal; return (new_profile, outcome) or (None, None) skip."""
     target = None
     section = None
@@ -397,7 +395,7 @@ def _apply_ball_update(
 def apply_profile_updates(
     store,                                    # ProfileStore (protocol imported lazily)
     priors: PopulationPriors,
-    subject_lookup: dict[int, tuple[str, int, "Position"]],
+    subject_lookup: dict[int, tuple[str, int, Position]],
     updates,                                  # Iterable[ProfileUpdateProposal]
     *,
     ball_id_lookup: dict[int, str] | None = None,
@@ -482,7 +480,7 @@ def emit_ball_proposals(
     default_peak_speed: float | None = None,
     default_peak_accel: float | None = None,
     confidence: float = 1.0,
-) -> "list[ProfileUpdateProposal]":
+) -> list[ProfileUpdateProposal]:
     """Extract p95 speed + p95 accel from a ball track → auto-tune proposals.
 
     Ships as a helper the probe / motion_stats can call: the ball doesn't go

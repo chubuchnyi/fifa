@@ -9,8 +9,8 @@ and exit heights (no visible teleport at the edges).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 
 import numpy as np
 

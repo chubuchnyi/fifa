@@ -17,7 +17,7 @@ Flag when ratio is outside [0.5, 2.0] over meaningful motion windows.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 import numpy as np
 

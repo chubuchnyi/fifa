@@ -25,6 +25,7 @@ import argparse
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -72,7 +73,7 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(Path(args.out) / "transl_trajectories.png", dpi=110)
     plt.close(fig)
-    print(f"  wrote transl_trajectories.png")
+    print("  wrote transl_trajectories.png")
 
     # ─── (2) yaw per subject over time ──────────────────────────────────
     fig, ax = plt.subplots(figsize=(11, 5))
@@ -88,7 +89,7 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(Path(args.out) / "orient_yaw_per_subject.png", dpi=110)
     plt.close(fig)
-    print(f"  wrote orient_yaw_per_subject.png")
+    print("  wrote orient_yaw_per_subject.png")
 
     # ─── (3) body_pose per-frame activity |dpose/dt| ────────────────────
     fig, ax = plt.subplots(figsize=(11, 5))
@@ -107,7 +108,7 @@ def main() -> None:
     fig.tight_layout()
     fig.savefig(Path(args.out) / "body_pose_activity.png", dpi=110)
     plt.close(fig)
-    print(f"  wrote body_pose_activity.png")
+    print("  wrote body_pose_activity.png")
 
     # ─── (4) anomaly-frame report ───────────────────────────────────────
     lines = [
@@ -139,7 +140,7 @@ def main() -> None:
         )
     txt = "\n".join(lines) + "\n"
     Path(args.out, "frame_anomaly_report.txt").write_text(txt, encoding="utf-8")
-    print(f"  wrote frame_anomaly_report.txt")
+    print("  wrote frame_anomaly_report.txt")
 
     # ─── (5) which subjects have BIG jumps? ─────────────────────────────
     print()

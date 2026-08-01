@@ -26,7 +26,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-
 from poseannot.camera import frame_projector, project_points
 from poseannot.config import load as load_cfg
 from poseannot.scene_state import BODY_JOINT_NAMES, build_scene_state

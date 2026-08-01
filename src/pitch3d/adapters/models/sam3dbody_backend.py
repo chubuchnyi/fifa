@@ -313,7 +313,6 @@ class SAM3DBodyBackend:
 
     def _build_converter(self, device):  # pragma: no cover - heavy path
         import smplx
-
         from mhr.mhr import MHR
 
         Conversion = self._import_conversion()

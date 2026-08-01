@@ -46,6 +46,7 @@ def main() -> None:
     from poseannot.config import load as load_cfg
     from poseannot.scene_state import build_scene_state
     from poseannot.video import frame_size, read_frame
+
     from pitch3d.core.scene.pitch import pitch_line_world_points
 
     cfg = replace(load_cfg(), scene_json=SCENE.resolve(), source_video=VIDEO.resolve(),

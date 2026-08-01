@@ -21,18 +21,18 @@ from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.subject import Subject
 from .avatar import AvatarMeshBackend, SmplxTextureBackend, TexturedSmplxAvatarBuilder
 from .ball import TrackNetBackend, TrackNetBallTracker
-from .gaussian_avatar import (
-    FeedForwardGaussianRefiner,
-    GaussianAvatarBuilder,
-    GaussianRefiner,
-)
-from .env import MeasuredPitchEnvReconstructor
 from .calibration import (
     CameraModuleFieldCalibrator,
     KeypointFieldCalibrator,
     PitchKeypointBackend,
 )
 from .detection import DETECTOR_CLASS_MAPS, RFDETRBackend, RFDETRDetector
+from .env import MeasuredPitchEnvReconstructor
+from .gaussian_avatar import (
+    FeedForwardGaussianRefiner,
+    GaussianAvatarBuilder,
+    GaussianRefiner,
+)
 from .motion import LearnedMotionPrior
 from .pose import (
     DiffusionVasOcclusionBackend,

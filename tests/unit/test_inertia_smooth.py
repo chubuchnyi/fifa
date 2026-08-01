@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.inertia_smooth import (
     InertiaSmoothConfig,
     _moving_average,

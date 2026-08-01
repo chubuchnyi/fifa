@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from pitch3d.adapters.profiles import LocalJsonPlayerStore
-from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.correction.kinematics import KinematicConfig, kinematic_gate
 from pitch3d.core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from pitch3d.core.scene.player_profile import (
@@ -16,7 +14,6 @@ from pitch3d.core.scene.player_profile import (
     ProfileField,
     ProfileSource,
     ProfileUpdateProposal,
-    UpdateOutcome,
     apply_profile_updates,
     default_player_profile,
     load_priors,

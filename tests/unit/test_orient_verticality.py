@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from scipy.spatial.transform import Rotation
 
 from pitch3d.core.config.gates import OrientVerticalityConfig

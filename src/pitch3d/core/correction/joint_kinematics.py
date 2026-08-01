@@ -35,7 +35,6 @@ from .engine import make_keyframes, resolve_subject_motion
 from .rotations import (
     axis_angle_to_quat,
     quat_mul,
-    quat_to_axis_angle,
     slerp_axis_angle,
 )
 

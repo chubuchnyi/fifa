@@ -56,6 +56,7 @@ def main() -> None:
     sys.path.insert(0, str(ROOT))
     sys.path.insert(0, str(ROOT / "src"))
     from poseannot.video import read_frame
+
     from pitch3d.core.scene.serialization import load_scene
 
     scene = load_scene(str(A_PATH))

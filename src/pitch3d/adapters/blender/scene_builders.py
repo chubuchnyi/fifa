@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import math
 
-
 GRASS_DARK_RGB = (0.311, 0.446, 0.109)
 GRASS_LIGHT_RGB = (0.327, 0.469, 0.114)
 

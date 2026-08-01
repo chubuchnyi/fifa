@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from pitch3d.core.correction.ball_contact_probe import (
     BallContactConfig,
     ball_contact_probe,
 )
-from pitch3d.core.scene.motion import Ball2DTrack, BallTrack, PoseSequence, SmplxShape, SubjectMotion
+from pitch3d.core.scene.motion import (
+    BallTrack,
+    PoseSequence,
+    SmplxShape,
+    SubjectMotion,
+)
 from pitch3d.core.scene.scene import Scene, Subject
 
 

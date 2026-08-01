@@ -16,6 +16,16 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from poseannot.camera import (
+    adjusted_calibration,
+    adjusted_camera,
+    image_to_ground,
+    plane_adjustment,
+    plane_similarity,
+    project_ground,
+    world_to_image,
+)
+from poseannot.edits import append_edit, build_calibration_edit, pop_last_calibration_edit
 
 from pitch3d.core.scene.layers import (
     Correction,
@@ -28,16 +38,6 @@ from pitch3d.core.scene.layers import (
 from pitch3d.core.scene.plane_camera import camera_from_calibration
 from pitch3d.core.scene.projection import quat_to_rotation_matrix
 from pitch3d.eval.synthetic import CAMERA_VIEWS, generate_scene
-from poseannot.edits import append_edit, build_calibration_edit, pop_last_calibration_edit
-from poseannot.camera import (
-    adjusted_calibration,
-    adjusted_camera,
-    image_to_ground,
-    plane_adjustment,
-    plane_similarity,
-    project_ground,
-    world_to_image,
-)
 
 PROBE = np.array([[0.0, 0.0], [30.0, 20.0], [-40.0, -25.0], [10.0, -30.0]])
 

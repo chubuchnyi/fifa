@@ -58,10 +58,10 @@ def main() -> int:
     _say(f"   ok  {time.perf_counter()-t:.2f}s  subjects={len(st.subjects)}  n_frames={st.n_frames}")
 
     from poseannot.app import _joints2d_for
-    from poseannot.camera import frame_projector
+    from poseannot.camera import frame_projector, project_points
     from poseannot.video import frame_size
+
     from pitch3d.core.scene.pitch import pitch_line_world_points
-    from poseannot.camera import project_points
 
     _say("-> frame_size(source_video)")
     t = time.perf_counter()

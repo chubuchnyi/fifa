@@ -86,14 +86,20 @@ Honest baseline, so the next session does not mistake green for safe.
 |--------|----------|------|
 | Test suite | **1114 passed / 14 skipped / 0 failed**, >5 min | fakes-backed (`conftest.py` says so); no golden test on real-clip output |
 | Untested user-facing paths | ~6000 lines | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
-| Lint | **311 ruff errors** | 87 E501 · 71 F401 · 45 E702 · 34 I001. The old "~46 pre-existing" figure was stale |
-| CI | **none** | no `.github/workflows`, no pre-commit — nothing mechanical stops a regression |
+| Lint | **152 ruff errors** (was 311) | 87 E501 · 45 E702 · tail. 148 auto-fixed 2026-08-01; UP042 switched off (its fix changes enum serialisation) |
+| CI | **pre-commit + GH Actions** | gate = `scripts/lint_changed.py`: a changed file may not *gain* violations. The 152 are reported, not gated — the backlog can shrink, not grow |
+| Type checking | **mypy checks nothing** | numpy's stubs use 3.12 `type` syntax, rejected under `python_version = "3.11"`; mypy stops at error 1. Declared but dead |
+| Declared deps | **fixed 2026-08-01** | `pyyaml`/`scipy` were imported by `core/` but undeclared — a clean `pip install -e ".[dev]"` could not collect a single test. CI now guards this |
 | Pipeline entry points | **6** | cli · controller · anim_export · poseannot · scripts/* · pod shell — orchestration re-implemented in each |
 | Calibration backends | **4 paths, 1 wired** | only `KeypointFieldCalibrator` is in `wiring.py`; `CameraModuleFieldCalibrator`, `PnLCalibBackend` and the `*_rigid_camera.py` scripts are parallel routes |
 
 Remediation plan agreed 2026-08-01: (1) agent entry point — this split; (2) pre-commit + CI;
 (3) one golden test on a real 30-frame clip; (4) collapse the 6 entry points onto
-`controller.Application`. Steps 2–4 not started.
+`controller.Application`. **Steps 1–2 done; 3–4 not started.**
+
+Step 2 is a *mechanical* fence only. It stops new lint debt and proves the package installs and
+imports from a clean checkout. It does **not** make the suite meaningful — that is step 3, and
+until then a green CI still means "the fakes agree with each other".
 
 ## 6. Key references
 

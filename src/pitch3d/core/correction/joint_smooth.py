@@ -11,7 +11,7 @@ large deltas the pose_kinematics gate already clamped them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 

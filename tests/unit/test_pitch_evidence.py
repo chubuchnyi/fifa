@@ -8,10 +8,12 @@ boards, and the missing line made the far field measure 37 px out when it was 4.
 
 from __future__ import annotations
 
-import cv2
 import numpy as np
-from poseannot import pitch_evidence
-from poseannot.pitch_evidence import _bridge, _masks, classify
+import pytest
+
+cv2 = pytest.importorskip("cv2")  # provided by [cv]; CI installs opencv-python-headless
+from poseannot import pitch_evidence  # noqa: E402  (must follow the cv2 skip guard)
+from poseannot.pitch_evidence import _bridge, _masks, classify  # noqa: E402
 
 _CROWD_ROWS = 200
 _LINE_V = 302
