@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+import numpy as np
+
 from ..ports.cache import Cache
 from ..ports.io import ClipRef
 from ..ports.jobs import JobQueue
@@ -29,6 +31,39 @@ from .ball_lift import lift_ball_to_3d
 from .continuity import StitchConfig, StitchReport, stitch_tracks_with_report
 from .identity import AppearanceProvider, IdentityReport, identity_gate
 from .stages import Stage, StageRun, clip_hash, run_cached
+
+
+class UnsolvedCalibrationError(RuntimeError):
+    """Raised when CALIBRATE returned a homography track that solved no frame at all."""
+
+
+def require_solved_calibration(cal: FieldCalibration, *, min_solved: int = 1) -> int:
+    """Refuse a calibration that carries no measurement, and return how many frames were solved.
+
+    Both calibrators already say so honestly: a frame they could not solve is stored as the last
+    good homography — or ``eye(3)`` if there has never been one — at **confidence exactly 0**. What
+    was missing is anyone reading it. A run whose every frame is unsolved exports ``eye(3)``, i.e.
+    "one image pixel is one metre", and every world coordinate downstream is that fiction: #125 got
+    34/60 identity frames, 11 subjects instead of 23, and not one line of complaint.
+
+    This is the failure that cannot be caught by eye later, because the ground overlay is drawn
+    through the *same* homography that produced the error, so the pitch always looks right — and
+    ``apply_rigid_camera.py`` then replaces the calibration outright, which makes a dead scene score
+    a healthy 1.0 px. It has to be caught here or not at all.
+
+    ``min_solved`` is the dial (auto default, manual override): 1 refuses only the indefensible
+    "no answer anywhere" case. How many *carried* frames are acceptable is a judgment about drift,
+    so it is left to the caller rather than guessed here.
+    """
+    solved = int((np.asarray(cal.confidence, dtype=float) > 0.0).sum())
+    if solved < min_solved:
+        total = int(np.asarray(cal.confidence).size)
+        raise UnsolvedCalibrationError(
+            f"calibration solved {solved}/{total} frames (need >= {min_solved}). The homography "
+            f"track is the carried fallback, not a measurement — check that the calibrator's "
+            f"weights actually loaded before trusting any world coordinate from this run."
+        )
+    return solved
 
 
 @dataclass
@@ -69,6 +104,9 @@ class ReconstructionPipeline:
     #: Callable that returns per-frame appearance features for a tracklet
     #: (``(T, D)`` float array or ``None``). Wire a real Re-ID backbone here.
     appearance_provider: AppearanceProvider | None = None
+    #: Minimum CALIBRATE frames that must carry a real solve (confidence > 0) — see
+    #: :func:`require_solved_calibration`. Raise it to demand more than "not entirely dead".
+    min_solved_frames: int = 1
 
     def run(
         self,
@@ -120,6 +158,7 @@ class ReconstructionPipeline:
             pose_extra["identity"] = asdict(self.identity_cfg)
 
         cal = stage(Stage.CALIBRATE, lambda: self.calibrator.calibrate(clip))
+        require_solved_calibration(cal, min_solved=self.min_solved_frames)
         motions = stage(
             Stage.POSE, lambda: self.pose.estimate(clip, trk, cal), extra_params=pose_extra
         )

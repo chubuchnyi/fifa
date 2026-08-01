@@ -200,6 +200,7 @@ def main() -> None:
                          "visual regression came from the camera or from the flip")
     args = ap.parse_args()
 
+    from pitch3d.core.orchestration.pipeline import require_solved_calibration
     from pitch3d.core.scene.serialization import load_scene, save_scene
 
     assert args.out is None or len(args.scene) == 1, "--out takes a single --scene"
@@ -218,6 +219,11 @@ def main() -> None:
         scene = load_scene(str(path))
         assert scene.field is not None and scene.field.calibration is not None, f"{path}: no field"
         cal = scene.field.calibration
+        # This script is how a dead scene gets to look alive (#125): it replaces the calibration
+        # outright, so a run that solved nothing — identity homographies, confidence 0 — comes out
+        # the far side scoring a healthy 1.0 px against the paint, and every subject in it is still
+        # placed by the fiction that one pixel is one metre. Refuse rather than launder.
+        require_solved_calibration(cal)
         # A subset is fine and is not a special case: the fit is one focal, one centre and a
         # rotation per frame OF THE VIDEO, so a scene covering frames 0-47 of a 0-59 fit wants
         # exactly those 48 rotations. Only frames the fit never saw are a refit.

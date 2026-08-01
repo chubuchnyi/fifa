@@ -106,16 +106,13 @@ _CURATED: list[tuple[str, str, str]] = [
     # → PnLCalib → SMPLest-X → WASB). The two scenes above were written by older code and carry
     # its fixed-in-tree defects.
     #
-    # Two runs of the SAME code on the same clip, both listed because they disagree: 23 subjects
-    # vs 11. Their calibrations disagreed too — 07-31's homographies are bit-for-bit `carry_off`'s
-    # (worst entry off by 8e-12, i.e. float round-trip, not arithmetic), so that run never re-solved
-    # the camera at all; 08-01's is a genuine new solve ~1500 px away on a 1920-px frame. That
-    # difference is invisible below the surface here, because `_rigid` replaces both calibrations
-    # with the one #119 measured — what is left to compare is the poses and the tracking.
+    # `out/pod_0801` was listed here for a few hours and is deliberately not any more: that run
+    # solved 0/60 frames, so its scene is built on identity homographies — one pixel is one metre —
+    # and it reached this list looking healthy only because `apply_rigid_camera.py` had replaced the
+    # dead calibration with #119's (see #125). A scene with no measurement in it is not a variant to
+    # compare against; both that script and the pipeline now refuse it outright.
     ("fresh-60", "Colombia · pod run 2026-07-31 · 23 subj · #119 cam",
      "out/fresh60/export/scene_rigid.json"),
-    ("pod-0801", "Colombia · pod run 2026-08-01 · 11 subj · #119 cam",
-     "out/pod_0801/export/scene_rigid.json"),
 ]
 
 

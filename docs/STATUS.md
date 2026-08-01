@@ -253,7 +253,7 @@ still open. Add a row when you open an item, move it to §6 with the evidence wh
 | #112 | **Drag the pitch layout to correct the homography** | **done 2026-07-31**, awaiting the user's eye | Shipped (§6): the manual-override half of the standing request, alongside #111's per-player drags. The gesture must exist because **no residual we compute can see this error** — every one is scored against the same lines that placed the model, so the operator's eye is the only instrument. The design choice that makes it safe is composing the edit on the **world plane** (`H @ B`, a 4-DOF similarity) rather than in image space (`A @ H`): `K[r₁ r₂ t] @ B` is again `K[r₁' r₂' t']`, so the drag provably cannot turn a camera-realizable calibration unrealizable, and K is never touched so the focal is unchanged. Live drag: `fit_px` 1.0 → 19.38 with the camera badge held at `measured · 0.0 px · f 4169.3`; undo restores `edits.json` byte-identical. The `turn` handle is pinned by unit test and by curl but **not yet watched in a browser** (session died, #122). |
 | #122 | **An expired session silently degrades the UI instead of asking for a re-login** | **done 2026-07-31** | The `poseannot_token` cookie lasts `jwt_expire_hours: 24`; when it lapses mid-session every layer just empties, because all ~50 call sites end `if (!r.ok) { clear the layer; return; }` — right for "no data on this frame", wrong for "your token died". The storm was live and measured: **~0.8 req/s of 401s on `/api/frame/1/ground` for hours**, 48 821 when first seen and 56 000+ still climbing a session later, while the frame the operator was judging alignment against kept rendering from cache. Fixed by wrapping `window.fetch` **once**: latch on the first 401, raise a blocking re-login card, short-circuit every later request. **Deliberately driver-agnostic** — no timer, retry, recursion or observer in `index.html` (nor anywhere in its git history) can re-issue that call, and the storming tab ran a build we can no longer read, so the repeat was never pinned to a line; interception at the one boundary every caller shares stops it regardless. The frame `<img>` bypasses `fetch`, so its `@error` re-requests through the wrapper — as a **GET**, since FastAPI's `APIRoute` answers HEAD with 405 and a HEAD probe would miss the very 401 it hunts. Mechanism verified in a real page: 502 calls → **1** network call, event latched once, callers still get a readable 401 `Response`. |
 | #61 | Camera-calibration accuracy (offset + ~3× scale) | **root cause exact + fixed for every clip 2026-08-01**, awaiting the user's eye | The defect was never on the ground plane (#110/#113/#114 measured 1.4 px against real paint), and it was not a *wrong* camera either. PnLCalib solves each frame as a free 8-DOF DLT with nothing tying it to a pinhole, and on this clip the result is **no camera at all**: swept over every focal from 200 to 12000 px, the nearest realizable pinhole is still **~525 px** away (#119's fit: 1.36 px). So `camera_from_calibration` refuses (`REALIZABLE_PX = 1.0`), `controller.py:296` substitutes a synthetic `Viewpoint.BROADCAST` at 1280×720 / fx 772, and the scene draws its pitch through the measured homography and its players through a camera **3.9× too small** — marks land, bodies do not. Fixed by applying the one measured fit (`calib/…npz`, committed) to **every** scene variant via `apply_rigid_camera.py`; live API agrees to `fit 1.0–1.4 px` on all of them. Close once the user has looked. |
-| #125 | **A "fresh" pipeline run silently re-used a months-old calibration** | opened 2026-08-01, **not yet adjudicated** | `out/fresh60`'s homographies match `mirror · carry_off`'s to **7.560e-12** — float round-trip, not arithmetic — so the 2026-07-31 run never re-solved the camera; it read a cache. (`out/anim_full_realism` matches at exactly 0.) The 2026-08-01 run *did* solve, landing **3.804e+02** away, and returned **11 subjects where the cached run returned 23**. Two questions, both open: **(a)** where the cache lives and why a full run hits it — a stale calibration is the one input that can never be caught by eye, because the pitch will always look right (it is fit to the paint) while everything else is silently wrong; **(b)** which of 11 vs 23 is correct. The `_rigid` clips cannot answer (b) — `apply_rigid_camera.py` overwrites both calibrations with #119's, so what is comparable there is the poses and the tracking, not the camera. |
+| #125 | **A run that solved no calibration frame still exports a finished scene** | **fixed 2026-08-01**; the pod-side cause of the failed solve is still unknown | Opened on a wrong diagnosis, and the correction is the finding (§6). There was **no cache**: `out/fresh60` matching `mirror · carry_off` to 7.560e-12 is what a *deterministic* calibrator does — same video, same seeded RANSAC, same weights, so identical output and a JSON float round-trip between them. The run that failed was **2026-08-01's**, and its own file said so in a field nobody read: `confidence` is **0.0 on 60/60 frames**, which both calibrators document as "unsolved — carried the last good homography, or `eye(3)` if there was none". 34/60 frames are exactly `eye(3)`; the scene is built on *one pixel = one metre*, which is the 11-subjects-instead-of-23. **Fixed** by `require_solved_calibration` in `core/orchestration/pipeline.py` — called straight after CALIBRATE and again by `apply_rigid_camera.py`, which is what laundered the dead scene into a healthy-looking 1.0 px. `min_solved` is the dial; the default refuses only "no answer anywhere". 4 tests pin it. **Still open:** *why* PnLCalib solved nothing on that pod — most likely the weight symlinks under `$VOL/weights/pnlcalib/`, i.e. the mount-point trap of 07-31 again, but that needs the pod to confirm. |
 | #124 | **The pitch-layout drag is unverifiable** | **done 2026-08-01** | The #112 gesture worked; nothing about it was legible (§6). Unlabeled handles among ~23 same-coloured player markers, a handle that springs back on release so a good drag reads as a failed one, instructions in a hover tooltip, and the numbers that prove it worked in 10 px grey type ~500 px away. Fixed with on-frame labels + an in-panel HUD carrying the gesture, the live `fit px` / on-paint score (red when worse than at open), the last delta, `undo` and `done`. Verified with real pointer events: drag → `32.1 px · 22/261` red, undo → `1.0 px · 278/25`. |
 | #108 | R3's line-constraint path is a **no-op** on the target clip | pending, **needs instrumentation, not the pod** | Fresh post-R3 homographies are byte-identical to the pre-R3 export (max\|dH\| = 0.0 over 60 frames) — the line path self-disables via `_lines_agree` (`_LINE_FRAME_TOL_M = 3.0`). The plan was to read which branch trips out of `carry_ab_full.log`; checked on the live pod 2026-07-31 and **the log cannot answer it** — 1.4 MB with *zero* mentions of the agreement test, because the branch emits nothing. So this was never blocked on pod access: it needs a log line at the decision first, and only then a run. |
 | #107 | Render the **measured** camera, not the synthetic one | **done 2026-07-31** | Was framed as a decision; it was a measurement, and it came out **neither** for the old scene (§6). `core/scene/plane_camera.py` decomposes the calibration into a real `CameraTrack` (focal from Zhang's constraint, no extra input) and **refuses** — `camera is None` — when no camera explains the homographies. Control: `scene_rigid.json` → focal 4169, reprojection **0.0003 px**; `scene.json`'s 480 free params → **5048 px**, so #107 was never an oversight, there was nothing to render. `AppController` now keeps the solved camera and falls back only when the refusal fires; the header badge names which you are looking at (`one camera · 0 px` vs amber `two cameras · 6220.64 px apart`). Unblocks #109. |
@@ -415,6 +415,48 @@ fabricate or silently hide.
 
 ## 6. Progress log (newest first)
 
+- **2026-08-01 (#125 — there was no cache; the run that failed was mine, and it exported a scene
+  built on `eye(3)` without a word of complaint)** —
+  User: *"возьмись за #125"*.
+  - **The diagnosis it was opened on was wrong, and wrong in the worst direction** — it accused the
+    good run and blessed the dead one. `out/fresh60` matching `mirror · carry_off` to 7.560e-12 is
+    not a cache hit; it is what a **deterministic** calibrator does. Same video, same frames, same
+    weights, `seed=0` on the RANSAC — identical output, and 7.56e-12 on entries of order 1e2 is the
+    JSON float round-trip between the two files, i.e. ~1e-15 relative. Two runs agreeing exactly is
+    the *expected* result and should never have been read as suspicious.
+  - **The file said what had happened, in a field nobody read.** `out/pod_0801`'s calibration
+    confidence is **0.0 on 60/60 frames**, and both calibrator classes document that value in their
+    own source: *"unsolved frame: carry last good, but flag zero confidence (R-6)"*. Since there was
+    never a first good frame, the carried value is `np.eye(3)` — **34/60 frames are exactly identity**
+    and the rest are within 1e-3 of it. An identity image→world homography asserts that **one pixel
+    is one metre**, so the pitch in that scene is 1920 m across. That, not "a different camera", is
+    the 11 subjects instead of 23.
+  - **Confidence 0 was already honest; nothing consumed it.** The R-6 marking that #105/#113 built
+    was doing its job perfectly and writing the answer into the export, where it sat unread through
+    a full pipeline, a `_rigid` pass, a clip registration, and a report to the user. A marking that
+    nothing reads is a comment.
+  - **Two things had to fail together for this to reach the operator.** First the producer exported
+    it; then **`apply_rigid_camera.py` laundered it** — that script *replaces* the calibration, so
+    the dead scene came out the far side scoring `fit 1.0 px · on paint 278/25` against real white
+    pixels, which is exactly the evidence I quoted as proof that "all overlay variants render
+    correctly". They did. The pitch is drawn through #119's camera, so it lands however dead the
+    scene underneath is. **The ground overlay cannot audit the calibration, because after `_rigid`
+    it is no longer drawing the calibration.**
+  - **Fixed at both points.** `require_solved_calibration` (`core/orchestration/pipeline.py`) runs
+    straight after CALIBRATE and again inside `apply_rigid_camera.py`. `min_solved` is the dial and
+    defaults to 1 — it refuses only "no answer anywhere", because how many *carried* frames are
+    tolerable is a judgment about drift and not mine to guess. Verified both ways on the real
+    artifacts: `pod_0801` → `UnsolvedCalibrationError: calibration solved 0/60 frames`, `fresh60` →
+    passes and writes `scene_rigid.json` as before. `tests/unit/test_unsolved_calibration_gate.py`
+    (4) pins it; full unit + integration suites green.
+  - **`pod-0801` is out of the clip switcher**, with the reason left in `clips.py` so it is not
+    re-added. The artifact stays on disk as the evidence for this entry.
+  - **Still open:** *why* PnLCalib solved nothing on that pod. The proxy calibrator is ruled out —
+    it reports confidence **0.95**, not 0.0, so the real backend did run and returned `None` for
+    every frame. The prime suspect is the weight symlinks under `$VOL/weights/pnlcalib/{SV_kp,SV_lines}`,
+    i.e. the per-pod mount-point trap that already cost the 07-31 run its SMPLest-X weights. That
+    needs the pod to confirm, and the gate means the next run cannot hide it either way.
+
 - **2026-08-01 (#61 root cause is "no camera at all", not "a wrong camera"; #124 makes the #112 drag
   verifiable; and a "fresh" pod run turns out to have re-used a months-old calibration)** —
   User: *"вот этот локальный скрипт, который ты упоминаешь. Назови его конкретно, и почему он
@@ -460,17 +502,10 @@ fabricate or silently hide.
     button disappears. Also hit **#82's trap again** — `.main` has `@pointerdown="onPanStart"`, so
     any panel not in the exclusion selector loses its clicks to `setPointerCapture`; `.layout-hud`
     is now listed in both `onPanStart` and `onWheel`.
-  - **The pod re-run, and what it exposed.** `FRAMES=60 OUT=out/pod_0801 STITCH=1 COHERENCE=1
-    PHYSICS=1` → 197 s (plus a 12 s `FORMAT=json` re-pass: `FORMAT=smplx_npz` writes only
-    `export/scene.smplx_npz/subject_*.npz`, no `scene.json`). Registered as clip `pod-0801`. Pod
-    `jd9syxkau3rqzm` **stopped**. The finding is uncomfortable: **the 2026-07-31 "fresh" run never
-    re-solved the camera.** Its homographies match `mirror · carry_off`'s to **7.560e-12** — float
-    round-trip, not arithmetic — i.e. they came from a cache, not from PnLCalib.
-    `out/anim_full_realism` matches at **0.000e+00**. Today's run is a genuine new solve, **3.804e+02**
-    away (~1500 px on a 1920 px frame at pitch scale) — and it found **11 subjects where the cached
-    run found 23**. Which is right is **not yet adjudicated**, and the `_rigid` variants cannot
-    answer it, because `apply_rigid_camera.py` overwrites both calibrations with #119's. What is
-    left to compare between those two clips is the poses and the tracking. Logged as **#125**.
+  - **The pod re-run.** `FRAMES=60 OUT=out/pod_0801 STITCH=1 COHERENCE=1 PHYSICS=1` → 197 s (plus a
+    12 s `FORMAT=json` re-pass: `FORMAT=smplx_npz` writes only `export/scene.smplx_npz/subject_*.npz`,
+    no `scene.json`). Pod `jd9syxkau3rqzm` **stopped**. What it produced is dead — but the first
+    reading of it was backwards, and the correction is the next entry (#125).
 
 - **2026-07-31 (#120a — mirroring a human takes two parameters, not one; and the user's eye
   independently caught #61 in the fresh run)** —
