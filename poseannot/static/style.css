@@ -282,6 +282,24 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .zoom-hud button:hover { border-color: var(--accent); color: var(--accent); }
 .zoom-hud span { min-width: 44px; text-align: center; }
 
+/* Layout-drag HUD (#124) — the instructions and the score, next to the handles they describe. */
+.layout-hud {
+  position: absolute; left: 10px; right: 10px; top: 10px; z-index: 6;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: rgba(20, 22, 26, 0.93); border: 1px solid #f472b6;
+  border-radius: 6px; padding: 6px 10px; font-size: 0.78rem; color: var(--fg-dim);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+.layout-hud > b { color: #f472b6; text-transform: uppercase; letter-spacing: 0.6px; font-size: 0.7rem; }
+.layout-hud .rd { color: var(--fg); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.layout-hud .rd.worse { color: #ff6b6b; }
+.layout-hud button {
+  background: none; border: 1px solid var(--border); color: var(--fg);
+  height: 22px; padding: 0 9px; border-radius: 3px; cursor: pointer;
+  font-family: inherit; font-size: 0.78rem;
+}
+.layout-hud button:hover { border-color: var(--accent); color: var(--accent); }
+
 /* Manual overlay-camera controls (top-left of the frame panel). */
 .cam-panel {
   position: absolute; left: 10px; top: 10px; z-index: 6;

@@ -260,6 +260,28 @@ badge keeps reading 'one camera'.">layout</button>
              :style="`width:${imgSize.w}px;height:${imgSize.h}px`"></svg>
       </div>
     </div>
+    <!-- Layout-drag HUD (#124). The gesture shipped in #112 works, but blind: the handle you
+         grab springs back to its fixed screen spot on release (that is by design — the world
+         moved under it, not the handle), so the ONLY evidence a drag did anything is the fit
+         reading, and that lived in 10 px grey type at the far end of the top bar. Put the
+         instrument next to the thing it measures. -->
+    <div class="layout-hud" x-show="showLayout && showPitch && pitchSource === 'calib'" x-cloak>
+      <b>pitch layout</b>
+      <span>drag the <b style="color:#f472b6">square</b> to slide it, the
+        <b style="color:#f472b6">ring</b> to turn and size it — until the green outline sits on
+        the painted lines. The handles spring back; the pitch is what moves.</span>
+      <span class="rd" :class="{ worse: _layoutWorse }"
+            x-text="'fit ' + (pitchFit === null ? '—' : pitchFit.toFixed(1)) + ' px'
+                  + (pitchCounts ? ' · on paint ' + pitchCounts.ok + ' / off ' + pitchCounts.off : '')"
+            title="lower fit and more on-paint = better. This is measured against the frame's own
+white pixels, so it is the honest score of your drag."></span>
+      <span x-show="lastLayout" class="rd"
+            x-text="lastLayout ? 'last: ' + lastLayout.moved_m + ' m · ' + lastLayout.turn_deg
+                                 + '° · x' + lastLayout.scale : ''"></span>
+      <button @click="undoLayout()" x-show="pitchAdjusted">undo</button>
+      <button @click="toggleLayout()">done</button>
+    </div>
+
     <div class="zoom-hud">
       <button @click="zoomBy(1/1.25)" title="zoom out">−</button>
       <span x-text="Math.round(view.scale * 100) + '%'"></span>
@@ -894,6 +916,11 @@ Alpine.data("poseAnnot", () => ({
     pitchHandles: [],         // [{id:"move"|"turn", uv:[u,v], world:[x,y]}]
     pitchAdjusted: false,     // is the drawn layout hand-registered rather than as-solved?
     lastLayout: null,         // {moved_m, turn_deg, scale} — what the last drag did
+    _layoutFit0: null,        // fit_px when layout mode opened — the bar to beat
+    get _layoutWorse() {
+      return this._layoutFit0 !== null && this.pitchFit !== null
+        && this.pitchFit > this._layoutFit0 + 0.5;
+    },
     _dragPitch: null,         // handle id being dragged, or null
     _dragPitchUV: null,
     showCamAdjust: false,     // overlay-orient panel visible?
@@ -1262,6 +1289,9 @@ Alpine.data("poseAnnot", () => ({
 
     toggleLayout() {
       this.showLayout = !this.showLayout;
+      // Latch the score on the way in, so "worse than when I started" is answerable. Dropping it
+      // on the way out keeps the next session honest rather than scoring against a stale bar.
+      this._layoutFit0 = this.showLayout ? this.pitchFit : null;
       this.rebuildOverlay();
     },
 
@@ -1737,6 +1767,14 @@ Alpine.data("poseAnnot", () => ({
           + ` stroke-width="${sw}" opacity="0.95" pointer-events="none"/>`);
         out.push(`<circle cx="${t[0]}" cy="${t[1]}" r="${rad * 0.34}" fill="${col}"`
           + ` opacity="0.9" pointer-events="none"/>`);
+        // Labelled, because unlabelled they are two more pink dots on a frame that already has
+        // twenty-odd pink player markers — the operator has no way to tell a control from an
+        // annotation, which is exactly how #112 shipped unusable.
+        const tag = (u, dy, s2) => out.push(`<text x="${u[0]}" y="${u[1] + dy}" font-size="${17 * s}"`
+          + ` fill="${col}" text-anchor="middle" paint-order="stroke" stroke="#000"`
+          + ` stroke-width="${3.5 * s}" pointer-events="none">${s2}</text>`);
+        tag(m, -half - 7 * s, "drag: move");
+        tag(t, -rad - 7 * s, "drag: turn + size");
         for (const [h, u] of [[this.pitchHandles[0], m], [this.pitchHandles[1], t]]) {
           out.push(`<circle class="pitch-handle" data-hid="${h.id}" cx="${u[0]}" cy="${u[1]}"`
             + ` r="${hit}" fill="transparent" pointer-events="auto" style="cursor:grab"/>`);
@@ -2010,7 +2048,8 @@ Alpine.data("poseAnnot", () => ({
     },
 
     onWheel(e) {
-      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel, .stage-inspect")) return;
+      if (e.target.closest && e.target.closest(
+        ".zoom-hud, .cam-panel, .upload-panel, .stage-inspect, .layout-hud")) return;
       const box = this.$refs.canvasFrame;
       if (!box) return;
       const rect = box.getBoundingClientRect();
@@ -2025,7 +2064,8 @@ Alpine.data("poseAnnot", () => ({
       // checkboxes starts a pan and setPointerCapture steals the interaction,
       // so clicks/drags never reach the controls — the "reset/flip/sliders/
       // re-run gate toggles do nothing" bug.
-      if (e.target.closest && e.target.closest(".zoom-hud, .cam-panel, .upload-panel, .stage-inspect")) return;
+      if (e.target.closest && e.target.closest(
+        ".zoom-hud, .cam-panel, .upload-panel, .stage-inspect, .layout-hud")) return;
       // A stance handle takes the gesture instead of the pan. The capture stays on
       // .main either way, so the move/up handlers below see the whole drag even when
       // the cursor leaves the small handle.
