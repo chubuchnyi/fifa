@@ -180,6 +180,48 @@ def mirror_subjects(scene) -> int:
     return len(scene.subjects)
 
 
+def mirror_corrections(scene) -> int:
+    """Carry the *corrections* across the world flip too — :func:`mirror_subjects` is only half.
+
+    A replayed scene keeps its motion here, not in ``proposal.pose``: ``resolve_subject_motion``
+    lays these absolute keyframes over the proposal, so mirroring the proposal alone moves nothing
+    a viewer sees. That is how the default clip ended up holding right-handed proposals, a
+    right-handed camera and 677 left-handed corrections, and drew every player mirrored about the
+    halfway line — the visible face of #120.
+
+    ``KEYFRAME_INTERP`` values are absolute, so each takes exactly the map its target takes in
+    :func:`mirror_subjects`. Anything else raises rather than passing through unmirrored.
+    """
+    from scipy.spatial.transform import Rotation
+
+    from pitch3d.core.scene.layers import CorrectionMode, TargetKind
+
+    m_local = local_mirror()
+    for corr in scene.corrections:
+        kind = corr.target.kind
+        if corr.mode != CorrectionMode.KEYFRAME_INTERP or kind not in (
+            TargetKind.ROOT_TRANSLATION, TargetKind.ROOT_ORIENTATION, TargetKind.POSE_BODY_JOINT
+        ):
+            raise NotImplementedError(
+                f"correction {corr.id} is {kind.value}/{corr.mode.value}, which the world flip "
+                f"has no rule for. Letting it through unmirrored is the bug this function fixes."
+            )
+        v = np.asarray(corr.payload.key_values, dtype=float)
+        if kind is TargetKind.ROOT_TRANSLATION:
+            corr.payload.key_values = v @ M
+        elif kind is TargetKind.ROOT_ORIENTATION:
+            corr.payload.key_values = Rotation.from_matrix(
+                m_local @ Rotation.from_rotvec(v).as_matrix() @ S
+            ).as_rotvec()
+        else:
+            # The sagittal flip, so the joint swaps side as well as negating its y and z.
+            j = corr.target.joint_index
+            assert j is not None and 0 <= j < len(_BP_SWAP), f"joint_index {j} out of body_pose"
+            corr.payload.key_values = v * (1.0, -1.0, -1.0)
+            corr.target.joint_index = int(_BP_SWAP[j])
+    return len(scene.corrections)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("camera", type=Path, nargs="?",
@@ -243,12 +285,13 @@ def main() -> None:
         # drawn through two different ones — the split #61 is a symptom of.
         cal.homographies = np.stack([np.linalg.inv(h) for h in cut["world_to_image"]])
         n = mirror_subjects(scene) if do_mirror else 0
+        n_corr = mirror_corrections(scene) if do_mirror else 0
 
         out = args.out or path.with_name(path.stem + "_rigid.json")
         save_scene(scene, str(out))
         print(f"OK   {out}\n"
               f"     stored frame {'mirrored template' if mirrored else 'right-handed'} "
-              f"({args.mirror}) -> mirrored {n} subjects")
+              f"({args.mirror}) -> mirrored {n} subjects, {n_corr} corrections")
 
 
 if __name__ == "__main__":

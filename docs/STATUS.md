@@ -66,7 +66,7 @@ One line per item. Reasoning, measurements and root causes live in
 | #112 | Drag the pitch layout to correct the homography | done 2026-07-31 — **awaiting eye** |
 | #60 | Re-run overlays + verify acceptable alignment | pending — the eye-check that closes the calibration thread |
 | #125 | A run that solved no calibration frame still exported a finished scene | gate fixed 2026-08-01; **why PnLCalib solved nothing on that pod is still open** (needs the pod) |
-| #120 | Stored scenes declare a world frame they are not in | body mirror fixed 2026-07-31; **stale `handedness` labels on pre-#118 artifacts remain** |
+| #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
 | #108 | R3's line-constraint path is a no-op on this clip | pending — needs a log line at the decision first, then a run |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** (where it runs). Do NOT stub a fake generate button |
