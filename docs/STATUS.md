@@ -84,7 +84,8 @@ Honest baseline, so the next session does not mistake green for safe.
 
 | Signal | Measured | Note |
 |--------|----------|------|
-| Test suite | **1114 passed / 14 skipped / 0 failed**, >5 min | fakes-backed (`conftest.py` says so); no golden test on real-clip output |
+| Test suite | **1114 passed / 14 skipped / 0 failed**, >5 min | fakes-backed (`conftest.py` says so) |
+| Real-measurement coverage | **1 file, 8 assertions** | `tests/e2e/test_golden_real_camera.py` over the committed 7 kB camera fit — the only non-fake evidence in the suite, and mutation-checked. Everything downstream of the camera (detection, pose, export) is still fakes-only |
 | Untested user-facing paths | ~6000 lines | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
 | Lint | **152 ruff errors** (was 311) | 87 E501 · 45 E702 · tail. 148 auto-fixed 2026-08-01; UP042 switched off (its fix changes enum serialisation) |
 | CI | **pre-commit + GH Actions** | gate = `scripts/lint_changed.py`: a changed file may not *gain* violations. The 152 are reported, not gated — the backlog can shrink, not grow |
@@ -94,8 +95,14 @@ Honest baseline, so the next session does not mistake green for safe.
 | Calibration backends | **4 paths, 1 wired** | only `KeypointFieldCalibrator` is in `wiring.py`; `CameraModuleFieldCalibrator`, `PnLCalibBackend` and the `*_rigid_camera.py` scripts are parallel routes |
 
 Remediation plan agreed 2026-08-01: (1) agent entry point — this split; (2) pre-commit + CI;
-(3) one golden test on a real 30-frame clip; (4) collapse the 6 entry points onto
-`controller.Application`. **Steps 1–2 done; 3–4 not started.**
+(3) one golden test on real measured data; (4) collapse the 6 entry points onto
+`controller.Application`. **Steps 1–3 done; 4 not started.**
+
+Step 3 landed against the camera solve, not the 30-frame clip originally sketched: the clip is
+not committed (too large) so a test over it cannot run in CI, whereas the 7 kB fit derived from
+it can. The real-video path was measured — 58.63 s for 30 frames, 19 subjects, CPU — and is a
+viable opt-in local test, but it is not written. That is the honest gap in step 3: the golden
+test proves the camera is real, not that the export downstream of it is.
 
 Step 2 is a *mechanical* fence only. It stops new lint debt and proves the package installs and
 imports from a clean checkout. It does **not** make the suite meaningful — that is step 3, and

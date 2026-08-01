@@ -55,7 +55,9 @@ Run everything from the repo root. Local env is `.venv` — CPU/core work needs 
 .venv/bin/mypy
 
 # end-to-end CLI (the real pipeline entrypoint; see app/cli.py for args)
-.venv/bin/python -m pitch3d.app.cli ...          # e.g. --stitch, --real-calib
+.venv/bin/python -m pitch3d.app.cli --clip <mp4> --frames 48 --out-dir out/run --export scene
+# `--real-calib` is NOT a CLI flag — it is scripts/demo_video.sh's (on by default there) and
+# needs the pod-only PnLCalib weights. The stitch flag is `--no-stitch`; `--stitch` is not real.
 PYTHONPATH=src python3 -m pitch3d --out-dir out/dryrun   # fakes-only dry run
 
 # R2 camera propagation (#94): default 8, `0` = per-frame (the pre-R2 control side of the A/B).
@@ -107,12 +109,22 @@ Subsystem → files: `docs/code-map.md`.
 ## Testing
 
 The suite is green and that does **not** mean the pipeline works. `tests/conftest.py` is
-fakes-backed by design ("no GPU/Blender/models"), there is no golden test over a real clip, and
-~6000 lines of the user-facing path (`controller.py`, `cli.py`, `anim_export.py`, `poseannot/*`,
-`blender_animate.py`) have no direct coverage.
+fakes-backed by design ("no GPU/Blender/models"), and ~6000 lines of the user-facing path
+(`controller.py`, `cli.py`, `anim_export.py`, `poseannot/*`, `blender_animate.py`) have no
+direct coverage.
 
 So: a green run is a smoke signal, not evidence. Evidence is the rendered output plus the numbers
 from the probe scripts above.
+
+**The one exception is `tests/e2e/test_golden_real_camera.py`** — the only test backed by a real
+measurement rather than a fake. It runs the camera solve over
+`calib/Colombia-1-0-Congo-DR1080p.npz` (7 kB, committed, so it runs in CI too) and pins what the
+code *derives*: focal 4169.32 px, one optical centre for all 60 frames, camera at
+(−2.29, −70.13, 17.22) m, and the framing the operator actually shot. It is mutation-checked —
+the table in its docstring lists which injected regressions it catches and the one it does not.
+
+If these numbers fail, do not nudge them until they pass. Either the camera code regressed, or
+someone refit the calibration and the whole file needs re-measuring against the new clip.
 
 When adding tests, prefer one assertion against real captured data over ten against fakes. Do not
 add tests that re-implement the function under test in the assertion, or that only check a call
