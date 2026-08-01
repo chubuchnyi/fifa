@@ -84,7 +84,7 @@ Honest baseline, so the next session does not mistake green for safe.
 
 | Signal | Measured | Note |
 |--------|----------|------|
-| Test suite | **1114 passed / 14 skipped / 0 failed**, >5 min | fakes-backed (`conftest.py` says so) |
+| Test suite | **1117 passed / 14 skipped / 0 failed in 77 s** | fakes-backed (`conftest.py` says so). The old ">5 min" here was wrong — no reason to avoid the full run |
 | Real-measurement coverage | **1 file, 8 assertions** | `tests/e2e/test_golden_real_camera.py` over the committed 7 kB camera fit — the only non-fake evidence in the suite, and mutation-checked. Everything downstream of the camera (detection, pose, export) is still fakes-only |
 | Untested user-facing paths | ~6000 lines | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
 | Lint | **152 ruff errors** (was 311) | 87 E501 · 45 E702 · tail. 148 auto-fixed 2026-08-01; UP042 switched off (its fix changes enum serialisation) |

@@ -49,8 +49,11 @@ Run everything from the repo root. Local env is `.venv` — CPU/core work needs 
 
 ```bash
 # tests / lint / types
-.venv/bin/python -m pytest                 # full suite: 1114 passed / 14 skipped, >5 min (2026-08-01)
-.venv/bin/python -m pytest tests/<path>    # focused — prefer this, the full run is slow
+.venv/bin/python -m pytest                 # full suite: 1117 passed / 14 skipped in 77 s (2026-08-01)
+.venv/bin/python -m pytest tests/<path>    # focused, for a tight edit loop — but 77 s is cheap,
+                                           # so run the full suite before you call anything done
+# NB: pyproject already sets `-q`. Adding another `-q` makes it `-qq`, which silently swallows
+# the "N passed" summary line — that is how the ">5 min" claim here survived unchallenged.
 .venv/bin/ruff check <files>
 .venv/bin/mypy
 
