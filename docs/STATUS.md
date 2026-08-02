@@ -91,12 +91,31 @@ Honest baseline, so the next session does not mistake green for safe.
 | CI | **pre-commit + GH Actions** | gate = `scripts/lint_changed.py`: a changed file may not *gain* violations. The 152 are reported, not gated — the backlog can shrink, not grow |
 | Type checking | **mypy checks nothing** | numpy's stubs use 3.12 `type` syntax, rejected under `python_version = "3.11"`; mypy stops at error 1. Declared but dead |
 | Declared deps | **fixed 2026-08-01** | `pyyaml`/`scipy` were imported by `core/` but undeclared — a clean `pip install -e ".[dev]"` could not collect a single test. CI now guards this |
-| Pipeline entry points | **6** | cli · controller · anim_export · poseannot · scripts/* · pod shell — orchestration re-implemented in each |
+| Pipeline entry points | **1, not 6** | re-measured 2026-08-02: `cli.py` and `mcp/server.py` both go through `controller.Application`. `anim_export.py` + `blender_animate.py` consume an exported `scene.json` and never reconstruct. The "6" was a miscount |
+| Gate-chain mirrors | **2, now guarded** | `controller.run_reconstruction` (16 gates) vs `poseannot/rerun.py` (12 + 4 declared provider-blocked). In sync; `tests/unit/test_gate_chain_parity.py` fails if they drift |
 | Calibration backends | **4 paths, 1 wired** | only `KeypointFieldCalibrator` is in `wiring.py`; `CameraModuleFieldCalibrator`, `PnLCalibBackend` and the `*_rigid_camera.py` scripts are parallel routes |
 
 Remediation plan agreed 2026-08-01: (1) agent entry point — this split; (2) pre-commit + CI;
 (3) one golden test on real measured data; (4) collapse the 6 entry points onto
-`controller.Application`. **Steps 1–3 done; 4 not started.**
+`controller.Application`. **Steps 1–3 done. Step 4 was retired 2026-08-02, not completed.**
+
+Step 4's premise did not survive being measured. There was no 6-way duplication to collapse:
+two of the six consume `scene.json` rather than producing it, and two already route through
+`Application`. The config half of the step was likewise aimed at a problem
+`load_physics_config()` had already solved with an explicit precedence chain and per-field
+lineage. What was real — the hand-maintained gate mirror in `poseannot/rerun.py` — is now held
+by a parity test instead of a refactor, which is the smaller and more durable fix.
+
+The lesson is worth more than the step: this file and CLAUDE.md were themselves a source of the
+"agent gets confused" symptom. Four debt bullets, two wrong, and no way to tell which without
+re-reading the code. Prefer claims a test can hold.
+
+Genuinely open, and *not* addressed by any of steps 1–4:
+
+- **9 exported stubs raise `NotImplementedError`** — see CLAUDE.md. Construct fine, fail on call.
+- **`BOWL_*` stadium geometry** in `core/scene/cameras.py` has no config override path.
+- **`anim_export.py` (845 lines) has no direct test** of its export logic, only a manifest
+  contract check. It is the widest untested surface left in the user-facing path.
 
 Step 3 landed against the camera solve, not the 30-frame clip originally sketched: the clip is
 not committed (too large) so a test over it cannot run in CI, whereas the 7 kB fit derived from

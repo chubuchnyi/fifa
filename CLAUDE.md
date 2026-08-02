@@ -95,19 +95,37 @@ sole edit path (ADR-0002). Human ≡ LLM as editors, over MCP (ADR-0008/0010).
 
 Subsystem → files: `docs/code-map.md`.
 
-**Known structural debt — do not add to it** (measured 2026-08-01, remediation not started):
+**Known structural debt — do not add to it.** Re-measured 2026-08-02, and two of the four
+entries that used to sit here were wrong. They had sent at least one agent (me) hunting
+duplication that does not exist, so what follows is only what was verified in the code:
 
-- **6 pipeline entry points** re-implement orchestration: `app/cli.py`, `app/controller.py`,
-  `app/anim_export.py`, `poseannot/`, `scripts/*`, pod shell scripts. New work goes through
-  `controller.Application`; do not start a seventh path.
-- **4 calibration routes, 1 wired.** Only `KeypointFieldCalibrator` is in `wiring.py`.
-  `CameraModuleFieldCalibrator`, `PnLCalibBackend` and `scripts/{fit,apply,bench}_rigid_camera.py`
-  are parallel. Check `wiring.py` before assuming which one runs.
-- **Stubs that raise `NotImplementedError`** are publicly exported from `adapters/models/__init__.py`
-  and can be instantiated on the fly (`adapters/models/pose.py`). A surprise `NotImplementedError`
-  at runtime is this, not a missing dependency.
-- **Config has no single source.** `config/*.yaml` + `.env` + CLI flags + hardcoded constants
-  (`core/scene/cameras.py`, `core/correction/kinematics.py`) with no documented precedence.
+- **One orchestration path, and it is `controller.Application`.** `app/cli.py` and
+  `adapters/mcp/server.py` both go through it. New pipeline work goes there too.
+  `app/anim_export.py` and `scripts/blender_animate.py` are *not* rival pipelines — they consume
+  an already-exported `scene.json` (JSON→mesh, then mesh→render) and never reconstruct, so
+  "collapsing" them onto `Application` would be wiring for its own sake.
+- **The gate chain is mirrored by hand in Studio.** `Application.run_reconstruction` runs 16
+  physics gates inline; `poseannot/rerun.py` re-runs 12 of them against a loaded `scene.json` and
+  declares the other 4 `available: false` (they need live-pipeline providers). That is a
+  legitimate split, not a bug — but the mirror used to be maintained by eye.
+  `tests/unit/test_gate_chain_parity.py` now parses the controller and fails if the two drift.
+- **2 calibration routes reachable, more present.** `wiring.py` accepts `calibrator="fake"` or
+  `"keypoints"` only. `CameraModuleFieldCalibrator`, `_PnLCalibBackend` and
+  `scripts/{fit,apply,bench}_rigid_camera.py` exist alongside. Check `wiring.py` before assuming
+  which one ran.
+- **9 exported stubs raise `NotImplementedError`.** Of the 47 names in
+  `adapters/models/__init__.py`: `AvatarBuilder`, `EnvReconstructor`, `GVHMRBackend`,
+  `GVHMRPoseEstimator`, `LearnedMotionPrior`, `PitchKeypointBackend`, `TrackNetBackend`,
+  `DiffusionVasOcclusionBackend`, `FeedForwardGaussianRefiner`. All import and construct fine and
+  fail only when called. A surprise `NotImplementedError` is this, not a missing dependency.
+
+**Config is not the free-for-all this file used to claim.** `core/config/physics.py`
+`load_physics_config()` resolves in a documented order — shipped `config/physics.yaml` → named
+profile → `PITCH3D_*` env vars → Python overrides — and records every scalar's provenance in
+`PhysicsConfig.lineage`. The constants in `core/correction/kinematics.py` are dataclass defaults
+mirrored by `config/physics.yaml`, not a second source of truth. `.env` is read by the pod shell
+scripts; no Python in this repo loads it. The real gap is narrower: the `BOWL_*` stadium geometry
+in `core/scene/cameras.py` has no override path at all.
 
 ## Testing
 
