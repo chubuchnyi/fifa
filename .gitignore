@@ -56,3 +56,6 @@ samples/
 
 # poseannot user-uploaded clip bundles (video + scene.json; large, runtime-only)
 /poseannot/clips/
+# Serena MCP local state (symbol-cache pickles, per-machine config). The tool appends its own
+# two-line entry here on first run; this covers the cache and memories it leaves out.
+/.serena/
