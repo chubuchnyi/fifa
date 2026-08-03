@@ -14,10 +14,12 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 import numpy as np
-import smplx
-import torch
+
+if TYPE_CHECKING:  # annotation only — the runtime import is inside the function that needs it
+    import smplx
 
 from pitch3d.core.correction.engine import resolve_subject_motion
 from pitch3d.core.scene.frames import R_SMPLX_CAMERA_TO_WORLD
@@ -81,6 +83,8 @@ class SceneState:
 
 @lru_cache(maxsize=1)
 def _smplx_model_cache(models_dir: str, num_betas: int) -> smplx.SMPLX:
+    import smplx  # heavy `hmr` extra — lazy so importing poseannot needs no model stack
+
     return smplx.create(
         models_dir, model_type="smplx", gender="neutral",
         num_betas=num_betas, use_pca=False, flat_hand_mean=True, batch_size=1,
@@ -88,6 +92,8 @@ def _smplx_model_cache(models_dir: str, num_betas: int) -> smplx.SMPLX:
 
 
 def _fk_forward(model, betas, global_orient, body_pose, transl):
+    import torch  # heavy `hmr` extra — lazy, same reason as _smplx_model_cache
+
     with torch.no_grad():
         out = model(
             betas=torch.tensor(betas[None], dtype=torch.float32),
