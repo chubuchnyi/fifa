@@ -23,6 +23,10 @@ from uuid import uuid4
 import numpy as np
 
 from pitch3d.core.correction.engine import make_keyframes, make_offset
+
+# The reader lives in core because the EXPORT needs this file too (#128) — until then the
+# operator's edits stopped at the annotator. Re-exported under its old name, not reimplemented.
+from pitch3d.core.correction.sidecar import load_corrections as load_edits
 from pitch3d.core.scene.layers import (
     Correction,
     CorrectionMode,
@@ -38,7 +42,7 @@ _ROOT_KINDS: dict[str, TargetKind] = {
     "root_orientation": TargetKind.ROOT_ORIENTATION,
     "root_translation": TargetKind.ROOT_TRANSLATION,
 }
-from pitch3d.core.scene.serialization import from_json, to_json
+from pitch3d.core.scene.serialization import to_json
 
 _LOCK = threading.Lock()
 
@@ -56,19 +60,6 @@ def _uid() -> str:
     unnoticed until a live undo returned the same id twice.
     """
     return uuid4().hex[:8]
-
-
-def load_edits(path: Path) -> list[Correction]:
-    """Return the list of persisted corrections, or empty if the file is absent."""
-    if not path.exists():
-        return []
-    raw = path.read_text(encoding="utf-8")
-    if not raw.strip():
-        return []
-    data = json.loads(raw)
-    corr_list_json = json.dumps(data.get("corrections", []))
-    corr = from_json(corr_list_json)
-    return list(corr)
 
 
 def _atomic_write(path: Path, text: str) -> None:

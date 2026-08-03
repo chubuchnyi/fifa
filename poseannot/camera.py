@@ -12,14 +12,20 @@ CameraTrack produces coords for a 180°-rolled frame; if we detect the
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from pitch3d.core.correction.rotations import matrix_to_quat
-from pitch3d.core.scene.layers import TargetKind
-from pitch3d.core.scene.projection import quat_to_rotation_matrix
+# The read side of the layout drag lives in core, because the EXPORT needs it too and
+# ``src/pitch3d`` may not import this package (#128). Re-exported rather than reimplemented:
+# the annotator previews an edit the exporter has to reproduce exactly, so two copies would be
+# two answers — the same trap the hand-maintained gate-chain mirror fell into.
+from pitch3d.core.correction.plane import (  # noqa: F401
+    adjusted_calibration,
+    adjusted_camera,
+    plane_adjustment,
+)
 
 
 @dataclass(frozen=True)
@@ -409,70 +415,3 @@ def decompose_similarity(b: np.ndarray) -> dict[str, float]:
         "deg": float(np.degrees(np.arctan2(b[1, 0], b[0, 0]))),
         "scale": float(np.hypot(b[0, 0], b[1, 0])),
     }
-
-
-def plane_adjustment(corrections, frame: int) -> np.ndarray:
-    """The composed ``B`` for ``frame`` from every enabled FIELD_CALIBRATION correction.
-
-    Applied in insertion order on the right, because each drag was measured against the layout
-    as it stood *after* the previous ones — the same order the user made them in.
-    """
-    b = np.eye(3)
-    for c in corrections:
-        if c.target.kind is not TargetKind.FIELD_CALIBRATION or not c.enabled:
-            continue
-        if frame not in c.frame_range:
-            continue
-        b = b @ np.asarray(c.payload.matrix, dtype=float)
-    return b
-
-
-def adjusted_camera(camera, corrections):
-    """``camera`` re-expressed after the user re-registered the pitch plane (#112).
-
-    A scene holds two descriptions of one camera, and #107 exists because they were allowed to
-    drift apart. Moving the pitch under a fixed camera would split them again — measured live at
-    2500 px on the first drag — so the camera moves too, and it moves *exactly*: for the plane
-    ``Z = 0`` the world→image map is ``K[r₁ r₂ t]``, i.e. two rotation columns and the
-    translation, which is precisely what a plane transform acts on. ``K`` never enters, so this
-    is the same right-multiply as :func:`adjusted_calibration` and cannot disagree with it.
-
-    The SVD snap only removes float noise here: for a similarity the columns come out orthogonal
-    already, scaled by ``σ``, which is what dividing by ``‖m₀‖`` takes out.
-    """
-    if camera is None:
-        return None
-    frames = np.asarray(camera.frames, dtype=int)
-    per_frame = [plane_adjustment(corrections, int(f)) for f in frames]
-    if all(np.array_equal(b, np.eye(3)) for b in per_frame):
-        return camera
-
-    quat = np.asarray(camera.rotation_quat, dtype=float)
-    transl = np.asarray(camera.translation, dtype=float)
-    rots = np.zeros((len(per_frame), 3, 3))
-    out_t = np.zeros_like(transl)
-    for i, b in enumerate(per_frame):
-        r = quat_to_rotation_matrix(quat[i])
-        m = np.column_stack([r[:, 0], r[:, 1], transl[i]]) @ b
-        scale = np.linalg.norm(m[:, 0])
-        r1, r2, out_t[i] = m[:, 0] / scale, m[:, 1] / scale, m[:, 2] / scale
-        u, _, vt = np.linalg.svd(np.column_stack([r1, r2, np.cross(r1, r2)]))
-        rots[i] = u @ vt
-        if np.linalg.det(rots[i]) < 0:
-            rots[i] = u @ np.diag([1.0, 1.0, -1.0]) @ vt
-    return replace(camera, rotation_quat=matrix_to_quat(rots), translation=out_t)
-
-
-def adjusted_calibration(calibration, corrections):
-    """``calibration`` with the user's layout drags folded in — or itself, if there are none.
-
-    Returns a copy: the stored solve stays untouched, so disabling the corrections restores it
-    exactly. ``H_i2w`` is the inverse direction, hence ``B⁻¹`` on the left.
-    """
-    frames = np.asarray(calibration.frames, dtype=int)
-    per_frame = [plane_adjustment(corrections, int(f)) for f in frames]
-    if all(np.array_equal(b, np.eye(3)) for b in per_frame):
-        return calibration
-    h = np.asarray(calibration.homographies, dtype=float)
-    moved = np.stack([np.linalg.inv(b) @ h[i] for i, b in enumerate(per_frame)])
-    return replace(calibration, homographies=moved)

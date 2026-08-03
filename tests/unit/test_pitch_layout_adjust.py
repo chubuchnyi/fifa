@@ -27,6 +27,8 @@ from poseannot.camera import (
 )
 from poseannot.edits import append_edit, build_calibration_edit, pop_last_calibration_edit
 
+from pitch3d.core.correction.plane import apply_plane_corrections, has_plane_corrections
+from pitch3d.core.correction.sidecar import merge_sidecar, sidecar_for
 from pitch3d.core.scene.layers import (
     Correction,
     CorrectionMode,
@@ -196,3 +198,166 @@ def test_a_drag_outside_its_frame_range_does_nothing():
     b = plane_similarity(anchor=np.zeros(2), src=np.zeros(2), dst=np.array([5.0, 0.0]),
                          turn=False)
     np.testing.assert_array_equal(plane_adjustment([_edit(b, frames=(1, 2))], 0), np.eye(3))
+
+
+# --- the read path: does anything downstream of poseannot actually apply this? (#128) ---------
+
+
+def _scene_with(cal, cam, corrections):
+    """A :class:`Scene` carrying one subject, so "the bodies did not move" is checkable."""
+    from pitch3d.core.scene.field import FieldModel
+    from pitch3d.core.scene.scene import Scene
+
+    return Scene(
+        id="s", episode_id="e", source_id="src",
+        field=FieldModel(calibration=cal), camera=cam, corrections=list(corrections),
+    )
+
+
+def test_the_exporter_and_the_annotator_place_the_pitch_in_the_same_pixels():
+    # #128 in one assertion. The annotator previewed the drag through `adjusted_calibration`
+    # and the user approved THOSE pixels; the exporter now reads the same correction through
+    # `apply_plane_corrections`. If the two ever disagree, the operator judged one picture and
+    # the render shipped another — which is exactly the failure that made the edit worthless.
+    scene_t, cal = _truth()
+    w, h = int(scene_t.intrinsics.width), int(scene_t.intrinsics.height)
+    fit = camera_from_calibration(cal, width=w, height=h)
+    b = plane_similarity(anchor=np.zeros(2), src=np.array([12.0, 3.0]),
+                         dst=np.array([-2.0, 9.0]), turn=True)
+    b[:2, 2] += np.array([1.75, -0.5])
+
+    exported = apply_plane_corrections(_scene_with(cal, fit.camera, [_edit(b)]))
+
+    annotator = project_ground(PROBE, world_to_image(adjusted_calibration(cal, [_edit(b)]), 0))
+    rot = quat_to_rotation_matrix(exported.camera.rotation_quat[0])
+    ground = np.column_stack([PROBE, np.zeros(len(PROBE))])
+    p = (ground @ rot.T + exported.camera.translation[0]) @ exported.camera.intrinsics.matrix().T
+    np.testing.assert_allclose(p[:, :2] / p[:, 2, None], annotator, atol=1e-6)
+    # and the exported calibration is moved too, not just the camera — they are one thing (#107)
+    np.testing.assert_allclose(
+        project_ground(PROBE, world_to_image(exported.field.calibration, 0)), annotator, atol=1e-6
+    )
+
+
+def test_the_layout_edit_moves_the_camera_and_leaves_the_bodies_alone():
+    # The documented semantics, pinned so it cannot be "fixed" by accident. Subjects are stored
+    # in world metres; the drag says where the pitch model sits under an approximate camera, so
+    # it re-registers the camera. Moving the bodies too would double-count the same correction.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    b = np.eye(3)
+    b[:2, 2] = [3.0, -2.0]
+    scene = _scene_with(cal, fit.camera, [_edit(b)])
+    out = apply_plane_corrections(scene)
+
+    assert out.subjects == scene.subjects
+    assert not np.allclose(out.camera.translation, scene.camera.translation)
+
+
+def test_a_scene_with_no_layout_edits_comes_back_untouched():
+    # Cheap, but it is the branch every ordinary export takes: no corrections must mean no copy
+    # and no numerical drift through the SVD snap.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    scene = _scene_with(cal, fit.camera, [])
+    assert apply_plane_corrections(scene) is scene
+    assert not has_plane_corrections(scene.corrections)
+
+
+def test_a_disabled_layout_edit_is_not_exported():
+    # Toggling a correction off in the editor has to mean the render stops using it, or "disable"
+    # is a lie in exactly the place a user would check it.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    b = np.eye(3)
+    b[:2, 2] = [5.0, 5.0]
+    off = _edit(b)
+    off.enabled = False
+    assert not has_plane_corrections([off])
+    assert apply_plane_corrections(_scene_with(cal, fit.camera, [off])).camera is fit.camera
+
+
+def test_anim_export_main_actually_calls_the_read_path():
+    # The semantics above were all true before #128 too — what was missing was the CALL. Parsing
+    # for it is the same trick `test_gate_chain_parity.py` uses: cheaper than rendering, and it
+    # fails if someone deletes the wiring while leaving the helper importable.
+    import ast
+    import inspect
+
+    from pitch3d.app import anim_export
+
+    src = inspect.getsource(anim_export.main)
+    called = {
+        n.func.id for n in ast.walk(ast.parse(src.lstrip()))
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+    }
+    assert "apply_plane_corrections" in called, "the export dropped the hand registration again"
+    assert "has_plane_corrections" in called
+    assert "merge_sidecar" in called, "the export stopped reading the annotator's edits.json"
+    assert "sidecar_for" in called
+
+
+# --- and does the export ever SEE the edit? the annotator writes a sidecar, not the scene (#128)
+
+
+def test_the_export_finds_the_sidecar_the_annotator_wrote(tmp_path):
+    # The gap that made the read path above worthless on real data: `poseannot` never rewrites
+    # scene.json, so every operator edit lives in a sibling file that nothing outside the
+    # annotator opened. Both names are minted by poseannot/clips.py.
+    (tmp_path / "scene_edits.json").write_text('{"corrections": []}')
+    assert sidecar_for(tmp_path / "scene.json") == tmp_path / "scene_edits.json"
+    (tmp_path / "scene_edits.json").unlink()
+    (tmp_path / "edits.json").write_text('{"corrections": []}')
+    assert sidecar_for(tmp_path / "scene.json") == tmp_path / "edits.json"
+    assert sidecar_for(tmp_path / "nowhere" / "scene.json") is None
+
+
+def test_a_sidecar_drag_reaches_the_render(tmp_path):
+    # End to end in miniature: the annotator appends a FIELD_CALIBRATION row to its sidecar, and
+    # a scene loaded WITHOUT that file must come back with the pitch moved once it is merged.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    b = np.eye(3)
+    b[:2, 2] = [2.5, -1.25]
+    path = tmp_path / "edits.json"
+    append_edit(path, build_calibration_edit(matrix=b, frame=0, frame_end=2, user="t"))
+
+    scene = _scene_with(cal, fit.camera, [])
+    assert not has_plane_corrections(scene.corrections)  # the render's view before the merge
+    merged = merge_sidecar(scene, path)
+    assert has_plane_corrections(merged.corrections)
+    assert not np.allclose(apply_plane_corrections(merged).camera.translation,
+                           scene.camera.translation)
+
+
+def test_the_sidecar_stacks_after_the_scenes_own_corrections(tmp_path):
+    # Order is the meaning here — each drag was measured against the layout the previous ones
+    # left. The annotator appends the operator's rows after the pipeline's, so the export must
+    # too, or the same file renders as a different edit.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    first, second = np.eye(3), np.eye(3)
+    first[:2, 2] = [4.0, 0.0]
+    second[0, 0] = second[1, 1] = 1.5
+    path = tmp_path / "edits.json"
+    append_edit(path, build_calibration_edit(matrix=second, frame=0, frame_end=2, user="t"))
+
+    merged = merge_sidecar(_scene_with(cal, fit.camera, [_edit(first)]), path)
+    np.testing.assert_allclose(plane_adjustment(merged.corrections, 0), first @ second)
+
+
+def test_a_missing_or_empty_sidecar_changes_nothing(tmp_path):
+    # An ordinary pipeline export has no annotator beside it; that must not be an error, and it
+    # must not be reported as "merged 0 edits" either — the caller checks for None.
+    scene_t, cal = _truth()
+    fit = camera_from_calibration(cal, width=int(scene_t.intrinsics.width),
+                                  height=int(scene_t.intrinsics.height))
+    scene = _scene_with(cal, fit.camera, [])
+    assert merge_sidecar(scene, tmp_path / "absent.json") is scene
+    (tmp_path / "blank.json").write_text("   ")
+    assert merge_sidecar(scene, tmp_path / "blank.json") is scene

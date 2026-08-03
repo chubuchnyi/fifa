@@ -21,6 +21,7 @@ contract in :mod:`pitch3d.adapters.blender.anim_contract` — the renderer refus
 CLI flags override env, env overrides the repo-root ``.env`` (see .env.example):
 
   --scene         PITCH3D_SCENE_JSON     canonical scene JSON (pipeline --format json export)
+  --corrections   PITCH3D_CORRECTIONS_JSON  annotator edits.json (default: sidecar beside --scene)
   --out           PITCH3D_ANIM_OUT       output dir
   --smplx-models  PITCH3D_SMPLX_MODELS   dir containing smplx/SMPLX_NEUTRAL.npz
   --source-video  PITCH3D_STADIUM_VIDEO  broadcast clip driving every MEASURED appearance
@@ -43,6 +44,12 @@ from pitch3d.adapters.blender.anim_contract import MANIFEST_NAME, SCHEMA_VERSION
 from pitch3d.adapters.io.frames import resolve_source_path
 from pitch3d.adapters.render.overlay import appearance_alpha
 from pitch3d.core.correction.engine import resolve_ball, resolve_subject_motion
+from pitch3d.core.correction.plane import (
+    apply_plane_corrections,
+    has_plane_corrections,
+    plane_adjustment,
+)
+from pitch3d.core.correction.sidecar import merge_sidecar, sidecar_for
 from pitch3d.core.scene.cameras import plan_virtual_cameras
 from pitch3d.core.scene.frames import rotation_for
 from pitch3d.core.scene.pitch import goal_frame_geometry, pitch_line_ribbons
@@ -72,6 +79,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument("--scene", default=env.get("PITCH3D_SCENE_JSON", "out/anim/export/scene.json"))
     p.add_argument("--out", default=env.get("PITCH3D_ANIM_OUT", "out/anim/mesh"))
+    p.add_argument(
+        "--corrections",
+        default=env.get("PITCH3D_CORRECTIONS_JSON", ""),
+        help="annotator edits.json to fold in; default is the sidecar beside --scene",
+    )
     p.add_argument("--smplx-models", default=env.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models"))
     p.add_argument("--source-video", default=env.get("PITCH3D_STADIUM_VIDEO", ""))
     p.add_argument(
@@ -805,6 +817,31 @@ def main(argv: list[str] | None = None) -> int:
 
     scene = load_scene(args.scene)
     assert scene.subjects, f"no subjects in {args.scene}"
+
+    # The annotator never rewrites the scene — its edits sit in a sidecar (#128), so a render
+    # that read only the scene rendered the pipeline's answer and not the operator's.
+    side = args.corrections or os.environ.get("PITCH3D_CORRECTIONS_JSON") or sidecar_for(args.scene)
+    if side:
+        before = len(scene.corrections)
+        scene = merge_sidecar(scene, side)
+        print(f"[anim_export] merged {len(scene.corrections) - before} operator edits from {side}")
+
+    # Fold in the operator's hand registration of the pitch plane (#128). Say so out loud: an
+    # export that silently ignored it read exactly like one that honoured it, which is how a
+    # session of eye-registration could be lost without anything looking wrong.
+    if has_plane_corrections(scene.corrections):
+        cam = scene.camera
+        f0 = int(cam.frames[0]) if cam is not None and len(cam.frames) else None
+        scene = apply_plane_corrections(scene)
+        if f0 is None:
+            print("[anim_export] applied hand-registered pitch layout")
+        else:
+            b = plane_adjustment(scene.corrections, f0)
+            moved = float(np.hypot(b[0, 2], b[1, 2]))
+            deg = float(np.degrees(np.arctan2(b[1, 0], b[0, 0])))
+            scl = float(np.hypot(b[0, 0], b[1, 0]))
+            print(f"[anim_export] applied hand-registered pitch layout "
+                  f"(f{f0}: {moved:.2f} m · {deg:+.2f}° · x{scl:.4f})")
 
     entries: dict[str, list[str]] = {}
     subject_tracks = _export_subjects(

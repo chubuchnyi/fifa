@@ -53,9 +53,9 @@ segments, the clip is calm dark-green panels with gold text), and player-silhoue
 root cause that the stage-14 shadow pin can only mitigate.
 
 **Before the next pod run (audited 2026-08-03).** The chain itself is proven — `out/pod_0801b` is
-23 subjects, 60/60 solved. What is not wired is #128: the render would use the raw 60-homography
-solve, discarding both hand-made corrections the eye approved on 08-03. Fix that first or the GPU
-spend buys a picture the operator did not register. Then: all 5 pods are EXITED; start one of the
+23 subjects, 60/60 solved. #128 is now wired, so the render carries the layout registration; #129
+(the rigid camera) is not, and remains the one eye-approved correction the chain still drops.
+Then: all 5 pods are EXITED; start one of the
 four mounting `/workspace`, **not** `jd9syxkau3rqzm` (mounts `/runpod` — only `pod_real_e2e.sh`
 resolves the volume by content, `pod_finish_batch.sh:50` hardcodes `cd /workspace/fifa`); reconcile
 the stale pod mirror against `87889c5`; and confirm `repos/PnLCalib` is really staged, since
@@ -76,7 +76,8 @@ One line per item. Reasoning, measurements and root causes live in
 | #60 | Re-run overlays + verify acceptable alignment | **CLOSED 2026-08-03** — the eye-check passed and closed #61/#119 with it |
 | #112 | Drag the pitch layout to correct the homography | **works** (user, 2026-08-03); its controls do not — split out as #127 |
 | #127 | The layout gizmo is twitchy and shows nothing until you let go | fixed 2026-08-03 — live preview + shift-fine + typed panel; **awaiting the user's hands** |
-| #128 | **Hand-made calibration never reaches the render** | opened 2026-08-03, **not started** — widened: `FIELD_CALIBRATION` is read by nothing in `src/pitch3d/`, *and* `apply_rigid_camera.py` (the one camera, #119) is called by no pod script. Both eye-approved corrections live past the end of the chain |
+| #128 | Hand-made calibration never reaches the render | **CLOSED 2026-08-03** — the export reads `FIELD_CALIBRATION` *and* the annotator's sidecar. Verified on the real scene: 11 drags merged, both camera halves agree 0.0000 px, pitch moves 63–207 px |
+| #129 | `apply_rigid_camera.py` (the one camera, #119) is called by no pod script | opened 2026-08-03, **not started** — split out of #128. The other eye-approved correction still lives past the end of the chain |
 | #125 | A run that solved no calibration frame still exported a finished scene | **CLOSED 2026-08-01**, gate *and* root cause: it reconstructed a different video (`PITCH3D_CLIP` unset); now required. Re-run `out/pod_0801b` = 23 subjects, 60/60 solved |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
@@ -126,12 +127,11 @@ Remediation plan agreed 2026-08-01: (1) agent entry point — this split; (2) pr
 
 Step 4's premise did not survive being measured: there was no 6-way duplication to collapse, and
 `load_physics_config()` had already solved the config half. What was real — the hand-maintained
-gate mirror in `poseannot/rerun.py` — is now held by a parity test instead of a refactor.
-
-The lesson is worth more than the step: this file and CLAUDE.md were themselves a source of the
-"agent gets confused" symptom. Four debt bullets, two wrong, and no way to tell which without
-re-reading the code. Prefer claims a test can hold. (It happened again on 08-03: #125's row here
-claimed its root cause needed a pod, while its own finding had answered it two days earlier.)
+gate mirror in `poseannot/rerun.py` — is now held by a parity test instead of a refactor. The
+lesson outlives the step: this file and CLAUDE.md were themselves a source of the "agent gets
+confused" symptom — four debt bullets, two wrong, and no way to tell which without re-reading the
+code. Prefer claims a test can hold. (Twice more on 08-03: #125's row claimed its root cause
+needed a pod, and #128's said the export was the last gap when the sidecar was.)
 
 Genuinely open, and *not* addressed by any of steps 1–4:
 
