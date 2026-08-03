@@ -89,6 +89,7 @@ PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py       # R5: is hyp
 PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py        # R2: does the camera swim?
 PYTHONPATH=src .venv/bin/python scripts/bench_calib_confidence.py   # #105: is calib confidence predictive?
 python scripts/motion_stats.py --scene <export/scene.json>          # #207: speed/accel plausibility
+.venv/bin/python scripts/check_layout_preview.py                    # #127: does the browser's drag preview match the commit? (needs the server + node)
 ```
 
 ## Architecture
