@@ -26,13 +26,38 @@ import ast
 from pathlib import Path
 
 import pytest
-from poseannot.rerun import _GATES, _PROVIDER_GATES
 
-CONTROLLER = Path(__file__).resolve().parents[2] / "src" / "pitch3d" / "app" / "controller.py"
+_ROOT = Path(__file__).resolve().parents[2]
+CONTROLLER = _ROOT / "src" / "pitch3d" / "app" / "controller.py"
+RERUN = _ROOT / "poseannot" / "rerun.py"
 
 #: The one gate whose function is not named ``*_gate``. Kept as data so a rename is a
 #: one-line fix here rather than a silently-dropped gate.
 _ALIASES = {"add_temporal_coherence": "coherence"}
+
+
+def _registry(path: Path, name: str) -> list[tuple[str, ...]]:
+    """The string fields of a module-level list-of-tuples, read without importing it.
+
+    ``poseannot.rerun`` transitively imports ``smplx``, so importing it here would make this
+    test uncollectable anywhere the heavy extras are absent — which is CI, where drift is most
+    likely to arrive unnoticed. Both sides of the comparison are source anyway.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets = getattr(node, "targets", []) or [getattr(node, "target", None)]
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets if t is not None):
+            return [
+                tuple(e.value for e in elt.elts if isinstance(e, ast.Constant) and
+                      isinstance(e.value, str))
+                for elt in node.value.elts
+                if isinstance(elt, ast.Tuple)
+            ]
+    raise AssertionError(f"{name} not found in {path.name} — has the registry been renamed?")
+
+
+_GATES = _registry(RERUN, "_GATES")
+_PROVIDER_GATES = _registry(RERUN, "_PROVIDER_GATES")
 
 
 def _controller_gate_ids() -> set[str]:
@@ -54,12 +79,15 @@ def _controller_gate_ids() -> set[str]:
     }
 
 
-def test_the_parse_still_finds_the_chain():
-    """Guards the guard. If ``run_reconstruction`` is renamed or the chain is extracted, this
-    file starts asserting over an empty set and would pass no matter what drifted."""
+def test_the_parse_still_finds_both_sides():
+    """Guards the guard. Every assertion below is a set difference, so a parse that quietly
+    returns nothing would make all of them pass while checking nothing at all."""
     ids = _controller_gate_ids()
     assert len(ids) >= 12, f"only found {len(ids)} gates in the controller — has the chain moved?"
     assert "foot_floor" in ids and "jerk_clamp" in ids
+    assert len(_GATES) >= 10, f"_GATES parsed as {len(_GATES)} entries — registry shape changed?"
+    assert len(_PROVIDER_GATES) >= 1
+    assert all(g and isinstance(g[0], str) for g in _GATES + _PROVIDER_GATES)
 
 
 def test_studio_accounts_for_every_gate_the_pipeline_runs():
