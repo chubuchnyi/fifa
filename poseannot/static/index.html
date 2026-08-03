@@ -278,13 +278,19 @@ badge keeps reading 'one camera'.">layout</button>
       <b>pitch layout</b>
       <span>drag the <b style="color:#f472b6">square</b> to slide it, the
         <b style="color:#f472b6">ring</b> to turn and size it — until the green outline sits on
-        the painted lines. The handles spring back; the pitch is what moves.</span>
+        the painted lines. The outline follows while you drag; hold <b>shift</b> for a quarter
+        of the gesture. The handles spring back; the pitch is what moves.</span>
       <span class="rd" :class="{ worse: _layoutWorse }"
             x-text="'fit ' + (pitchFit === null ? '—' : pitchFit.toFixed(1)) + ' px'
                   + (pitchCounts ? ' · on paint ' + pitchCounts.ok + ' / off ' + pitchCounts.off : '')"
             title="lower fit and more on-paint = better. This is measured against the frame's own
 white pixels, so it is the honest score of your drag."></span>
-      <span x-show="lastLayout" class="rd"
+      <span x-show="liveLayout" class="rd"
+            x-text="liveLayout ? 'dragging: ' + liveLayout.moved_m.toFixed(2) + ' m · '
+                                 + liveLayout.turn_deg.toFixed(1) + '° · x'
+                                 + liveLayout.scale.toFixed(3)
+                                 + (liveLayout.fine ? ' · fine' : '') : ''"></span>
+      <span x-show="lastLayout && !liveLayout" class="rd"
             x-text="lastLayout ? 'last: ' + lastLayout.moved_m + ' m · ' + lastLayout.turn_deg
                                  + '° · x' + lastLayout.scale : ''"></span>
       <button @click="undoLayout()" x-show="pitchAdjusted">undo</button>
@@ -548,7 +554,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-07-31 · pitch layout drag + session-expiry guard";
+const BUILD_ID = "2026-08-03 · live pitch-layout preview + fine drag (#127)";
 
 // Every API call below ends `if (!r.ok) { ...clear the layer...; return; }`. That is the right
 // shape for "no data on this frame" and exactly the wrong one for "your session died": the overlay
@@ -926,6 +932,9 @@ Alpine.data("poseAnnot", () => ({
     pitchHandles: [],         // [{id:"move"|"turn", uv:[u,v], world:[x,y]}]
     pitchAdjusted: false,     // is the drawn layout hand-registered rather than as-solved?
     lastLayout: null,         // {moved_m, turn_deg, scale} — what the last drag did
+    liveLayout: null,         // the same three numbers, live, for the drag in progress
+    pitchW2I: null,           // 3x3 pitch-plane world→pixel, and its inverse. #127: the
+    pitchI2W: null,           // client previews the drag with them instead of waiting on POST.
     _layoutFit0: null,        // fit_px when layout mode opened — the bar to beat
     get _layoutWorse() {
       return this._layoutFit0 !== null && this.pitchFit !== null
@@ -933,6 +942,7 @@ Alpine.data("poseAnnot", () => ({
     },
     _dragPitch: null,         // handle id being dragged, or null
     _dragPitchUV: null,
+    _dragPitchFine: false,    // Shift held — 1/4 gain, the answer to "too sensitive"
     showCamAdjust: false,     // overlay-orient panel visible?
     // Overlay orientation: a rigid transform of the whole overlay (pitch +
     // skeletons + mesh) about the pitch-markings centre, applied in the browser.
@@ -1257,10 +1267,10 @@ Alpine.data("poseAnnot", () => ({
       }
     },
 
-    // The pitch as the SOLVED calibration sees it. Server-side because the homography
-    // is per-frame and the projection is a 3x3 multiply — no reason to ship a matrix
-    // per frame to the client. Independent of the orient sliders on purpose: those
-    // nudge scene.camera, and this path deliberately does not go through it.
+    // The pitch as the SOLVED calibration sees it. Projected server-side, but the plane
+    // map comes down with it (#127) so a layout drag can be previewed without a round
+    // trip per tick. Independent of the orient sliders on purpose: those nudge
+    // scene.camera, and this path deliberately does not go through it.
     async refreshCalibratedPitch() {
       if (this.pitchSource !== "calib" || !this.showPitch) { this.pitchLines = []; return; }
       const want = this.frame;
@@ -1272,6 +1282,7 @@ Alpine.data("poseAnnot", () => ({
         this.pitchFit = null; this.pitchCounts = null;
         this.pitchUprights = []; this.pitchCamera = null;
         this.pitchFrameHanded = null; this.pitchCamSource = null;
+        this.pitchW2I = null; this.pitchI2W = null;
         this.rebuildOverlay();
         return;
       }
@@ -1294,6 +1305,8 @@ Alpine.data("poseAnnot", () => ({
       this.pitchCamStatic = cam.static;
       this.pitchHandles = d.handles || [];
       this.pitchAdjusted = !!d.adjusted;
+      this.pitchW2I = d.w2i || null;
+      this.pitchI2W = d.i2w || null;
       this.rebuildOverlay();
     },
 
@@ -1303,6 +1316,74 @@ Alpine.data("poseAnnot", () => ({
       // on the way out keeps the next session honest rather than scoring against a stale bar.
       this._layoutFit0 = this.showLayout ? this.pitchFit : null;
       this.rebuildOverlay();
+    },
+
+    _mat3(a, b) {
+      const c = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+        c[i][j] = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+      return c;
+    },
+
+    _mapH(h, p) {
+      const w = h[2][0] * p[0] + h[2][1] * p[1] + h[2][2];
+      return [(h[0][0] * p[0] + h[0][1] * p[1] + h[0][2]) / w,
+              (h[1][0] * p[0] + h[1][1] * p[1] + h[1][2]) / w];
+    },
+
+    // The drag in progress, resolved on the pitch plane (#127). Returns the world-plane
+    // similarity B, the image-space transform A = H·B·H⁻¹ that previews it on already-drawn
+    // pixels, the pixel to POST, and the three numbers the operator reads.
+    //
+    // The authoritative copy of this arithmetic is poseannot/camera.py:plane_similarity, and
+    // the commit still goes through it — so the gain is applied here as a damped *world target
+    // point* rather than a damped matrix. Feed that point back through the homography and the
+    // server derives exactly the B previewed here, with no new parameter on the endpoint.
+    _layoutDrag() {
+      if (this._dragPitch === null || !this._dragPitchUV) return null;
+      if (!this.pitchW2I || !this.pitchI2W || this.pitchHandles.length !== 2) return null;
+      const turn = this._dragPitch === "turn";
+      const a = this.pitchHandles[0].world;
+      const src = this.pitchHandles[turn ? 1 : 0].world;
+      const raw = this._mapH(this.pitchI2W, this._dragPitchUV);
+      // A pixel near the top of a broadcast frame is tens of metres of lawn, so a 1:1 drag is
+      // as coarse as the perspective happens to be. Shift buys a quarter of the gesture.
+      const g = this._dragPitchFine ? 0.25 : 1.0;
+      const v = [src[0] - a[0], src[1] - a[1]];
+      const n2 = v[0] * v[0] + v[1] * v[1];
+      let dst = raw;
+      if (g !== 1.0) {
+        if (!turn) {
+          dst = [src[0] + g * (raw[0] - src[0]), src[1] + g * (raw[1] - src[1])];
+        } else if (n2 > 1e-12) {
+          const w = [raw[0] - a[0], raw[1] - a[1]];
+          const c0 = (v[0] * w[0] + v[1] * w[1]) / n2;
+          const s0 = (v[0] * w[1] - v[1] * w[0]) / n2;
+          // Damp the ANGLE and the LOG-scale, so half a gesture is half the turn and the
+          // square root of the zoom — damping the endpoint instead would couple the two.
+          const th = Math.atan2(s0, c0) * g, k = Math.pow(Math.hypot(c0, s0), g);
+          const c = k * Math.cos(th), s = k * Math.sin(th);
+          dst = [a[0] + c * v[0] - s * v[1], a[1] + s * v[0] + c * v[1]];
+        }
+      }
+      let b, scale = 1.0, turnDeg = 0.0;
+      if (!turn) {
+        b = [[1, 0, dst[0] - src[0]], [0, 1, dst[1] - src[1]], [0, 0, 1]];
+      } else if (n2 > 1e-12) {
+        const w = [dst[0] - a[0], dst[1] - a[1]];
+        const c = (v[0] * w[0] + v[1] * w[1]) / n2, s = (v[0] * w[1] - v[1] * w[0]) / n2;
+        b = [[c, -s, a[0] - (c * a[0] - s * a[1])], [s, c, a[1] - (s * a[0] + c * a[1])], [0, 0, 1]];
+        scale = Math.hypot(c, s);
+        turnDeg = Math.atan2(s, c) * 180 / Math.PI;
+      } else {
+        b = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      }
+      return {
+        a: this._mat3(this._mat3(this.pitchW2I, b), this.pitchI2W),
+        uv: g === 1.0 ? this._dragPitchUV : this._mapH(this.pitchW2I, dst),
+        moved: Math.hypot(dst[0] - src[0], dst[1] - src[1]),
+        turnDeg, scale, fine: g !== 1.0,
+      };
     },
 
     // Move the pitch model onto the painted lines. The client reports only where the cursor
@@ -1638,6 +1719,12 @@ Alpine.data("poseAnnot", () => ({
       const sks = [...this.allSkeletons].sort((p, q) =>
         (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
       const out = [];
+      // A layout drag in flight moves everything that is drawn through the calibration —
+      // markings, gizmo and stance handles alike — so resolve it once and map through it.
+      // Everything below is on the pitch plane and therefore exact; the uprights are not,
+      // and are noted where they are drawn.
+      const drag = this._layoutDrag();
+      const P = drag ? (p) => this._mapH(drag.a, p) : (p) => p;
       // Bottom layer: measured pitch markings (green), the alignment reference.
       // Drawn as connected polylines on the calibrated path — a line that should be
       // straight and isn't says more about a bad solve than scattered dots ever could.
@@ -1656,7 +1743,8 @@ Alpine.data("poseAnnot", () => ({
         for (const poly of this.pitchLines) {
           const pts = poly.pts;
           if (pts.length < 2) continue;
-          const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+          const d = pts.map((p0) => { const p = P(p0);
+            return `${p[0].toFixed(1)},${p[1].toFixed(1)}`; }).join(" ");
           out.push(`<polyline points="${d}" fill="none" ${style[poly.status] || style.unknown}/>`);
         }
         // Goal frames + corner flags, in cyan so they never read as measured markings.
@@ -1664,10 +1752,14 @@ Alpine.data("poseAnnot", () => ({
         // the focal never enters the arithmetic. These leave the plane, so their drawn
         // position is a function of a focal the lawn cannot supply — which is what makes
         // them the instrument: line the crossbar up with the real one and the focal is right.
+        // While a layout drag is open these ride the plane transform like everything else,
+        // which is exact at their feet and only approximate at the crossbar — they stand off
+        // the plane the transform describes. The server's redraw on release is the truth.
         for (const poly of this.pitchUprights) {
           const pts = poly.pts;
           if (pts.length < 2) continue;
-          const d = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+          const d = pts.map((p0) => { const p = P(p0);
+            return `${p[0].toFixed(1)},${p[1].toFixed(1)}`; }).join(" ");
           out.push(`<polyline points="${d}" fill="none" stroke="#22d3ee"`
             + ` stroke-width="2.2" stroke-dasharray="9 4" opacity="0.9"/>`);
         }
@@ -1736,8 +1828,7 @@ Alpine.data("poseAnnot", () => ({
         const arm = 10 * s, rx = 11 * s, ry = 4.5 * s, hit = 20 * s, sw = 1.6 * s;
         for (const g of this.groundHandles) {
           const live = this._dragTrack === g.track_id && this._dragUV;
-          const u = live ? this._dragUV[0] : g.uv[0];
-          const v = live ? this._dragUV[1] : g.uv[1];
+          const [u, v] = live ? this._dragUV : P(g.uv);
           const col = g.track_id === this.selectedTrackId ? this.accentBright : trackColorFor(g.track_id);
           out.push(`<line x1="${u - arm}" y1="${v}" x2="${u + arm}" y2="${v}"`
             + ` stroke="${col}" stroke-width="${sw}" opacity="0.9" pointer-events="none"/>`);
@@ -1763,8 +1854,10 @@ Alpine.data("poseAnnot", () => ({
         const s = this._srcPerScreen();
         const sw = 2.0 * s, hit = 26 * s, half = 9 * s, rad = 12 * s;
         const col = "#f472b6";
-        const at = (h) => (this._dragPitch === h.id && this._dragPitchUV) ? this._dragPitchUV : h.uv;
-        const [m, t] = this.pitchHandles.map(at);
+        // Both handles ride the same plane transform as the markings, so the gizmo cannot
+        // drift away from the outline it is moving: under `turn` the square is the pivot and
+        // stays put by construction, and under `move` the square lands on the (damped) drop.
+        const [m, t] = this.pitchHandles.map((h) => P(h.uv));
         out.push(`<line x1="${m[0]}" y1="${m[1]}" x2="${t[0]}" y2="${t[1]}" stroke="${col}"`
           + ` stroke-width="${sw * 0.7}" stroke-dasharray="${6 * s} ${5 * s}" opacity="0.55"`
           + ` pointer-events="none"/>`);
@@ -1783,8 +1876,17 @@ Alpine.data("poseAnnot", () => ({
         const tag = (u, dy, s2) => out.push(`<text x="${u[0]}" y="${u[1] + dy}" font-size="${17 * s}"`
           + ` fill="${col}" text-anchor="middle" paint-order="stroke" stroke="#000"`
           + ` stroke-width="${3.5 * s}" pointer-events="none">${s2}</text>`);
-        tag(m, -half - 7 * s, "drag: move");
-        tag(t, -rad - 7 * s, "drag: turn + size");
+        // Mid-drag the labels give way to the numbers: the outline says WHERE it is going,
+        // this says HOW FAR, which is the part that is unreadable off a 3 m nudge at 40 m.
+        if (drag) {
+          const turning = this._dragPitch === "turn";
+          tag(turning ? t : m, -rad - 7 * s, `${drag.moved.toFixed(2)} m`
+            + (turning ? ` · ${drag.turnDeg.toFixed(1)}° · ×${drag.scale.toFixed(3)}` : "")
+            + (drag.fine ? " · fine" : ""));
+        } else {
+          tag(m, -half - 7 * s, "drag: move · shift = fine");
+          tag(t, -rad - 7 * s, "drag: turn + size · shift = fine");
+        }
         for (const [h, u] of [[this.pitchHandles[0], m], [this.pitchHandles[1], t]]) {
           out.push(`<circle class="pitch-handle" data-hid="${h.id}" cx="${u[0]}" cy="${u[1]}"`
             + ` r="${hit}" fill="transparent" pointer-events="auto" style="cursor:grab"/>`);
@@ -2083,6 +2185,7 @@ Alpine.data("poseAnnot", () => ({
       if (g) {
         this._dragPitch = g.dataset.hid;
         this._dragPitchUV = this._clientToSource(e);
+        this._dragPitchFine = e.shiftKey;
         try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
         return;
       }
@@ -2102,6 +2205,12 @@ Alpine.data("poseAnnot", () => ({
     onPanMove(e) {
       if (this._dragPitch !== null) {
         this._dragPitchUV = this._clientToSource(e);
+        // Read live, not latched at pointerdown: the operator overshoots at full gain and
+        // then wants to trim, which means picking fine up mid-gesture.
+        this._dragPitchFine = e.shiftKey;
+        const d = this._layoutDrag();
+        this.liveLayout = d && { moved_m: d.moved, turn_deg: d.turnDeg,
+                                 scale: d.scale, fine: d.fine };
         this.rebuildOverlay();
         return;
       }
@@ -2120,8 +2229,12 @@ Alpine.data("poseAnnot", () => ({
     onPanEnd(e) {
       if (this._dragPitch !== null) {
         if (e && e.type !== "pointerup") return;   // see the note below
-        const hid = this._dragPitch, uv = this._dragPitchUV;
+        // Commit the pixel the PREVIEW was drawn from, not the raw cursor: under fine drag
+        // they differ, and posting the cursor would land somewhere the operator never saw.
+        const hid = this._dragPitch, d = this._layoutDrag();
+        const uv = d ? d.uv : this._dragPitchUV;
         this._dragPitch = null; this._dragPitchUV = null;
+        this._dragPitchFine = false; this.liveLayout = null;
         if (uv) this.adjustLayout(hid, uv);
         return;
       }

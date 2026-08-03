@@ -546,6 +546,12 @@ def api_pitch_calibrated(
         "video_size": [int(vw), int(vh)],
         # Where to grab the layout to re-register it by hand (#112).
         "handles": _gizmo(cal, frame, vw, vh),
+        # The plane map, both ways. #127: the drag used to have no feedback until pointerup,
+        # because only the server could redraw the outline — so the gesture could not be
+        # modulated while it was still open. With these the browser previews it live, using
+        # H'_w2i = H_w2i @ B ⇒ the drawn pixels move by H @ B @ H⁻¹.
+        "w2i": [[float(x) for x in row] for row in w2i],
+        "i2w": [[float(x) for x in row] for row in np.linalg.inv(w2i)],
         "adjusted": any(
             c.target.kind is TargetKind.FIELD_CALIBRATION and c.enabled
             for c in st.scene.corrections
