@@ -33,14 +33,23 @@ import requests
 BASE = "http://127.0.0.1:8000"
 ROOT = Path(__file__).resolve().parents[1]
 
-#: Both handles, both gains, and one turn that shrinks rather than grows.
+#: Both handles, both gains, one turn that shrinks rather than grows — and the typed panel,
+#: whose whole point is the metres the drag cannot resolve.
 CASES = [
-    {"handle": "move", "uv": [1010, 600], "fine": False},
-    {"handle": "move", "uv": [1010, 600], "fine": True},
-    {"handle": "turn", "uv": [1600, 700], "fine": False},
-    {"handle": "turn", "uv": [1600, 700], "fine": True},
-    {"handle": "turn", "uv": [1400, 560], "fine": True},
+    {"drag": "move", "uv": [1010, 600], "fine": False},
+    {"drag": "move", "uv": [1010, 600], "fine": True},
+    {"drag": "turn", "uv": [1600, 700], "fine": False},
+    {"drag": "turn", "uv": [1600, 700], "fine": True},
+    {"drag": "turn", "uv": [1400, 560], "fine": True},
+    {"nudge": {"group": "move", "dx": 1.5, "dy": 0, "deg": 0, "scale": 1}},
+    {"nudge": {"group": "move", "dx": -0.25, "dy": 3.0, "deg": 0, "scale": 1}},
+    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": 2.5, "scale": 1}},
+    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": 0, "scale": 0.985}},
+    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": -7.0, "scale": 1.04}},
 ]
+
+#: Names pulled out of the page, in the order they must be evaluated.
+METHODS = ("_mat3", "_mapH", "_layoutReady", "_layoutB", "_layoutDrag", "_layoutPending")
 
 HARNESS = r"""
 const fs = require("fs");
@@ -55,13 +64,20 @@ function grab(name) {
   }
   return src.slice(i, k + 1).trim().replace(/,$/, "");
 }
-const app = eval(`({ ${grab("_mat3")}, ${grab("_mapH")}, ${grab("_layoutDrag")} })`);
+const names = JSON.parse(process.argv[5]);
+const app = eval(`({ ${names.map(grab).join(", ")} })`);
 const d = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
 Object.assign(app, { pitchW2I: d.w2i, pitchI2W: d.i2w, pitchHandles: d.handles });
 console.log(JSON.stringify(JSON.parse(process.argv[4]).map((c) => {
-  app._dragPitch = c.handle; app._dragPitchUV = c.uv; app._dragPitchFine = !!c.fine;
-  const r = app._layoutDrag();
-  return { ...c, uv_post: r.uv, moved_m: r.moved, turn_deg: r.turnDeg, scale: r.scale, a: r.a };
+  // The two ways to make the same edit: the gesture, and the numbers typed into the panel.
+  app._dragPitch = c.drag || null;
+  app._dragPitchUV = c.uv || null;
+  app._dragPitchFine = !!c.fine;
+  app.layoutNudge = c.nudge || { group: "move", dx: 0, dy: 0, deg: 0, scale: 1 };
+  const r = c.drag ? app._layoutDrag() : app._layoutPending();
+  if (!r) throw new Error(`case produced no preview: ${JSON.stringify(c)}`);
+  return { ...c, handle: r.turn ? "turn" : "move", uv_post: r.uv,
+           moved_m: r.moved, turn_deg: r.turnDeg, scale: r.scale, a: r.a };
 })));
 """
 
@@ -78,9 +94,10 @@ def main() -> int:
     if "w2i" not in base:
         print("server has no w2i in /api/pitch/calibrated — is it running the current code?")
         return 2
-    if base["adjusted"]:
-        print("the layout is already hand-adjusted; undo it first so this starts from the solve")
-        return 2
+    # Whatever the operator has already registered by hand stays: every case below pushes one
+    # correction and pops the same one, so the only thing that must hold is that the flag reads
+    # the same at the end as it did here.
+    was_adjusted = bool(base["adjusted"])
 
     with tempfile.TemporaryDirectory() as tmp:
         harness = Path(tmp, "harness.js")
@@ -89,7 +106,7 @@ def main() -> int:
         state.write_text(json.dumps({k: base[k] for k in ("w2i", "i2w", "handles")}))
         js = json.loads(subprocess.run(
             ["node", str(harness), str(ROOT / "poseannot/static/index.html"),
-             str(state), json.dumps(CASES)],
+             str(state), json.dumps(CASES), json.dumps(METHODS)],
             capture_output=True, text=True, check=True).stdout)
 
     gx, gy = np.meshgrid(np.linspace(0, 1920, 9), np.linspace(0, 1080, 7))
@@ -110,13 +127,14 @@ def main() -> int:
                            - image(np.asarray(after["w2i"], dtype=float) @ i2w, grid)).max())
         ok = dm < 0.01 and dd < 0.02 and ds < 1e-4 and err < 0.5
         bad += not ok
-        print(f"{'ok ' if ok else 'BAD'} {c['handle']:5s} fine={str(c['fine']):5s} "
+        how = f"drag fine={str(c['fine']):5s}" if c.get("drag") else "panel          "
+        print(f"{'ok ' if ok else 'BAD'} {c['handle']:5s} {how} "
               f"preview {c['moved_m']:6.2f} m {c['turn_deg']:+7.2f}° x{c['scale']:.4f}  "
               f"committed {r['moved_m']:6.2f} {r['turn_deg']:+7.2f} x{r['scale']:.4f}  "
               f"jump {err:.4f} px over {len(grid)} pixels")
 
-    if s.get(f"{BASE}/api/pitch/calibrated/0", timeout=30).json()["adjusted"]:
-        print("WARNING: the scene was left hand-adjusted — undo it in the UI")
+    if bool(s.get(f"{BASE}/api/pitch/calibrated/0", timeout=30).json()["adjusted"]) != was_adjusted:
+        print("WARNING: this left the scene in a different state than it found it")
         bad += 1
     return 1 if bad else 0
 

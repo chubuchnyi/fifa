@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>poseannot</title>
-  <link rel="stylesheet" href="/static/style.css?v=layout5" />
+  <link rel="stylesheet" href="/static/style.css?v=layout6" />
   <script type="importmap">
   {
     "imports": {
@@ -44,8 +44,11 @@
     </div>
   </div>
 
-  <!-- Toolbar -->
+  <!-- Toolbar. Two rows on purpose: WHERE you are (clip, frame, subject) over WHAT you are
+       drawing (overlay, pitch, calibration readouts). As one row it overflowed the moment the
+       calibration badges appeared and pushed the pitch controls off the right edge. -->
   <div class="toolbar">
+   <div class="tb-row">
     <span class="brand">poseannot</span>
     <span class="sep">|</span>
     <select class="clip-select" x-model="activeClipId" @change="switchClip($event.target.value)">
@@ -80,7 +83,12 @@
     <button @click="undoEdit()" x-show="selectedJoint !== null"
             title="undo edit (Ctrl+Z)">undo</button>
     <button @click="deselectJoint()" x-show="selectedJoint !== null">deselect</button>
-    <span class="sep">|</span>
+    <span class="user">
+      <span x-text="user"></span> · <a href="/logout">logout</a>
+    </span>
+   </div>
+
+   <div class="tb-row">
     <button @click="toggleOverlayMode()" :class="{ active: overlayMode === '3d' }"
             :title="overlayMode === '3d' ? 'overlay: projected 3D mesh — press M for 2D skeleton' : 'overlay: 2D skeleton — press M for 3D mesh'"
             x-text="overlayMode === '3d' ? 'overlay: 3D' : 'overlay: 2D'"></button>
@@ -176,9 +184,7 @@ badge keeps reading 'one camera'.">layout</button>
     </span>
     <button @click="showCamAdjust = !showCamAdjust" :class="{ active: showCamAdjust }"
             title="overlay orientation: rotate/move/flip about the pitch centre (C)">orient</button>
-    <span class="user">
-      <span x-text="user"></span> · <a href="/logout">logout</a>
-    </span>
+   </div>
   </div>
 
   <!-- Pipeline stage rail: the DAG as a clickable glass-box strip. Clicking a
@@ -279,14 +285,15 @@ badge keeps reading 'one camera'.">layout</button>
       <span>drag the <b style="color:#f472b6">square</b> to slide it, the
         <b style="color:#f472b6">ring</b> to turn and size it — until the green outline sits on
         the painted lines. The outline follows while you drag; hold <b>shift</b> for a quarter
-        of the gesture. The handles spring back; the pitch is what moves.</span>
+        of the gesture, or type metres and degrees in the panel below. The handles spring back;
+        the pitch is what moves.</span>
       <span class="rd" :class="{ worse: _layoutWorse }"
             x-text="'fit ' + (pitchFit === null ? '—' : pitchFit.toFixed(1)) + ' px'
                   + (pitchCounts ? ' · on paint ' + pitchCounts.ok + ' / off ' + pitchCounts.off : '')"
             title="lower fit and more on-paint = better. This is measured against the frame's own
 white pixels, so it is the honest score of your drag."></span>
       <span x-show="liveLayout" class="rd"
-            x-text="liveLayout ? 'dragging: ' + liveLayout.moved_m.toFixed(2) + ' m · '
+            x-text="liveLayout ? 'editing: ' + liveLayout.moved_m.toFixed(2) + ' m · '
                                  + liveLayout.turn_deg.toFixed(1) + '° · x'
                                  + liveLayout.scale.toFixed(3)
                                  + (liveLayout.fine ? ' · fine' : '') : ''"></span>
@@ -358,6 +365,54 @@ white pixels, so it is the honest score of your drag."></span>
         </template>
       </div>
       <div class="cam-hint">rotate/move the green pitch dots onto the painted lines — the players follow. Flip skeletons if bodies read upside-down.</div>
+    </div>
+
+    <!-- The orient panel's control surface, aimed at the pitch layout (#127). The drag is only
+         ever as fine as the perspective under the cursor — near the top of a broadcast frame one
+         pixel is tens of centimetres of lawn — so the last part of the registration is typed in
+         metres and degrees instead of gestured. Same edit, same POST, same undo: each control
+         previews live and commits on release, so one gesture is still one correction. -->
+    <div class="cam-panel layout-panel" x-cloak
+         x-show="showLayout && showPitch && pitchSource === 'calib'">
+      <div class="cam-hd">
+        <span>pitch layout</span>
+        <span class="spacer"></span>
+        <button @click="resetNudge()" title="drop the pending nudge — does not undo a commit">clear</button>
+        <button @click="undoLayout()" x-show="pitchAdjusted"
+                title="take back the last committed nudge or drag">undo</button>
+      </div>
+      <div class="cam-sec">slide (metres)</div>
+      <template x-for="c in layoutTr" :key="c.k">
+        <div class="cam-row">
+          <label x-text="c.label" :title="c.hint"></label>
+          <input type="range" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="layoutNudge[c.k]"
+                 @input="onNudge('move')" @change="commitNudge('move')" />
+          <input class="cam-num" type="number" :min="c.min" :max="c.max" :step="c.step"
+                 x-model.number="layoutNudge[c.k]"
+                 @input="onNudge('move')" @change="commitNudge('move')" />
+        </div>
+      </template>
+      <div class="cam-sec">turn + size (about the square)</div>
+      <div class="cam-row">
+        <label title="spin the layout about the square handle">turn °</label>
+        <input type="range" min="-20" max="20" step="0.1" x-model.number="layoutNudge.deg"
+               @input="onNudge('turn')" @change="commitNudge('turn')" />
+        <input class="cam-num" type="number" min="-20" max="20" step="0.1"
+               x-model.number="layoutNudge.deg"
+               @input="onNudge('turn')" @change="commitNudge('turn')" />
+      </div>
+      <div class="cam-row">
+        <label title="grow or shrink the layout about the square handle">size ×</label>
+        <input type="range" min="0.8" max="1.25" step="0.001" x-model.number="layoutNudge.scale"
+               @input="onNudge('turn')" @change="commitNudge('turn')" />
+        <input class="cam-num" type="number" min="0.8" max="1.25" step="0.001"
+               x-model.number="layoutNudge.scale"
+               @input="onNudge('turn')" @change="commitNudge('turn')" />
+      </div>
+      <div class="cam-hint">The outline follows every tick and commits when you let go, then the
+        control returns to neutral — so <b>undo</b> still takes back exactly one gesture. Slide
+        and turn are edited one at a time: what you see previewed is what gets committed.</div>
     </div>
 
     <!-- Stage inspector: the selected stage's StageView (read-only Phase 1) —
@@ -554,7 +609,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-08-03 · live pitch-layout preview + fine drag (#127)";
+const BUILD_ID = "2026-08-03 · layout nudge panel + two-row toolbar (#127)";
 
 // Every API call below ends `if (!r.ok) { ...clear the layer...; return; }`. That is the right
 // shape for "no data on this frame" and exactly the wrong one for "your session died": the overlay
@@ -932,7 +987,12 @@ Alpine.data("poseAnnot", () => ({
     pitchHandles: [],         // [{id:"move"|"turn", uv:[u,v], world:[x,y]}]
     pitchAdjusted: false,     // is the drawn layout hand-registered rather than as-solved?
     lastLayout: null,         // {moved_m, turn_deg, scale} — what the last drag did
-    liveLayout: null,         // the same three numbers, live, for the drag in progress
+    // The three numbers for the edit in flight, whichever way it is being made. Derived rather
+    // than latched, so the drag and the panel cannot report different things about one preview.
+    get liveLayout() {
+      const d = this._layoutDrag() || (this.showLayout ? this._layoutPending() : null);
+      return d && { moved_m: d.moved, turn_deg: d.turnDeg, scale: d.scale, fine: d.fine };
+    },
     pitchW2I: null,           // 3x3 pitch-plane world→pixel, and its inverse. #127: the
     pitchI2W: null,           // client previews the drag with them instead of waiting on POST.
     _layoutFit0: null,        // fit_px when layout mode opened — the bar to beat
@@ -943,6 +1003,15 @@ Alpine.data("poseAnnot", () => ({
     _dragPitch: null,         // handle id being dragged, or null
     _dragPitchUV: null,
     _dragPitchFine: false,    // Shift held — 1/4 gain, the answer to "too sensitive"
+    // The typed half of the same edit (#127). `group` says which of the two the preview and the
+    // next commit describe, because one POST carries either a slide or a turn, never both.
+    layoutNudge: { group: "move", dx: 0, dy: 0, deg: 0, scale: 1 },
+    // World X runs goal to goal, Y touchline to touchline — so these are the pitch's own axes,
+    // not the screen's, which is what "moved N m" has always been reported in.
+    layoutTr: [
+      { k: "dx", label: "along", min: -10, max: 10, step: 0.05, hint: "goal to goal (world +X)" },
+      { k: "dy", label: "across", min: -10, max: 10, step: 0.05, hint: "touchline to touchline (world +Y)" },
+    ],
     showCamAdjust: false,     // overlay-orient panel visible?
     // Overlay orientation: a rigid transform of the whole overlay (pitch +
     // skeletons + mesh) about the pitch-markings centre, applied in the browser.
@@ -1315,7 +1384,7 @@ Alpine.data("poseAnnot", () => ({
       // Latch the score on the way in, so "worse than when I started" is answerable. Dropping it
       // on the way out keeps the next session honest rather than scoring against a stale bar.
       this._layoutFit0 = this.showLayout ? this.pitchFit : null;
-      this.rebuildOverlay();
+      this.resetNudge();
     },
 
     _mat3(a, b) {
@@ -1331,17 +1400,48 @@ Alpine.data("poseAnnot", () => ({
               (h[1][0] * p[0] + h[1][1] * p[1] + h[1][2]) / w];
     },
 
-    // The drag in progress, resolved on the pitch plane (#127). Returns the world-plane
-    // similarity B, the image-space transform A = H·B·H⁻¹ that previews it on already-drawn
-    // pixels, the pixel to POST, and the three numbers the operator reads.
+    _layoutReady() {
+      return !!(this.pitchW2I && this.pitchI2W && this.pitchHandles.length === 2);
+    },
+
+    // One layout edit, resolved on the pitch plane (#127): land the handle's world point on
+    // `dst`. Returns the world-plane similarity B, the image-space transform A = H·B·H⁻¹ that
+    // previews it on already-drawn pixels, the pixel to POST, and the numbers the operator reads.
     //
-    // The authoritative copy of this arithmetic is poseannot/camera.py:plane_similarity, and
-    // the commit still goes through it — so the gain is applied here as a damped *world target
-    // point* rather than a damped matrix. Feed that point back through the homography and the
-    // server derives exactly the B previewed here, with no new parameter on the endpoint.
+    // The authoritative copy of this arithmetic is poseannot/camera.py:plane_similarity, and the
+    // commit still goes through it — the client only chooses `dst` and projects it back to a
+    // pixel, so the server independently re-derives exactly the B previewed here. That is what
+    // lets the drag damp its gain and the panel take typed metres without either of them adding
+    // a parameter to the endpoint. scripts/check_layout_preview.py holds the two together.
+    _layoutB(turn, dst) {
+      const a = this.pitchHandles[0].world;
+      const src = this.pitchHandles[turn ? 1 : 0].world;
+      const v = [src[0] - a[0], src[1] - a[1]];
+      const n2 = v[0] * v[0] + v[1] * v[1];
+      let b, scale = 1.0, turnDeg = 0.0;
+      if (!turn) {
+        b = [[1, 0, dst[0] - src[0]], [0, 1, dst[1] - src[1]], [0, 0, 1]];
+      } else if (n2 > 1e-12) {
+        const w = [dst[0] - a[0], dst[1] - a[1]];
+        const c = (v[0] * w[0] + v[1] * w[1]) / n2, s = (v[0] * w[1] - v[1] * w[0]) / n2;
+        b = [[c, -s, a[0] - (c * a[0] - s * a[1])], [s, c, a[1] - (s * a[0] + c * a[1])], [0, 0, 1]];
+        scale = Math.hypot(c, s);
+        turnDeg = Math.atan2(s, c) * 180 / Math.PI;
+      } else {
+        b = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      }
+      return {
+        a: this._mat3(this._mat3(this.pitchW2I, b), this.pitchI2W),
+        uv: this._mapH(this.pitchW2I, dst),
+        moved: Math.hypot(dst[0] - src[0], dst[1] - src[1]),
+        turn, turnDeg, scale, fine: false,
+      };
+    },
+
+    // The drag in progress. The gain is applied as a damped world TARGET POINT rather than a
+    // damped matrix, so the server still derives the previewed B from the pixel it is sent.
     _layoutDrag() {
-      if (this._dragPitch === null || !this._dragPitchUV) return null;
-      if (!this.pitchW2I || !this.pitchI2W || this.pitchHandles.length !== 2) return null;
+      if (this._dragPitch === null || !this._dragPitchUV || !this._layoutReady()) return null;
       const turn = this._dragPitch === "turn";
       const a = this.pitchHandles[0].world;
       const src = this.pitchHandles[turn ? 1 : 0].world;
@@ -1366,24 +1466,59 @@ Alpine.data("poseAnnot", () => ({
           dst = [a[0] + c * v[0] - s * v[1], a[1] + s * v[0] + c * v[1]];
         }
       }
-      let b, scale = 1.0, turnDeg = 0.0;
-      if (!turn) {
-        b = [[1, 0, dst[0] - src[0]], [0, 1, dst[1] - src[1]], [0, 0, 1]];
-      } else if (n2 > 1e-12) {
-        const w = [dst[0] - a[0], dst[1] - a[1]];
-        const c = (v[0] * w[0] + v[1] * w[1]) / n2, s = (v[0] * w[1] - v[1] * w[0]) / n2;
-        b = [[c, -s, a[0] - (c * a[0] - s * a[1])], [s, c, a[1] - (s * a[0] + c * a[1])], [0, 0, 1]];
-        scale = Math.hypot(c, s);
-        turnDeg = Math.atan2(s, c) * 180 / Math.PI;
-      } else {
-        b = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+      const r = this._layoutB(turn, dst);
+      // At full gain the drop pixel IS the target, so post it unchanged rather than its
+      // world round-trip — the operator's own pixel, not one reconstructed from it.
+      if (g === 1.0) r.uv = this._dragPitchUV;
+      r.fine = g !== 1.0;
+      return r;
+    },
+
+    // The panel's pending nudge, as the same object a drag produces. Null when neutral, so the
+    // overlay falls back to the committed calibration and nothing else.
+    _layoutPending() {
+      if (!this._layoutReady()) return null;
+      const n = this.layoutNudge;
+      const num = (x, dflt) => (Number.isFinite(x) ? x : dflt);
+      if (n.group === "move") {
+        const dx = num(n.dx, 0), dy = num(n.dy, 0);
+        if (!dx && !dy) return null;
+        const src = this.pitchHandles[0].world;
+        return this._layoutB(false, [src[0] + dx, src[1] + dy]);
       }
-      return {
-        a: this._mat3(this._mat3(this.pitchW2I, b), this.pitchI2W),
-        uv: g === 1.0 ? this._dragPitchUV : this._mapH(this.pitchW2I, dst),
-        moved: Math.hypot(dst[0] - src[0], dst[1] - src[1]),
-        turnDeg, scale, fine: g !== 1.0,
-      };
+      const deg = num(n.deg, 0), k = num(n.scale, 1);
+      if (!deg && k === 1) return null;
+      const a = this.pitchHandles[0].world, p = this.pitchHandles[1].world;
+      const v = [p[0] - a[0], p[1] - a[1]];
+      const th = deg * Math.PI / 180, c = k * Math.cos(th), s = k * Math.sin(th);
+      return this._layoutB(true, [a[0] + c * v[0] - s * v[1], a[1] + s * v[0] + c * v[1]]);
+    },
+
+    // Live while the control moves. Slide and turn are edited one at a time because one POST
+    // carries one handle — so what is previewed is always exactly what a commit will store.
+    onNudge(group) {
+      const n = this.layoutNudge;
+      if (n.group !== group) {
+        if (group === "move") { n.deg = 0; n.scale = 1; } else { n.dx = 0; n.dy = 0; }
+        n.group = group;
+      }
+      this.rebuildOverlay();
+    },
+
+    // Release (or Enter in the box) commits, through the same endpoint the drag uses.
+    async commitNudge(group) {
+      const n = this.layoutNudge;
+      const d = n.group === group ? this._layoutPending() : null;
+      // Zero BEFORE the round-trip: adjustLayout redraws through the new calibration, and a
+      // nudge still pending at that moment would be applied on top of itself.
+      n.dx = 0; n.dy = 0; n.deg = 0; n.scale = 1;
+      if (d) await this.adjustLayout(d.turn ? "turn" : "move", d.uv);
+      else this.rebuildOverlay();
+    },
+
+    resetNudge() {
+      this.layoutNudge = { group: this.layoutNudge.group, dx: 0, dy: 0, deg: 0, scale: 1 };
+      this.rebuildOverlay();
     },
 
     // Move the pitch model onto the painted lines. The client reports only where the cursor
@@ -1719,11 +1854,11 @@ Alpine.data("poseAnnot", () => ({
       const sks = [...this.allSkeletons].sort((p, q) =>
         (p.track_id === this.selectedTrackId ? 1 : 0) - (q.track_id === this.selectedTrackId ? 1 : 0));
       const out = [];
-      // A layout drag in flight moves everything that is drawn through the calibration —
-      // markings, gizmo and stance handles alike — so resolve it once and map through it.
-      // Everything below is on the pitch plane and therefore exact; the uprights are not,
-      // and are noted where they are drawn.
-      const drag = this._layoutDrag();
+      // A layout edit in flight — dragged or dialled in on the panel — moves everything that is
+      // drawn through the calibration: markings, gizmo and stance handles alike. So resolve it
+      // once and map through it. Everything below is on the pitch plane and therefore exact;
+      // the uprights are not, and are noted where they are drawn.
+      const drag = this._layoutDrag() || (this.showLayout ? this._layoutPending() : null);
       const P = drag ? (p) => this._mapH(drag.a, p) : (p) => p;
       // Bottom layer: measured pitch markings (green), the alignment reference.
       // Drawn as connected polylines on the calibrated path — a line that should be
@@ -1879,9 +2014,8 @@ Alpine.data("poseAnnot", () => ({
         // Mid-drag the labels give way to the numbers: the outline says WHERE it is going,
         // this says HOW FAR, which is the part that is unreadable off a 3 m nudge at 40 m.
         if (drag) {
-          const turning = this._dragPitch === "turn";
-          tag(turning ? t : m, -rad - 7 * s, `${drag.moved.toFixed(2)} m`
-            + (turning ? ` · ${drag.turnDeg.toFixed(1)}° · ×${drag.scale.toFixed(3)}` : "")
+          tag(drag.turn ? t : m, -rad - 7 * s, `${drag.moved.toFixed(2)} m`
+            + (drag.turn ? ` · ${drag.turnDeg.toFixed(1)}° · ×${drag.scale.toFixed(3)}` : "")
             + (drag.fine ? " · fine" : ""));
         } else {
           tag(m, -half - 7 * s, "drag: move · shift = fine");
@@ -2208,9 +2342,6 @@ Alpine.data("poseAnnot", () => ({
         // Read live, not latched at pointerdown: the operator overshoots at full gain and
         // then wants to trim, which means picking fine up mid-gesture.
         this._dragPitchFine = e.shiftKey;
-        const d = this._layoutDrag();
-        this.liveLayout = d && { moved_m: d.moved, turn_deg: d.turnDeg,
-                                 scale: d.scale, fine: d.fine };
         this.rebuildOverlay();
         return;
       }
@@ -2233,8 +2364,7 @@ Alpine.data("poseAnnot", () => ({
         // they differ, and posting the cursor would land somewhere the operator never saw.
         const hid = this._dragPitch, d = this._layoutDrag();
         const uv = d ? d.uv : this._dragPitchUV;
-        this._dragPitch = null; this._dragPitchUV = null;
-        this._dragPitchFine = false; this.liveLayout = null;
+        this._dragPitch = null; this._dragPitchUV = null; this._dragPitchFine = false;
         if (uv) this.adjustLayout(hid, uv);
         return;
       }
