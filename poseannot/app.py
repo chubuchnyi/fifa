@@ -57,11 +57,13 @@ from .auth import authenticate, current_user, issue_token
 from .camera import (
     CameraAdjust,
     camera_centre,
+    decompose_similarity,
     focal_from_homography,
     frame_projector,
     image_to_ground,
     plane_orientation,
     plane_similarity,
+    plane_similarity_params,
     project_ground,
     project_points,
     project_world,
@@ -78,6 +80,9 @@ from .scene_state import (
     camera,
     edited_frames,
     get_state,
+    layout_panel_context,
+    layout_panel_matrix,
+    set_layout_panel_edit,
     undo_last_calibration_edit,
     undo_last_edit,
 )
@@ -518,6 +523,8 @@ def api_pitch_calibrated(
 
     all_err = np.concatenate(errors) if errors else np.array([np.nan])
     fit = float(np.nanmedian(all_err)) if np.isfinite(all_err).any() else None
+    _lp_panel = layout_panel_matrix(st)
+    _lp_pre, _lp_post = layout_panel_context(st, frame)
     return {
         "polylines": polylines,
         "uprights": uprights,
@@ -556,6 +563,20 @@ def api_pitch_calibrated(
             c.target.kind is TargetKind.FIELD_CALIBRATION and c.enabled
             for c in st.scene.corrections
         ),
+        # What the typed panel's sliders must read. Sent every refresh so they survive a reload,
+        # an undo, or a second browser — the panel shows scene state, not local state.
+        "layout": decompose_similarity(_lp_panel),
+        # The panel's preview basis: the plane map with the panel's own slot taken OUT, plus what
+        # composes before and after it. ``w2i`` already has the panel folded in, so it cannot
+        # preview a *replacement* of it — only an addition on top.
+        "layout_basis": {
+            "w2i_bare": [
+                [float(x) for x in row]
+                for row in w2i @ np.linalg.inv(_lp_pre @ _lp_panel @ _lp_post)
+            ],
+            "pre": [[float(x) for x in row] for row in _lp_pre],
+            "post": [[float(x) for x in row] for row in _lp_post],
+        },
     }
 
 
@@ -610,6 +631,45 @@ def api_pitch_adjust(req: PitchAdjustRequest, user: str = Depends(current_user))
         "moved_m": round(float(np.linalg.norm(dst - src)), 2),
         "scale": round(float(np.hypot(b[0, 0], b[1, 0])), 4),
         "turn_deg": round(float(np.degrees(np.arctan2(b[1, 0], b[0, 0]))), 2),
+    }
+
+
+class PitchLayoutRequest(BaseModel):
+    """Where the layout should END UP — not how far to nudge it."""
+
+    dx: float = 0.0
+    dy: float = 0.0
+    deg: float = 0.0
+    scale: float = 1.0
+
+
+@app.post("/api/pitch/layout")
+def api_pitch_layout(req: PitchLayoutRequest, user: str = Depends(current_user)) -> dict:
+    """Set the typed panel's layout transform absolutely (#127).
+
+    Separate from ``/api/pitch/adjust`` because it means something different. A drag is a
+    *gesture*: it was aimed at the layout as the last gesture left it, so it appends and one
+    gesture is one undo. The panel is a *state*: its sliders say where the pitch should sit, so
+    it rewrites one correction and its sliders keep their value. Sliders that sprang back to
+    zero after every commit was the defect this endpoint exists to remove — the layout moved and
+    the control that moved it showed nothing.
+
+    The four scalars are the whole request, so the server is still the only thing that ever
+    builds ``B`` and it is a similarity by construction. A raw 3x3 from the browser would have
+    been the shortcut, and it would have handed the client the ability to post a transform that
+    breaks the single-camera guarantee.
+    """
+    st = get_state()
+    if calibration(st) is None:
+        raise HTTPException(400, "scene has no field calibration — nothing to adjust")
+    if not 0.5 <= req.scale <= 2.0:
+        raise HTTPException(400, f"scale {req.scale} is outside 0.5–2.0")
+    b = plane_similarity_params(req.dx, req.dy, req.deg, req.scale)
+    corr = set_layout_panel_edit(st, matrix=b, user=user)
+    return {
+        "ok": True,
+        "correction_id": None if corr is None else corr.id,
+        "layout": decompose_similarity(b),
     }
 
 

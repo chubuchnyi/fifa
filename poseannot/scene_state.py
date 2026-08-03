@@ -30,15 +30,18 @@ from pitch3d.core.scene.serialization import load_scene as _pitch3d_load_scene
 from .camera import adjusted_calibration, adjusted_camera
 from .config import PoseAnnotConfig
 from .config import load as load_config
-from .edits import append_edit as _persist_edit
 from .edits import (
+    PANEL_NOTE,
     build_body_pose_edit,
     build_calibration_edit,
     build_root_edit,
     load_edits,
     pop_last_calibration_edit,
     pop_last_matching,
+    remove_panel_calibration_edit,
+    upsert_panel_calibration_edit,
 )
+from .edits import append_edit as _persist_edit
 
 # SMPLest-X → z-up world remap (see scripts/render_smplx_mesh.py comment).
 R_SMPLX_TO_OURS = R_SMPLX_CAMERA_TO_WORLD.astype(np.float32)  # real HMR output
@@ -271,6 +274,81 @@ def apply_and_persist_calibration_edit(
         from dataclasses import replace as _dc_replace
         st.scene = _dc_replace(st.scene, corrections=[*st.scene.corrections, corr])
     return corr
+
+
+def set_layout_panel_edit(
+    st: SceneState, *, matrix, user: str, cfg: PoseAnnotConfig | None = None,
+) -> Correction | None:
+    """Set the typed panel's layout transform to ``matrix``, replacing whatever it held.
+
+    ``None`` when the panel is back at neutral: an identity correction is not worth carrying,
+    and dropping it is what makes ``adjusted`` read false again after the operator zeroes the
+    sliders.
+    """
+    cfg = cfg or load_config()
+    from dataclasses import replace as _dc_replace
+
+    if np.allclose(np.asarray(matrix, dtype=float), np.eye(3), atol=1e-12):
+        remove_panel_calibration_edit(cfg.corrections_out)
+        with st.lock:
+            st.scene = _dc_replace(st.scene, corrections=[
+                c for c in st.scene.corrections
+                if not (c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE)
+            ])
+        return None
+
+    corr = build_calibration_edit(
+        frame=0, frame_end=st.n_frames - 1, matrix=matrix, user=user, note=PANEL_NOTE,
+    )
+    upsert_panel_calibration_edit(cfg.corrections_out, corr)
+    with st.lock:
+        others = [
+            c for c in st.scene.corrections
+            if not (c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE)
+        ]
+        # Same reason as the file-side upsert: composition order is the edit's meaning, so the
+        # panel keeps the slot it already had rather than jumping to the end.
+        idx = next(
+            (i for i, c in enumerate(st.scene.corrections)
+             if c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE),
+            len(others),
+        )
+        st.scene = _dc_replace(st.scene, corrections=[*others[:idx], corr, *others[idx:]])
+    return corr
+
+
+def layout_panel_matrix(st: SceneState) -> np.ndarray:
+    """The panel's own ``B``, or identity — what its sliders must read on load."""
+    for c in st.scene.corrections:
+        if c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE and c.enabled:
+            return np.asarray(c.payload.matrix, dtype=float)
+    return np.eye(3)
+
+
+def layout_panel_context(st: SceneState, frame: int) -> tuple[np.ndarray, np.ndarray]:
+    """The drags composed **before** and **after** the panel's slot, for ``frame``.
+
+    The panel previews itself by rebuilding the whole plane map, not by right-multiplying the
+    adjusted one: its correction keeps its position in the composition, so replacing it is not a
+    right-multiply unless it happens to be last. With these two the browser can compute the exact
+    map its new slider values imply — which is what keeps "no jump on release" true (#127) once
+    drags and typed values are mixed in one session.
+    """
+    pre, post, seen = np.eye(3), np.eye(3), False
+    for c in st.scene.corrections:
+        if c.target.kind is not TargetKind.FIELD_CALIBRATION or not c.enabled:
+            continue
+        if c.note == PANEL_NOTE:
+            seen = True
+            continue
+        if frame not in c.frame_range:
+            continue
+        m = np.asarray(c.payload.matrix, dtype=float)
+        if seen:
+            post = post @ m
+        else:
+            pre = pre @ m
+    return pre, post
 
 
 def undo_last_calibration_edit(

@@ -172,6 +172,46 @@ def build_calibration_edit(
     )
 
 
+#: Marks the one correction the typed layout panel owns. A drag appends a correction per
+#: gesture, because each gesture was aimed at the layout as the previous one left it. The panel
+#: is not a gesture — its sliders state where the layout should *end up* — so it rewrites a
+#: single correction in place, and its sliders can therefore hold a value instead of springing
+#: back to zero after every commit.
+PANEL_NOTE = "layout-panel"
+
+
+def upsert_panel_calibration_edit(path: Path, correction: Correction) -> list[Correction]:
+    """Replace the panel's correction **in place**, or append it if this is the first one.
+
+    In place matters: ``plane_adjustment`` composes right-to-left in insertion order, so moving
+    the panel's entry to the end would silently reinterpret every drag made after it.
+    """
+    with _LOCK:
+        current = load_edits(path)
+        for i, c in enumerate(current):
+            if c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE:
+                current[i] = correction
+                break
+        else:
+            current.append(correction)
+        save_edits(path, current)
+        return current
+
+
+def remove_panel_calibration_edit(path: Path) -> bool:
+    """Drop the panel's correction — what "back to neutral" means on disk."""
+    with _LOCK:
+        current = load_edits(path)
+        kept = [
+            c for c in current
+            if not (c.target.kind is TargetKind.FIELD_CALIBRATION and c.note == PANEL_NOTE)
+        ]
+        if len(kept) == len(current):
+            return False
+        save_edits(path, kept)
+        return True
+
+
 def pop_last_calibration_edit(path: Path) -> Correction | None:
     """Pop the most recent pitch-layout edit — undo for the one correction with no track_id."""
     with _LOCK:

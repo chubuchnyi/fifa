@@ -1,10 +1,11 @@
 """Does the browser's live layout preview agree with what the server commits? (#127)
 
-The pitch-layout drag is previewed in the browser and committed on the server, and the two
-compute the same similarity twice — `_layoutDrag` in ``poseannot/static/index.html`` is a port
-of :func:`poseannot.camera.plane_similarity`. Nothing in the type system holds them together,
-and a divergence has exactly one symptom: the outline jumps at the moment the operator lets go,
-which is the defect #127 existed to remove.
+The pitch-layout edit is previewed in the browser and committed on the server, and the two
+compute the same similarity twice — in ``poseannot/static/index.html``, `_layoutDrag` is a port
+of :func:`poseannot.camera.plane_similarity` and `_panelB` of
+:func:`poseannot.camera.plane_similarity_params`. Nothing in the type system holds them
+together, and a divergence has exactly one symptom: the outline jumps at the moment the
+operator lets go, which is the defect #127 existed to remove.
 
 So this drives both. It pulls the SHIPPED JavaScript out of ``index.html`` (rather than a
 retyped copy), runs it under node, POSTs the pixel it says to POST, and compares:
@@ -34,28 +35,33 @@ BASE = "http://127.0.0.1:8000"
 ROOT = Path(__file__).resolve().parents[1]
 
 #: Both handles, both gains, one turn that shrinks rather than grows — and the typed panel,
-#: whose whole point is the metres the drag cannot resolve.
+#: whose whole point is the metres the drag cannot resolve. The panel cases mix all four
+#: scalars, since it commits them as one similarity rather than one handle at a time.
 CASES = [
     {"drag": "move", "uv": [1010, 600], "fine": False},
     {"drag": "move", "uv": [1010, 600], "fine": True},
     {"drag": "turn", "uv": [1600, 700], "fine": False},
     {"drag": "turn", "uv": [1600, 700], "fine": True},
     {"drag": "turn", "uv": [1400, 560], "fine": True},
-    {"nudge": {"group": "move", "dx": 1.5, "dy": 0, "deg": 0, "scale": 1}},
-    {"nudge": {"group": "move", "dx": -0.25, "dy": 3.0, "deg": 0, "scale": 1}},
-    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": 2.5, "scale": 1}},
-    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": 0, "scale": 0.985}},
-    {"nudge": {"group": "turn", "dx": 0, "dy": 0, "deg": -7.0, "scale": 1.04}},
+    {"panel": {"dx": 1.5, "dy": 0, "deg": 0, "scale": 1}},
+    {"panel": {"dx": -0.25, "dy": 3.0, "deg": 0, "scale": 1}},
+    {"panel": {"dx": 0, "dy": 0, "deg": 2.5, "scale": 1}},
+    {"panel": {"dx": 0, "dy": 0, "deg": 0, "scale": 0.985}},
+    {"panel": {"dx": 0.8, "dy": -1.6, "deg": -7.0, "scale": 1.04}},
 ]
 
 #: Names pulled out of the page, in the order they must be evaluated.
-METHODS = ("_mat3", "_mapH", "_layoutReady", "_layoutB", "_layoutDrag", "_layoutPending")
+METHODS = ("_mat3", "_mapH", "_layoutReady", "_layoutB", "_layoutDrag", "_panelB",
+           "panelPending", "_layoutPending")
 
 HARNESS = r"""
 const fs = require("fs");
 const src = fs.readFileSync(process.argv[2], "utf8");
+// Methods and getters both, so `panelPending` is the shipped one rather than a stand-in — it
+// is the gate that decides whether the panel previews at all.
 function grab(name) {
-  const i = src.indexOf(`\n    ${name}(`);
+  let i = src.indexOf(`\n    ${name}(`);
+  if (i < 0) i = src.indexOf(`\n    get ${name}(`);
   if (i < 0) throw new Error(`method ${name} not found in index.html`);
   let k = src.indexOf("{", i), depth = 0;
   for (; k < src.length; k++) {
@@ -67,13 +73,14 @@ function grab(name) {
 const names = JSON.parse(process.argv[5]);
 const app = eval(`({ ${names.map(grab).join(", ")} })`);
 const d = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
-Object.assign(app, { pitchW2I: d.w2i, pitchI2W: d.i2w, pitchHandles: d.handles });
+Object.assign(app, { pitchW2I: d.w2i, pitchI2W: d.i2w, pitchHandles: d.handles,
+                     layoutBasis: d.layout_basis, layoutSaved: d.layout });
 console.log(JSON.stringify(JSON.parse(process.argv[4]).map((c) => {
   // The two ways to make the same edit: the gesture, and the numbers typed into the panel.
   app._dragPitch = c.drag || null;
   app._dragPitchUV = c.uv || null;
   app._dragPitchFine = !!c.fine;
-  app.layoutNudge = c.nudge || { group: "move", dx: 0, dy: 0, deg: 0, scale: 1 };
+  app.layoutPanel = c.panel || { ...d.layout };
   const r = c.drag ? app._layoutDrag() : app._layoutPending();
   if (!r) throw new Error(`case produced no preview: ${JSON.stringify(c)}`);
   return { ...c, handle: r.turn ? "turn" : "move", uv_post: r.uv,
@@ -103,7 +110,8 @@ def main() -> int:
         harness = Path(tmp, "harness.js")
         harness.write_text(HARNESS)
         state = Path(tmp, "state.json")
-        state.write_text(json.dumps({k: base[k] for k in ("w2i", "i2w", "handles")}))
+        state.write_text(json.dumps(
+            {k: base[k] for k in ("w2i", "i2w", "handles", "layout", "layout_basis")}))
         js = json.loads(subprocess.run(
             ["node", str(harness), str(ROOT / "poseannot/static/index.html"),
              str(state), json.dumps(CASES), json.dumps(METHODS)],
@@ -115,10 +123,22 @@ def main() -> int:
 
     bad = 0
     for c in js:
-        r = s.post(f"{BASE}/api/pitch/adjust", timeout=30,
-                   json={"frame": 0, "handle": c["handle"], "uv": c["uv_post"]}).json()
+        if c.get("drag"):
+            r = s.post(f"{BASE}/api/pitch/adjust", timeout=30,
+                       json={"frame": 0, "handle": c["handle"], "uv": c["uv_post"]}).json()
+        else:
+            # The panel round-trips its four scalars through plane_similarity_params and back out
+            # of decompose_similarity, so this checks the server built the B it was asked for.
+            lay = s.post(f"{BASE}/api/pitch/layout", timeout=30, json=c["panel"]).json()["layout"]
+            r = {"moved_m": float(np.hypot(lay["dx"], lay["dy"])),
+                 "turn_deg": lay["deg"], "scale": lay["scale"]}
         after = s.get(f"{BASE}/api/pitch/calibrated/0", timeout=30).json()
-        s.post(f"{BASE}/api/pitch/adjust/undo", timeout=30)
+        # A drag appended a correction, so pop it. The panel rewrote its own single one, so
+        # restore what it held — which removes it outright if it held nothing.
+        if c.get("drag"):
+            s.post(f"{BASE}/api/pitch/adjust/undo", timeout=30)
+        else:
+            s.post(f"{BASE}/api/pitch/layout", timeout=30, json=base["layout"])
 
         dm = abs(r["moved_m"] - c["moved_m"])
         dd = abs(r["turn_deg"] - c["turn_deg"])

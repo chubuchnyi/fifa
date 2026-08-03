@@ -370,49 +370,58 @@ white pixels, so it is the honest score of your drag."></span>
     <!-- The orient panel's control surface, aimed at the pitch layout (#127). The drag is only
          ever as fine as the perspective under the cursor — near the top of a broadcast frame one
          pixel is tens of centimetres of lawn — so the last part of the registration is typed in
-         metres and degrees instead of gestured. Same edit, same POST, same undo: each control
-         previews live and commits on release, so one gesture is still one correction. -->
+         metres and degrees instead of gestured.
+
+         These four say where the layout should END UP, about the pitch centre. A drag is a
+         gesture and appends; the panel is a state and rewrites its own single correction, which
+         is what lets the sliders hold a value instead of springing back to 0/1 after each
+         commit. Only 4 numbers because the pitch is a plane: Z=0 *defines* the world the players
+         stand on, and out-of-plane tilt is already pinned by the vanishing points of the painted
+         lines. Slide, yaw and size are exactly the freedom a line-fit solve really has. -->
     <div class="cam-panel layout-panel" x-cloak
          x-show="showLayout && showPitch && pitchSource === 'calib'">
       <div class="cam-hd">
         <span>pitch layout</span>
         <span class="spacer"></span>
-        <button @click="resetNudge()" title="drop the pending nudge — does not undo a commit">clear</button>
+        <button @click="revertPanel()" x-show="panelPending"
+                title="drop the uncommitted change — back to the values on the server">revert</button>
+        <button @click="neutralPanel()" x-show="panelSet"
+                title="commit 0 / 0 / 0° / x1 — removes this panel's correction">neutral</button>
         <button @click="undoLayout()" x-show="pitchAdjusted"
-                title="take back the last committed nudge or drag">undo</button>
+                title="take back the last committed drag or panel value">undo</button>
       </div>
       <div class="cam-sec">slide (metres)</div>
       <template x-for="c in layoutTr" :key="c.k">
         <div class="cam-row">
           <label x-text="c.label" :title="c.hint"></label>
           <input type="range" :min="c.min" :max="c.max" :step="c.step"
-                 x-model.number="layoutNudge[c.k]"
-                 @input="onNudge('move')" @change="commitNudge('move')" />
+                 x-model.number="layoutPanel[c.k]"
+                 @input="rebuildOverlay()" @change="commitPanel()" />
           <input class="cam-num" type="number" :min="c.min" :max="c.max" :step="c.step"
-                 x-model.number="layoutNudge[c.k]"
-                 @input="onNudge('move')" @change="commitNudge('move')" />
+                 x-model.number="layoutPanel[c.k]"
+                 @input="rebuildOverlay()" @change="commitPanel()" />
         </div>
       </template>
-      <div class="cam-sec">turn + size (about the square)</div>
+      <div class="cam-sec">turn + size (about the pitch centre)</div>
       <div class="cam-row">
-        <label title="spin the layout about the square handle">turn °</label>
-        <input type="range" min="-20" max="20" step="0.1" x-model.number="layoutNudge.deg"
-               @input="onNudge('turn')" @change="commitNudge('turn')" />
+        <label title="yaw the layout about the centre spot">turn °</label>
+        <input type="range" min="-20" max="20" step="0.1" x-model.number="layoutPanel.deg"
+               @input="rebuildOverlay()" @change="commitPanel()" />
         <input class="cam-num" type="number" min="-20" max="20" step="0.1"
-               x-model.number="layoutNudge.deg"
-               @input="onNudge('turn')" @change="commitNudge('turn')" />
+               x-model.number="layoutPanel.deg"
+               @input="rebuildOverlay()" @change="commitPanel()" />
       </div>
       <div class="cam-row">
-        <label title="grow or shrink the layout about the square handle">size ×</label>
-        <input type="range" min="0.8" max="1.25" step="0.001" x-model.number="layoutNudge.scale"
-               @input="onNudge('turn')" @change="commitNudge('turn')" />
+        <label title="grow or shrink the layout about the centre spot">size ×</label>
+        <input type="range" min="0.8" max="1.25" step="0.001" x-model.number="layoutPanel.scale"
+               @input="rebuildOverlay()" @change="commitPanel()" />
         <input class="cam-num" type="number" min="0.8" max="1.25" step="0.001"
-               x-model.number="layoutNudge.scale"
-               @input="onNudge('turn')" @change="commitNudge('turn')" />
+               x-model.number="layoutPanel.scale"
+               @input="rebuildOverlay()" @change="commitPanel()" />
       </div>
-      <div class="cam-hint">The outline follows every tick and commits when you let go, then the
-        control returns to neutral — so <b>undo</b> still takes back exactly one gesture. Slide
-        and turn are edited one at a time: what you see previewed is what gets committed.</div>
+      <div class="cam-hint">Totals, not nudges: the outline follows every tick, commits when you
+        let go, and the numbers stay where you left them. All four move together — one correction,
+        rewritten in place, so the panel never grows an undo stack of its own.</div>
     </div>
 
     <!-- Stage inspector: the selected stage's StageView (read-only Phase 1) —
@@ -609,7 +618,7 @@ import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
 // (a stale value in the diag panel = the browser served a cached index.html).
-const BUILD_ID = "2026-08-03 · layout nudge panel + two-row toolbar (#127)";
+const BUILD_ID = "2026-08-03 · layout panel holds absolute values (#127)";
 
 // Every API call below ends `if (!r.ok) { ...clear the layer...; return; }`. That is the right
 // shape for "no data on this frame" and exactly the wrong one for "your session died": the overlay
@@ -1003,9 +1012,29 @@ Alpine.data("poseAnnot", () => ({
     _dragPitch: null,         // handle id being dragged, or null
     _dragPitchUV: null,
     _dragPitchFine: false,    // Shift held — 1/4 gain, the answer to "too sensitive"
-    // The typed half of the same edit (#127). `group` says which of the two the preview and the
-    // next commit describe, because one POST carries either a slide or a turn, never both.
-    layoutNudge: { group: "move", dx: 0, dy: 0, deg: 0, scale: 1 },
+    // The typed half of the same edit (#127), and ABSOLUTE: these say where the layout should
+    // sit, not how far to nudge it, which is why they keep their value after a commit. Springing
+    // back to 0/1 was the defect — the pitch moved and the control that moved it read neutral.
+    layoutPanel: { dx: 0, dy: 0, deg: 0, scale: 1 },
+    //: server-confirmed values, so the preview can draw the difference and the sliders can be
+    //: reverted without a round-trip.
+    layoutSaved: { dx: 0, dy: 0, deg: 0, scale: 1 },
+    //: {w2i_bare, pre, post} — the plane map with the panel's own slot removed, so a REPLACEMENT
+    //: of it can be previewed. `pitchW2I` already contains it and cannot be used for that.
+    layoutBasis: null,
+    //: is there an uncommitted difference between the sliders and what the server holds?
+    get panelPending() {
+      const p = this.layoutPanel, q = this.layoutSaved;
+      return Math.abs((p.dx || 0) - q.dx) > 1e-9 || Math.abs((p.dy || 0) - q.dy) > 1e-9
+          || Math.abs((p.deg || 0) - q.deg) > 1e-9
+          || Math.abs((p.scale === undefined ? 1 : p.scale) - q.scale) > 1e-9;
+    },
+    //: does the server hold a panel correction at all? Gates the "neutral" button, which would
+    //: otherwise offer to remove something that is not there.
+    get panelSet() {
+      const q = this.layoutSaved;
+      return !!(q.dx || q.dy || q.deg || Math.abs(q.scale - 1) > 1e-9);
+    },
     // World X runs goal to goal, Y touchline to touchline — so these are the pitch's own axes,
     // not the screen's, which is what "moved N m" has always been reported in.
     layoutTr: [
@@ -1376,6 +1405,13 @@ Alpine.data("poseAnnot", () => ({
       this.pitchAdjusted = !!d.adjusted;
       this.pitchW2I = d.w2i || null;
       this.pitchI2W = d.i2w || null;
+      this.layoutBasis = d.layout_basis || null;
+      // The sliders show scene state, so they are re-read here rather than remembered: a
+      // reload, an undo or a second browser all land on the same numbers.
+      if (d.layout) {
+        this.layoutSaved = { ...d.layout };
+        this.layoutPanel = { ...d.layout };
+      }
       this.rebuildOverlay();
     },
 
@@ -1384,7 +1420,7 @@ Alpine.data("poseAnnot", () => ({
       // Latch the score on the way in, so "worse than when I started" is answerable. Dropping it
       // on the way out keeps the next session honest rather than scoring against a stale bar.
       this._layoutFit0 = this.showLayout ? this.pitchFit : null;
-      this.resetNudge();
+      this.revertPanel();
     },
 
     _mat3(a, b) {
@@ -1474,51 +1510,73 @@ Alpine.data("poseAnnot", () => ({
       return r;
     },
 
-    // The panel's pending nudge, as the same object a drag produces. Null when neutral, so the
-    // overlay falls back to the committed calibration and nothing else.
+    // The panel's B, the port of poseannot/camera.py:plane_similarity_params. Anchored at the
+    // world origin, not at a handle: the handles sit at fixed SCREEN positions, so their world
+    // coordinates move after every edit, and a total measured from them would drift while
+    // nothing had moved.
+    _panelB(p) {
+      const num = (x, d) => (Number.isFinite(x) ? x : d);
+      const th = num(p.deg, 0) * Math.PI / 180, k = num(p.scale, 1);
+      const c = k * Math.cos(th), s = k * Math.sin(th);
+      return [[c, -s, num(p.dx, 0)], [s, c, num(p.dy, 0)], [0, 0, 1]];
+    },
+
+    // The panel's uncommitted change, as the same object a drag produces. Null when the sliders
+    // agree with the server, so the overlay falls back to the committed calibration.
+    //
+    // Rebuilt from `layoutBasis` rather than right-multiplied onto `pitchW2I`: the panel keeps
+    // its slot in the composition, so REPLACING its correction is a right-multiply only when it
+    // happens to be the last one. Mixing drags and typed values in one session is exactly when
+    // it is not — and getting that wrong is a jump on release, the defect #127 exists to remove.
     _layoutPending() {
-      if (!this._layoutReady()) return null;
-      const n = this.layoutNudge;
-      const num = (x, dflt) => (Number.isFinite(x) ? x : dflt);
-      if (n.group === "move") {
-        const dx = num(n.dx, 0), dy = num(n.dy, 0);
-        if (!dx && !dy) return null;
-        const src = this.pitchHandles[0].world;
-        return this._layoutB(false, [src[0] + dx, src[1] + dy]);
-      }
-      const deg = num(n.deg, 0), k = num(n.scale, 1);
-      if (!deg && k === 1) return null;
-      const a = this.pitchHandles[0].world, p = this.pitchHandles[1].world;
-      const v = [p[0] - a[0], p[1] - a[1]];
-      const th = deg * Math.PI / 180, c = k * Math.cos(th), s = k * Math.sin(th);
-      return this._layoutB(true, [a[0] + c * v[0] - s * v[1], a[1] + s * v[0] + c * v[1]]);
+      if (!this._layoutReady() || !this.layoutBasis || !this.panelPending) return null;
+      const { w2i_bare, pre, post } = this.layoutBasis;
+      const w2i = this._mat3(this._mat3(this._mat3(w2i_bare, pre),
+                                        this._panelB(this.layoutPanel)), post);
+      const p = this.layoutPanel, num = (x, d) => (Number.isFinite(x) ? x : d);
+      return {
+        a: this._mat3(w2i, this.pitchI2W),
+        moved: Math.hypot(num(p.dx, 0), num(p.dy, 0)),
+        turn: true, turnDeg: num(p.deg, 0), scale: num(p.scale, 1), fine: false,
+      };
     },
 
-    // Live while the control moves. Slide and turn are edited one at a time because one POST
-    // carries one handle — so what is previewed is always exactly what a commit will store.
-    onNudge(group) {
-      const n = this.layoutNudge;
-      if (n.group !== group) {
-        if (group === "move") { n.deg = 0; n.scale = 1; } else { n.dx = 0; n.dy = 0; }
-        n.group = group;
+    // Release (or Enter in the box) commits. The sliders are NOT zeroed: they are the state
+    // being committed, not a gesture that has been spent.
+    async commitPanel() {
+      if (!this.panelPending) return;
+      const p = this.layoutPanel, num = (x, d) => (Number.isFinite(x) ? x : d);
+      const body = { dx: num(p.dx, 0), dy: num(p.dy, 0),
+                     deg: num(p.deg, 0), scale: num(p.scale, 1) };
+      this.busy = true;
+      try {
+        const r = await fetch("/api/pitch/layout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        if (!r.ok) { this.diag.refresh = `layout failed ${r.status}`; return; }
+        this.lastLayout = { moved_m: Math.hypot(body.dx, body.dy),
+                            turn_deg: body.deg, scale: body.scale };
+        // Both overlays draw through the calibration that just changed. The stance handles are
+        // the honest part: a re-registered pitch takes the players with it.
+        await this.refreshCalibratedPitch();
+        await this.refreshGround();
+      } finally {
+        this.busy = false;
       }
+    },
+
+    // Discard the uncommitted change — local only, so it cannot be confused with undo.
+    revertPanel() {
+      this.layoutPanel = { ...this.layoutSaved };
       this.rebuildOverlay();
     },
 
-    // Release (or Enter in the box) commits, through the same endpoint the drag uses.
-    async commitNudge(group) {
-      const n = this.layoutNudge;
-      const d = n.group === group ? this._layoutPending() : null;
-      // Zero BEFORE the round-trip: adjustLayout redraws through the new calibration, and a
-      // nudge still pending at that moment would be applied on top of itself.
-      n.dx = 0; n.dy = 0; n.deg = 0; n.scale = 1;
-      if (d) await this.adjustLayout(d.turn ? "turn" : "move", d.uv);
-      else this.rebuildOverlay();
-    },
-
-    resetNudge() {
-      this.layoutNudge = { group: this.layoutNudge.group, dx: 0, dy: 0, deg: 0, scale: 1 };
-      this.rebuildOverlay();
+    // Commit 0/0/0°/x1, which on the server drops the panel's correction entirely.
+    async neutralPanel() {
+      this.layoutPanel = { dx: 0, dy: 0, deg: 0, scale: 1 };
+      await this.commitPanel();
     },
 
     // Move the pitch model onto the painted lines. The client reports only where the cursor

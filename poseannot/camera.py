@@ -384,6 +384,33 @@ def plane_similarity(
     return b
 
 
+def plane_similarity_params(dx: float, dy: float, deg: float, scale: float) -> np.ndarray:
+    """The typed panel's ``B``: slide, yaw and size about the **pitch centre** (#127).
+
+    The drag builds ``B`` from a dropped pixel and so can only rotate about whichever handle is
+    under the cursor; the panel has no cursor, and rotating about a moving handle would make its
+    own readout drift — turn the layout and the "slide" number would change even though nothing
+    slid. Anchoring at the world origin instead makes the four numbers a *decomposition* of
+    ``B`` rather than a history of gestures, which is what lets the panel show totals that hold
+    still. It is the same subgroup either way, so the ``PlaneTransformPayload`` guarantee is
+    untouched: this is a similarity, hence ``K[r₁ r₂ t] @ B`` is again a legal camera.
+    """
+    th = np.radians(float(deg))
+    c, s = float(scale) * np.cos(th), float(scale) * np.sin(th)
+    return np.array([[c, -s, float(dx)], [s, c, float(dy)], [0.0, 0.0, 1.0]])
+
+
+def decompose_similarity(b: np.ndarray) -> dict[str, float]:
+    """``plane_similarity_params`` read backwards, so the panel can rehydrate from the scene."""
+    b = np.asarray(b, dtype=float)
+    return {
+        "dx": float(b[0, 2]),
+        "dy": float(b[1, 2]),
+        "deg": float(np.degrees(np.arctan2(b[1, 0], b[0, 0]))),
+        "scale": float(np.hypot(b[0, 0], b[1, 0])),
+    }
+
+
 def plane_adjustment(corrections, frame: int) -> np.ndarray:
     """The composed ``B`` for ``frame`` from every enabled FIELD_CALIBRATION correction.
 

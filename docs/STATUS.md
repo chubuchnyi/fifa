@@ -66,15 +66,15 @@ One line per item. Reasoning, measurements and root causes live in
 | #60 | Re-run overlays + verify acceptable alignment | **CLOSED 2026-08-03** — the eye-check passed and closed #61/#119 with it |
 | #112 | Drag the pitch layout to correct the homography | **works** (user, 2026-08-03); its controls do not — split out as #127 |
 | #127 | The layout gizmo is twitchy and shows nothing until you let go | fixed 2026-08-03 — live preview + shift-fine + typed panel; **awaiting the user's hands** |
+| #128 | A hand-registered pitch layout never reaches the render | opened 2026-08-03, **not started** — `FIELD_CALIBRATION` is stored and applied in poseannot, and read by nothing in `src/pitch3d/` |
 | #125 | A run that solved no calibration frame still exported a finished scene | gate fixed 2026-08-01; **why PnLCalib solved nothing on that pod is still open** (needs the pod) |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
 | #108 | R3's line-constraint path is a no-op on this clip | pending — needs a log line at the decision first, then a run |
 | #45 | F2: raw video → frame range → auto `scene.json` behind the GUI | **BLOCKED on a user decision** (where it runs). Do NOT stub a fake generate button |
-| #107 | Render the measured camera, not the synthetic one | done 2026-07-31 |
-| #117 | Frame preprocessing to feed auto-calibration | research done 2026-07-31; its focal reading superseded by #119 |
-| #122 | An expired session silently degraded the UI instead of asking for a re-login | done 2026-07-31 |
-| #124 | The pitch-layout drag was unverifiable | done 2026-08-01 |
+
+**Closed, detail in findings:** #107 measured camera (07-31) · #117 frame preprocessing (07-31, its
+focal reading superseded by #119) · #122 expired session (07-31) · #124 undiscoverable drag (08-01).
 
 **The calibration thread is closed.** #61, #119 and #60 all passed the user's eye on 2026-08-03,
 after the #120 corrections-mirror fix made the overlay judgeable at all. What is left of #112 is
@@ -83,8 +83,13 @@ the orient panel has — drag with live preview, and typed metres/degrees — he
 `scripts/check_layout_preview.py` (10/10, 0.0000 px). The toolbar is two wrapping rows because one
 nowrap row overflowed the moment the calibration badges appeared.
 
-**Not acted on, for the user to judge:** the hand-registration currently stored on frame 0 reads
-`fit 2.8 px · ok 246 / off 65`, where the untouched solve reads `1.0 px · 278 / 25`. It may well be
+The panel's four numbers are **absolute**: a drag is a gesture and appends, so it must zero itself;
+the panel states where the layout should sit and rewrites one correction in place. Springing back
+to 0/1 after each commit was the defect. It previews from `layout_basis`, not `w2i` — its
+correction keeps its slot among the drags, so replacing it is not a plain right-multiply.
+
+**Not acted on, for the user to judge:** the hand-registration stored on frame 0 (11 drags) reads
+`fit 3.0 px · ok 279 / off 0`, where the untouched solve reads `1.0 px · 278 / 25`. It may well be
 deliberate — their eye is ground truth here, not the residual, which is scored against the same
 lines that placed the model.
 
