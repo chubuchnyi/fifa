@@ -58,9 +58,13 @@ Run everything from the repo root. Local env is `.venv` — CPU/core work needs 
 .venv/bin/mypy
 
 # end-to-end CLI (the real pipeline entrypoint; see app/cli.py for args)
-.venv/bin/python -m pitch3d.app.cli --clip <mp4> --frames 48 --out-dir out/run --export scene
+.venv/bin/python -m pitch3d.app.cli --clip <mp4> --frames 48 --out-dir out/run \
+  --detector rfdetr --tracker bytetrack --device cpu --render overlay --export gltf
+# `--export scene` is NOT a value — the choices are fake|gltf|threejs (`gltf` writes scene.json).
 # `--real-calib` is NOT a CLI flag — it is scripts/demo_video.sh's (on by default there) and
 # needs the pod-only PnLCalib weights. The stitch flag is `--no-stitch`; `--stitch` is not real.
+# Adding `--calibrator keypoints` locally raises NotImplementedError: it needs a backend injected
+# via `--calibrator-backend` (ADR-0006). Verified end-to-end on the target clip 2026-08-02.
 PYTHONPATH=src python3 -m pitch3d --out-dir out/dryrun   # fakes-only dry run
 
 # R2 camera propagation (#94): default 8, `0` = per-frame (the pre-R2 control side of the A/B).
