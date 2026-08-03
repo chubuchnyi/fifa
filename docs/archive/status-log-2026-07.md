@@ -14,6 +14,29 @@ in `docs/STATUS.md`; per-item detail in `docs/findings/`.
 
 ## 6. Progress log (newest first)
 
+- **2026-08-03 (the 2026-08-01 remediation plan, closed out — moved here from STATUS §5)** — the
+  plan was: (1) agent entry point; (2) pre-commit + CI; (3) one golden test on real measured data;
+  (4) collapse the "6" entry points onto `controller.Application`. **Steps 1–3 done; step 4 retired
+  2026-08-02, not completed.**
+  - **Step 4's premise did not survive being measured.** There was no 6-way duplication to collapse,
+    and `load_physics_config()` had already solved the config half. What was real — the
+    hand-maintained gate mirror in `poseannot/rerun.py` — is now held by
+    `tests/unit/test_gate_chain_parity.py` instead of by a refactor.
+  - **The lesson outlives the step.** STATUS and CLAUDE.md were themselves a source of the "agent
+    gets confused" symptom: four debt bullets, two of them wrong, and no way to tell which without
+    re-reading the code. Prefer claims a test can hold. It recurred twice on 08-03 — #125's row
+    claimed its root cause needed a pod, and #128's said the export was the last gap when the
+    sidecar was — and once on 08-03 in my own reading of #131, where I called carried homographies
+    "garbage counted as solved" before `pipeline.py` showed that conf 0 is a documented fallback.
+  - **Step 3 landed against the camera solve**, not the 30-frame clip originally sketched: the clip
+    is not committed (too large) so a test over it cannot run in CI, whereas the 7 kB fit derived
+    from it can. The real-video path was measured — 58.63 s for 30 frames, 19 subjects, CPU — and is
+    a viable opt-in local test, but it is not written. That is the honest gap: the golden test
+    proves the camera is real, not that the export downstream of it is.
+  - **Step 2 is a mechanical fence only.** It stops new lint debt and proves the package installs
+    and imports from a clean checkout. It does **not** make the suite meaningful — until step 3 is
+    widened, a green CI still means "the fakes agree with each other".
+
 - **2026-08-01 (#125 — there was no cache; the run that failed was mine, and it exported a scene
   built on `eye(3)` without a word of complaint)** —
   User: *"возьмись за #125"*.

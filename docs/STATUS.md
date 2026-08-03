@@ -52,15 +52,27 @@ Best finals: `out/kitzones_pod/sideline_t21_pinned8.mp4` (sideline) ·
 segments, the clip is calm dark-green panels with gold text), and player-silhouette recovery — the
 root cause that the stage-14 shadow pin can only mitigate.
 
+**Vertical fan clip, run 2026-08-03 — completed, and the output is unusable.** Detail + all numbers:
+[`findings §3.3`](findings/open-items-2026-08-01.md). Short version: raw, the frame is 37% grass
+starting at y=1088 and PnLCalib solves 0/8; the new `scripts/broadcast_crop.py` measures the grass
+band and crops to it (84.2% grass) and the same frames solve 8/8 at conf 0.47–0.56. But past frame
+~155 the fan zooms in until only the goal mouth is left, PnLCalib stops solving, and the calibrator
+carries the stale homography onto zoomed pixels — **43% of the 355 frames**, roots 3080 m apart, one
+subject at 100 416 m/s. Not fixable by cropping: #119's one-camera result is broadcast-specific
+(tripod = pan/tilt only), and a handheld phone that translates *and* zooms has no one camera
+(`realizable: False`, 142 px). Usable window ≈ frames 0–155 (~5 s) — **worth a render? user's call.**
+Two real defects fell out of it and are worth more than the clip: #130 (fixed) and #131.
+
 **Before the next pod run (audited 2026-08-03).** The chain itself is proven — `out/pod_0801b` is
 23 subjects, 60/60 solved. #128 is now wired, so the render carries the layout registration; #129
 (the rigid camera) is not, and remains the one eye-approved correction the chain still drops.
 Then: all 5 pods are EXITED; start one of the
 four mounting `/workspace`, **not** `jd9syxkau3rqzm` (mounts `/runpod` — only `pod_real_e2e.sh`
 resolves the volume by content, `pod_finish_batch.sh:50` hardcodes `cd /workspace/fifa`); reconcile
-the stale pod mirror against `87889c5`; and confirm `repos/PnLCalib` is really staged, since
-`pod_real_e2e.sh:78` falls back to the proxy calibrator (#203 depth collapse) by printing a line,
-not by failing.
+the stale pod mirror against `87889c5` (**plus** the hand-patched `src/pitch3d/app/cli.py` from the
+#130 hotfix — `git checkout --` it before pulling); and confirm `repos/PnLCalib` is really staged,
+since `pod_real_e2e.sh:78` falls back to the proxy calibrator (#203 depth collapse) by printing a
+line, not by failing.
 
 Lever-by-lever history: [`archive/status-log-2026-07.md`](archive/status-log-2026-07.md).
 
@@ -78,6 +90,8 @@ One line per item. Reasoning, measurements and root causes live in
 | #127 | The layout gizmo is twitchy and shows nothing until you let go | fixed 2026-08-03 — live preview + shift-fine + typed panel; **awaiting the user's hands** |
 | #128 | Hand-made calibration never reaches the render | **CLOSED 2026-08-03** — the export reads `FIELD_CALIBRATION` *and* the annotator's sidecar. Verified on the real scene: 11 drags merged, both camera halves agree 0.0000 px, pitch moves 63–207 px |
 | #129 | `apply_rigid_camera.py` (the one camera, #119) is called by no pod script | opened 2026-08-03, **not started** — split out of #128. The other eye-approved correction still lives past the end of the chain |
+| #130 | A subject shorter than the clip sank the whole run (`IndexError` after 22 min of GPU) | **CLOSED 2026-08-03** — the observation frame is now the middle of that subject's *own* track. Mutation-checked regression test |
+| #131 | A run reports `confidence mean=0.28` and never says 43% of it is *carried*, not measured | opened 2026-08-03, **not started** — report, don't gate: the drift judgement is deliberately the caller's, but no caller is given the number |
 | #125 | A run that solved no calibration frame still exported a finished scene | **CLOSED 2026-08-01**, gate *and* root cause: it reconstructed a different video (`PITCH3D_CLIP` unset); now required. Re-run `out/pod_0801b` = 23 subjects, 60/60 solved |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
@@ -93,11 +107,6 @@ ergonomics, not geometry: #127, now fixed and awaiting the same eye. The layout 
 the orient panel has — drag with live preview, and typed metres/degrees — held together by
 `scripts/check_layout_preview.py` (10/10, 0.0000 px). The toolbar is two wrapping rows because one
 nowrap row overflowed the moment the calibration badges appeared.
-
-The panel's four numbers are **absolute**: a drag is a gesture and appends, so it must zero itself;
-the panel states where the layout should sit and rewrites one correction in place. Springing back
-to 0/1 after each commit was the defect. It previews from `layout_basis`, not `w2i` — its
-correction keeps its slot among the drags, so replacing it is not a plain right-multiply.
 
 **Not acted on, for the user to judge:** the hand-registration stored on frame 0 (11 drags) reads
 `fit 3.0 px · ok 279 / off 0`, where the untouched solve reads `1.0 px · 278 / 25`. It may well be
@@ -121,34 +130,21 @@ Honest baseline, so the next session does not mistake green for safe.
 | Gate-chain mirrors | **2, now guarded** | `controller.run_reconstruction` (16 gates) vs `poseannot/rerun.py` (12 + 4 declared provider-blocked). In sync; `tests/unit/test_gate_chain_parity.py` fails if they drift |
 | Calibration backends | **4 paths, 1 wired** | only `KeypointFieldCalibrator` is in `wiring.py`; `CameraModuleFieldCalibrator`, `PnLCalibBackend` and the `*_rigid_camera.py` scripts are parallel routes |
 
-Remediation plan agreed 2026-08-01: (1) agent entry point — this split; (2) pre-commit + CI;
-(3) one golden test on real measured data; (4) collapse the 6 entry points onto
-`controller.Application`. **Steps 1–3 done. Step 4 was retired 2026-08-02, not completed.**
+The 2026-08-01 remediation plan is closed out: steps 1–3 (agent entry point · pre-commit + CI · one
+golden test on real data) done, step 4 (collapse the "6" entry points) **retired 2026-08-02, not
+completed** — its premise did not survive measurement. Full write-up, and the lesson about this
+file's own claims, in [`archive/status-log-2026-07.md`](archive/status-log-2026-07.md) under
+2026-08-03.
 
-Step 4's premise did not survive being measured: there was no 6-way duplication to collapse, and
-`load_physics_config()` had already solved the config half. What was real — the hand-maintained
-gate mirror in `poseannot/rerun.py` — is now held by a parity test instead of a refactor. The
-lesson outlives the step: this file and CLAUDE.md were themselves a source of the "agent gets
-confused" symptom — four debt bullets, two wrong, and no way to tell which without re-reading the
-code. Prefer claims a test can hold. (Twice more on 08-03: #125's row claimed its root cause
-needed a pod, and #128's said the export was the last gap when the sidecar was.)
-
-Genuinely open, and *not* addressed by any of steps 1–4:
+Genuinely open, and *not* addressed by any of those steps:
 
 - **9 exported stubs raise `NotImplementedError`** — see CLAUDE.md. Construct fine, fail on call.
 - **`BOWL_*` stadium geometry** in `core/scene/cameras.py` has no config override path.
 - **`anim_export.py` (845 lines) has no direct test** of its export logic, only a manifest
   contract check. It is the widest untested surface left in the user-facing path.
-
-Step 3 landed against the camera solve, not the 30-frame clip originally sketched: the clip is
-not committed (too large) so a test over it cannot run in CI, whereas the 7 kB fit derived from
-it can. The real-video path was measured — 58.63 s for 30 frames, 19 subjects, CPU — and is a
-viable opt-in local test, but it is not written. That is the honest gap in step 3: the golden
-test proves the camera is real, not that the export downstream of it is.
-
-Step 2 is a *mechanical* fence only. It stops new lint debt and proves the package installs and
-imports from a clean checkout. It does **not** make the suite meaningful — that is step 3, and
-until then a green CI still means "the fakes agree with each other".
+- **CI is a mechanical fence, not evidence.** It stops new lint debt and proves a clean checkout
+  installs; it does not make the suite meaningful. The golden test proves the *camera* is real, not
+  the export downstream of it — a green CI still largely means "the fakes agree with each other".
 
 ## 6. Key references
 

@@ -4,8 +4,17 @@
 The calibrator wants a frame that is mostly pitch. A vertical fan clip is mostly stand, sky and
 scoreboard, with the pitch as a band across part of it — PnLCalib then finds too few keypoints and
 the #125 gate refuses the run. Measured on ``14604731_1080_1920_30fps.mp4`` (1080x1920, 355 f):
-grass covers 27.8% of the frame and only starts at y=1276. Raw, the pipeline solved 0/8 calibration
-frames; cropped to the grass band it solved 8/8 at confidence 0.524.
+grass covers 37.2% of the frame and only starts at y=1088. Raw, the pipeline solved 0/8 calibration
+frames; through this script's own crop (``1080x608+0+1200``, 84.2% grass) it solved 8/8 at
+confidence 0.473–0.558. That crop frames the penalty box, both goalposts and the goal line — the
+keypoints the calibrator looks for. On a clip that is *already* broadcast this is a no-op by
+construction, and measured as one: the target clip returns ``1920x1080+0+0`` with grass unchanged
+at 53.2%.
+
+A crop cannot rescue a clip whose *camera* moves, though: past frame ~155 this one zooms in until
+only the goal mouth is left, PnLCalib stops solving, and the calibrator carries the last homography
+forward onto zoomed pixels — 43% of the full 355-frame run, and roots kilometres out. See
+``docs/findings/open-items-2026-08-01.md`` (#131).
 
 The band is *measured*, not assumed — a fan can hold the phone any way — and the measurement is
 overridable, because a clip whose pitch is half-occluded by a crowd will mis-measure and the
