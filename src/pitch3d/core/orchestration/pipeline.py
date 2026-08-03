@@ -66,6 +66,26 @@ def require_solved_calibration(cal: FieldCalibration, *, min_solved: int = 1) ->
     return solved
 
 
+def describe_calibration_solve(cal: FieldCalibration) -> str:
+    """One line saying how much of a calibration was measured rather than carried (#131).
+
+    ``require_solved_calibration`` deliberately leaves the drift judgement to the caller — but no
+    caller was given the number to judge. The only calibration figure a run printed was the mean
+    confidence over *all* frames, which is a mean over a bimodal distribution: on the vertical fan
+    clip it read 0.28 while 43% of frames carried a stale homography, and the two modes were 0.421
+    (roots sane) against 0.000 (roots kilometres out). The mean here is over solved frames only,
+    for the same reason.
+    """
+    conf = np.asarray(cal.confidence, dtype=float)
+    ok = conf > 0.0
+    n, total = int(ok.sum()), int(conf.size)
+    line = f"{n}/{total} frame(s) measured, {total - n} carried (confidence 0)"
+    if n:
+        line += (f" · over measured frames: mean {conf[ok].mean():.3f}, "
+                 f"min {conf[ok].min():.3f}, max {conf[ok].max():.3f}")
+    return line
+
+
 @dataclass
 class ReconstructionResult:
     """Everything the reconstruction stages produce for one clip (the proposal layer)."""

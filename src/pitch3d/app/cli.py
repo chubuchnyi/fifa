@@ -23,7 +23,7 @@ from ..adapters.io import FFmpegIngestor
 from ..core.agent import EditBudget, auto_correct
 from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.engine import make_offset, make_smoothing
-from ..core.orchestration import StitchConfig
+from ..core.orchestration import StitchConfig, describe_calibration_solve
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
 from ..core.scene.layers import CorrectionTarget, TargetKind
@@ -239,6 +239,7 @@ def run_dry_run(
     mid_frame = int(_s0_frames[len(_s0_frames) // 2])
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
+    print(f"== calibration: {describe_calibration_solve(scene.field.calibration)}")
     sr = app.stitch_report(scene_id)
     if sr is not None:
         print(f"== continuity: {sr.n_in}→{sr.n_out} tracklets "

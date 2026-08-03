@@ -10,7 +10,7 @@ from .continuity import (
     stitch_tracks,
     stitch_tracks_with_report,
 )
-from .pipeline import ReconstructionPipeline, ReconstructionResult
+from .pipeline import ReconstructionPipeline, ReconstructionResult, describe_calibration_solve
 from .stages import RECON_ORDER, Stage, StageRun, clip_hash, run_cached
 
 __all__ = [
@@ -24,6 +24,7 @@ __all__ = [
     "assemble_scene",
     "ballistic_z",
     "clip_hash",
+    "describe_calibration_solve",
     "lift_ball_to_3d",
     "resolve_scene",
     "run_cached",
