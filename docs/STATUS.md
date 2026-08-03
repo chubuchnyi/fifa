@@ -14,7 +14,7 @@
   not survive a session; this file does.
 -->
 
-**Last updated:** 2026-08-01 · **Repo:** /home/chubuchnyi/AVATAR · **Target clip:**
+**Last updated:** 2026-08-03 · **Repo:** /home/chubuchnyi/AVATAR · **Target clip:**
 `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -65,7 +65,7 @@ One line per item. Reasoning, measurements and root causes live in
 | #119 | Re-solve the calibration as ONE camera, not 60 free homographies | **CLOSED 2026-08-03 by the user's eye** |
 | #60 | Re-run overlays + verify acceptable alignment | **CLOSED 2026-08-03** — the eye-check passed and closed #61/#119 with it |
 | #112 | Drag the pitch layout to correct the homography | **works** (user, 2026-08-03); its controls do not — split out as #127 |
-| #127 | The layout gizmo is twitchy and shows nothing until you let go | fixed 2026-08-03 — live preview + shift-fine; **awaiting the user's hands** |
+| #127 | The layout gizmo is twitchy and shows nothing until you let go | fixed 2026-08-03 — live preview + shift-fine + typed panel; **awaiting the user's hands** |
 | #125 | A run that solved no calibration frame still exported a finished scene | gate fixed 2026-08-01; **why PnLCalib solved nothing on that pod is still open** (needs the pod) |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
@@ -78,7 +78,15 @@ One line per item. Reasoning, measurements and root causes live in
 
 **The calibration thread is closed.** #61, #119 and #60 all passed the user's eye on 2026-08-03,
 after the #120 corrections-mirror fix made the overlay judgeable at all. What is left of #112 is
-ergonomics, not geometry: #127, now fixed and awaiting the same eye.
+ergonomics, not geometry: #127, now fixed and awaiting the same eye. The layout has both editors
+the orient panel has — drag with live preview, and typed metres/degrees — held together by
+`scripts/check_layout_preview.py` (10/10, 0.0000 px). The toolbar is two wrapping rows because one
+nowrap row overflowed the moment the calibration badges appeared.
+
+**Not acted on, for the user to judge:** the hand-registration currently stored on frame 0 reads
+`fit 2.8 px · ok 246 / off 65`, where the untouched solve reads `1.0 px · 278 / 25`. It may well be
+deliberate — their eye is ground truth here, not the residual, which is scored against the same
+lines that placed the model.
 
 ## 5. Health (measured 2026-08-01)
 
