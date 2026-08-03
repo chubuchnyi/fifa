@@ -61,10 +61,11 @@ One line per item. Reasoning, measurements and root causes live in
 
 | ID | Item | Status |
 |----|------|--------|
-| #61 | Camera-calibration accuracy (offset + ~3× scale) | root cause exact + fixed for every clip 2026-08-01 — **awaiting eye** |
-| #119 | Re-solve the calibration as ONE camera, not 60 free homographies | done 2026-07-31 — **awaiting eye** |
-| #112 | Drag the pitch layout to correct the homography | done 2026-07-31 — **awaiting eye** |
-| #60 | Re-run overlays + verify acceptable alignment | pending — the eye-check that closes the calibration thread |
+| #61 | Camera-calibration accuracy (offset + ~3× scale) | **CLOSED 2026-08-03 by the user's eye** |
+| #119 | Re-solve the calibration as ONE camera, not 60 free homographies | **CLOSED 2026-08-03 by the user's eye** |
+| #60 | Re-run overlays + verify acceptable alignment | **CLOSED 2026-08-03** — the eye-check passed and closed #61/#119 with it |
+| #112 | Drag the pitch layout to correct the homography | **works** (user, 2026-08-03); its controls do not — split out as #127 |
+| #127 | The layout gizmo is twitchy and shows nothing until you let go | open 2026-08-03 — only the handle tracks the cursor; the outline redraws after pointerup, so the drag cannot be modulated |
 | #125 | A run that solved no calibration frame still exported a finished scene | gate fixed 2026-08-01; **why PnLCalib solved nothing on that pod is still open** (needs the pod) |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
@@ -75,8 +76,9 @@ One line per item. Reasoning, measurements and root causes live in
 | #122 | An expired session silently degraded the UI instead of asking for a re-login | done 2026-07-31 |
 | #124 | The pitch-layout drag was unverifiable | done 2026-08-01 |
 
-**Bottleneck:** four items (#61, #119, #112, #60) are built and waiting on a visual verdict. Nothing
-in the calibration thread closes until they are judged — worth batching into one A/B pass.
+**The calibration thread is closed.** #61, #119 and #60 all passed the user's eye on 2026-08-03,
+after the #120 corrections-mirror fix made the overlay judgeable at all. What is left of #112 is
+ergonomics, not geometry: #127.
 
 ## 5. Health (measured 2026-08-01)
 
@@ -84,7 +86,7 @@ Honest baseline, so the next session does not mistake green for safe.
 
 | Signal | Measured | Note |
 |--------|----------|------|
-| Test suite | **1117 passed / 14 skipped / 0 failed in 77 s** | fakes-backed (`conftest.py` says so). The old ">5 min" here was wrong — no reason to avoid the full run |
+| Test suite | **1125 passed / 14 skipped / 0 failed in 71 s** (re-measured 2026-08-02) | fakes-backed (`conftest.py` says so). The old ">5 min" here was wrong — no reason to avoid the full run |
 | Real-measurement coverage | **1 file, 8 assertions** | `tests/e2e/test_golden_real_camera.py` over the committed 7 kB camera fit — the only non-fake evidence in the suite, and mutation-checked. Everything downstream of the camera (detection, pose, export) is still fakes-only |
 | Untested user-facing paths | ~6000 lines | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
 | Lint | **152 ruff errors** (was 311) | 87 E501 · 45 E702 · tail. 148 auto-fixed 2026-08-01; UP042 switched off (its fix changes enum serialisation) |
