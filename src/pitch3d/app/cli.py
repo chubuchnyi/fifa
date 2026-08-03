@@ -233,7 +233,10 @@ def run_dry_run(
         foot_position_provider=foot_position_provider,
     )
     scene = app.get_scene(scene_id)
-    mid_frame = int(scene.subjects[0].proposal.pose.frames[n // 2])
+    # Subject 0 need not span the clip — R-6 keeps a short track rather than dropping it — so the
+    # observation frame is the middle of that subject's OWN track, not the middle of the clip.
+    _s0_frames = scene.subjects[0].proposal.pose.frames
+    mid_frame = int(_s0_frames[len(_s0_frames) // 2])
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
     sr = app.stitch_report(scene_id)
