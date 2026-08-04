@@ -14,7 +14,7 @@
   not survive a session; this file does.
 -->
 
-**Last updated:** 2026-08-03 · **Repo:** /home/chubuchnyi/AVATAR · **Target clip:**
+**Last updated:** 2026-08-04 · **Repo:** /home/chubuchnyi/AVATAR · **Target clip:**
 `samples/video/Colombia-1-0-Congo-DR1080p.mp4`
 
 ---
@@ -92,6 +92,7 @@ One line per item. Reasoning, measurements and root causes live in
 | #129 | `apply_rigid_camera.py` (the one camera, #119) is called by no pod script | opened 2026-08-03, **not started** — split out of #128. The other eye-approved correction still lives past the end of the chain |
 | #130 | A subject shorter than the clip sank the whole run (`IndexError` after 22 min of GPU) | **CLOSED 2026-08-03** — the observation frame is now the middle of that subject's *own* track. Mutation-checked regression test |
 | #131 | A run reports `confidence mean=0.28` and never says 43% of it is *carried*, not measured | **CLOSED 2026-08-03** — every run now prints `N/T measured, M carried`, mean over measured frames only. Report, not gate: the drift judgement stays the caller's |
+| #132 | Player crossings break ByteTrack IDs and fuse per-crop poses (occlusion) | surveyed 2026-08-04 — masks-not-boxes has published wins (McByte +13 HOTA on SoccerNet; PromptHMR mask-prompted SMPL-X); candidates + license flags in [`findings/occlusion-pose-research-2026-08-04.md`](findings/occlusion-pose-research-2026-08-04.md); **user to pick direction** |
 | #125 | A run that solved no calibration frame still exported a finished scene | **CLOSED 2026-08-01**, gate *and* root cause: it reconstructed a different video (`PITCH3D_CLIP` unset); now required. Re-run `out/pod_0801b` = 23 subjects, 60/60 solved |
 | #120 | Stored scenes declare a world frame they are not in | body mirror 2026-07-31; **corrections mirror 2026-08-01** (user saw it, measured 0.114→0.323); stale `handedness` labels remain |
 | #109 | `jersey_numbers.py` must crop from the real camera at native resolution | pending, unblocked by #107 |
