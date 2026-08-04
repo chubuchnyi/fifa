@@ -107,8 +107,41 @@ are the real files.) Two consequences that only a real load could show:
 - **`dinov2_vitl14_pretrain.pth` is optional in the same way.** The run printed "Not using DINOv2
   weight"; `image_encoder.backbone` (343 tensors, 304.4 M params) comes from the checkpoint.
 - The gated classic SMPL is 9 buffers / 4.9 M params (`shapedirs`, `v_template`, `J_regressor`,
-  `posedirs`, `lbs_weights`, …) — pure body-model data, no learned weights, so the blocker is a
-  licence wall rather than a missing part of the network.
+  `posedirs`, `lbs_weights`, …) — pure body-model data, no learned weights. See below: it turns
+  out not to block us at all.
+
+## The gated SMPL does not block a run (`--forward`)
+
+`data/body_models/smpl` does not exist on this machine, and the image model still runs:
+
+```
+.venv/bin/python scripts/check_prompthmr_weights.py --forward
+SMPL_NEUTRAL.pkl present : False        forward pass : OK
+rotmat (2,22,3,3) · transl (2,3) · betas (2,10) · features (2,2,1024)   all finite
+mask on vs off : max |d rotmat| = 0.1666
+```
+
+Two independent reasons the gate is not load-bearing:
+
+1. **Our path never reads the classic-SMPL outputs.** `PHMR.process_output` unconditionally
+   computes `smpl_vertices/joints/j3d` (`phmr.py:142-153`), but the only consumers in the repo
+   are `evaluator.py` and `datasets/{emdb,test}_dataset.py` — benchmark code. `phmr_vid.py`
+   takes `rotmat`, `transl`, `betas`, `features` and nothing else.
+2. **The checkpoint already carries the whole neutral SMPL** — `v_template (6890,3)`,
+   `shapedirs (6890,3,10)`, `posedirs (207,20670)`, `J_regressor (24,6890)`,
+   `lbs_weights (6890,24)`, `parents`, faces. `SMPL_NEUTRAL.pkl` is read only to *shape* buffers
+   that `load_state_dict` then overwrites, so a stub sized from the checkpoint is exact.
+
+`rotmat` is `(N, 22, 3, 3)` = global orient + **21** body joints — our `N_SMPLX_BODY_JOINTS`
+(`core/scene/motion.py:19`) confirmed against a running model, not just against their source.
+
+And the mask prompt is live end to end, not merely present in the weights: flipping
+`mask_prompt` on the same image, boxes and keypoints moves the predicted rotations. The input
+here is noise, so **0.1666 says "connected", not "better"** — the real A/B is on the clip.
+
+**Licence caveat.** Technically unblocked ≠ licence-clear: the SMPL body model is MPI-licensed
+wherever the bytes come from, and PromptHMR is research-terms anyway. Registration is a
+ship-time task, not a prerequisite for measuring whether this helps.
 
 ## Fit to our seams
 
@@ -128,9 +161,9 @@ are the real files.) Two consequences that only a real load could show:
 
 ## What will bite (found by reading their code, not by running it)
 
-1. **Gated classic SMPL blocks any run.** `PHMR.__init__` constructs `SMPL('data/body_models/smpl')`
-   → needs `SMPL_NEUTRAL.pkl` from smpl.is.tue.mpg.de. We have SMPL-X locally, not this.
-   **Needs the user's registration** (same MPI account family as the SMPL-X one already used).
+1. ~~**Gated classic SMPL blocks any run.**~~ **Withdrawn — measured false.** `PHMR.__init__`
+   does construct `SMPL('data/body_models/smpl')`, but the section above runs a forward pass
+   with that directory absent. Costs ~10 lines of stub in our glue; needs no MPI registration.
 2. **Their SAM2 tracker seeds identities from ONE frame** — first frame with detections, then
    `break`, then pure propagation. Players entering later are never tracked. Concrete reason to
    keep RF-DETR + ByteTrack and take only the mask-prompted HMR.
