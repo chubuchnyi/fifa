@@ -245,7 +245,11 @@ class ByteTrackTracker(Tracker):
         min_track_frames: Tracklets shorter than this are dropped as association blips.
         kit_split: Cut a track in two where its kit colour changes team (#132). Auto-detect plus
             manual override: set ``False`` to get the pre-fix single-identity behaviour back.
-        kit_split_min_run: Frames a kit must hold before it may cut a track.
+        kit_split_min_run: Boxes a kit must hold before it may cut a track. Swept over shot 1 of
+            the target clip: 3 → 0 tracks still changing team, 4 → 1, 5 → 2 (control: 9). 3 wins
+            on an asymmetry, not on the count — a missed swap is 100+ frames of an avatar on the
+            wrong human, an extra cut is one more id on a track that was already broken — and it
+            cuts no track that 4 does not already cut.
         device: Inference device for the default backend.
     """
 
@@ -254,7 +258,7 @@ class ByteTrackTracker(Tracker):
     team_ids: tuple[str, ...] = ("A", "B")
     min_track_frames: int = 1
     kit_split: bool = True
-    kit_split_min_run: int = 4
+    kit_split_min_run: int = 3
     device: str = "cuda"
 
     def info(self) -> ModelInfo:

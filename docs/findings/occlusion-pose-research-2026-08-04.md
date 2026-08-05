@@ -495,6 +495,53 @@ One number is not enough — own-mask IoU cannot tell a *bad fit* from a *fused*
 Metrics 1–3 also run over the window 115–135, not just frame 124, so a lucky single frame cannot
 carry the verdict.
 
+### The tracking fix, built and measured 2026-08-05
+
+`ByteTrackBackend` sampled a track's kit colour from **its first 8 frames only**, so a track that
+picks up a different player mid-way was undetectable by construction — track 97 is scored on
+frames 112–119 and keeps that label while wearing the other kit from 128. `RawTracklet` now also
+carries `appearance_series (T, D)` sampled over the whole span (the same decode pass, just more
+crops), and `split_on_kit_change` cuts a track at a sustained kit change, giving each piece its
+own id. The first piece keeps the original id, so healthy tracks are untouched.
+
+Measured on shot 1 with the **same detections and the same association** in both arms — only the
+split differs, so the delta is the fix and nothing else (`--also-nosplit` writes the control):
+
+| `kit_split_min_run` | player tracks | splits | tracks still changing team |
+|---|---|---|---|
+| off (control) | 38 | — | **9** |
+| **3 (default)** | 56 | 18 | **0** |
+| 4 | 53 | 15 | 1 |
+| 5 | 49 | 11 | 2 |
+| 6 | 49 | 11 | 2 |
+
+Every split was audited back to its parent by exact frame tiling, not by eye-balling counts:
+
+```
+min_run=4, 15 splits from 9 parents -- 8 of them on the --kit-scan swap list, 1 not (track 2)
+  parent   2 -> 6 pieces   parent  15 -> 4 pieces   every other parent -> 2 pieces
+```
+
+- **The one parent `--kit-scan` did not flag is a true positive.** `out/phmr_ab/t2_cut.png`: track
+  2's box sits on a **referee** at frames 38–40, swells to hold both as a Colombia player crosses,
+  and leaves on the player. `--kit-scan` is blind to it because a referee's dark kit classifies as
+  neither team and those frames are skipped — so **9 is a floor, not the count**.
+- **Track 2 shredding into 6–8 pieces is the honest reading of a box that really does wander
+  between people**, not the split rule misfiring. Every other parent yields 2 pieces, and track 15
+  yields 4, matching its three measured kit flips.
+- The one track `min_run=4` misses is 90, whose yellow phase is **3 boxes** (frames 97, 98, 110)
+  against a 104-frame blue phase — real evidence, just short. `min_run=3` catches it and cuts no
+  parent that `min_run=4` did not already cut.
+
+`kit_split=False` restores the previous behaviour (auto-detect plus manual override). Referees are
+excluded from both the centre fit and the cut: their kit is a third colour that would pollute the
+centres and split good officials.
+
+**What this does not do.** Splitting fixes *membership* — each piece is one human wearing one kit —
+but it does not re-link. The yellow player in piece `97→144` and track 85 are the same man under
+two ids. Tracklet stitching (GTA-Link, in the survey above) is the follow-up, and it is now the
+thing standing between us and stable identities.
+
 ### Stage C — the decision, taken 2026-08-05
 
 The first bullet is the one that landed:

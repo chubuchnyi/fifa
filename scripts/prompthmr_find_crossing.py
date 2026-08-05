@@ -50,6 +50,8 @@ parser.add_argument('--also-nosplit', metavar='OUT.npz',
                     help='additionally track the SAME detections with the split off, as a control')
 parser.add_argument('--det-cache', metavar='NPZ',
                     help='reuse detections from here (written on first run); tracker A/Bs are free')
+parser.add_argument('--kit-split-min-run', type=int, default=3,
+                    help='boxes a kit must hold before it may cut a track (#132)')
 args = parser.parse_args()
 
 import cv2  # noqa: E402
@@ -103,7 +105,8 @@ print(f'  {n_det} detections over {len(detections.frames)} frames', flush=True)
 
 print('tracking (ByteTrack) ...', flush=True)
 tracks = ByteTrackTracker(device='cpu', min_track_frames=4,
-                          kit_split=not args.no_kit_split).track(clip, detections)
+                          kit_split=not args.no_kit_split,
+                          kit_split_min_run=args.kit_split_min_run).track(clip, detections)
 players = [t for t in tracks.tracklets if t.cls == 'player']
 print(f'  {len(tracks.tracklets)} tracklets, {len(players)} players'
       f'  (kit_split={"off" if args.no_kit_split else "on"})')
