@@ -52,6 +52,8 @@ Best finals: `out/kitzones_pod/sideline_t21_pinned8.mp4` (sideline) ·
 segments, the clip is calm dark-green panels with gold text), and player-silhouette recovery — the
 root cause that the stage-14 shadow pin can only mitigate.
 
+**IN FLIGHT 2026-08-05: the #129 A/B on pod `tn2gfx13mxu5c6`** (RTX PRO 4500, /workspace, $0.72/hr — **stop it when done**). `run_129_ab.sh` runs `pod_finish_batch.sh` twice, `RIGID_CAMERA=1` then `=0`, camera `sideline`, into `out/n129_on` and `out/n129_off`; log `/workspace/n129_ab.log`, done marker `AB_129_ALL_DONE`. Arm ON already cleared the two things that could have sunk it: calibration is **REAL PnLCalib, 60/60 measured / 0 carried** (conf 0.54), and the rigid camera applied with **0 subjects mirrored** (the scene is already right-handed — #120's fix), focal 4169 px / centre (−2.3, −70.1, 17.2) m matching the golden test. Compare with `bash scripts/ab_compare_render.sh out/n129_off out/n129_on sideline out/cmp_129`.
+
 **Vertical fan clip, run 2026-08-03 — completed, and the output is unusable.** Detail + all numbers:
 [`findings §3.3`](findings/open-items-2026-08-01.md). Short version: raw, the frame is 37% grass
 starting at y=1088 and PnLCalib solves 0/8; the new `scripts/broadcast_crop.py` measures the grass
