@@ -547,8 +547,36 @@ separates humans the tracker fused, the stitcher re-joins fragments of the same 
 
 **What this does not do.** Splitting fixes *membership* — each piece is one human wearing one kit —
 but it does not re-link. The yellow player in piece `97→144` and track 85 are the same man under
-two ids. Tracklet stitching (GTA-Link, in the survey above) is the follow-up, and it is now the
-thing standing between us and stable identities.
+two ids.
+
+#### The split turns out to be what makes the existing stitcher work
+
+`scripts/identity_budget.py --frames 236`, all four arms over the same cached detections:
+
+| `kit_split` | stitch | player ids | merges found |
+|---|---|---|---|
+| off | off | 38 | — |
+| off | **on** | 37 | **1** |
+| on | off | 56 | — |
+| on | **on** | **36** | **14** |
+
+`core/orchestration/continuity.py` has been in the tree all along and is on by default in the CLI,
+and on the unsplit tracks it finds **one** merge in 38 tracks — effectively inert. On the split
+tracks it finds **fourteen**. The reason is its own `require_same_team` gate: a track that covers
+two humans has an averaged, meaningless team label, so it can match nothing. Give the fragments an
+honest team and the stitcher starts doing its job. The two features are not in tension; the split
+is a **precondition** for the stitch.
+
+**Read the counts together, not alone.** 37 (unsplit + stitched) and 36 (split + stitched) look
+alike, but 9 of the 37 are ids covering two humans, and none of the 36 are. Fewer ids is what the
+broken tracker already scored well on, by fusing two players into one.
+
+**The honest remaining gap.** Shot 1 shows a median of **17** plausible players per frame (min 13,
+max 19), so a shot-long budget is ~17–19 identities. We are at **36** — about two ids per player.
+That is the stitcher's conservatism, not a defect: `max_gap = 12` frames (0.4 s) and a strict
+predicted-position gate, because per its own docstring "a missed merge leaves two fragments, but a
+*wrong* merge teleports a body". Widening those gates is the next measurable step, and this table
+is the harness to judge it by.
 
 ### Stage C — the decision, taken 2026-08-05
 
