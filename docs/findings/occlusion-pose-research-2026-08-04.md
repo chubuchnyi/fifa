@@ -301,15 +301,50 @@ numbers above were measured on, is a far easier case that merely scored well on 
 
 ### Stage A — prove the defect exists (this baseline was never measured)
 
-Every number on this page compares candidate *fixes* to each other. Nobody has shown our own
-pipeline breaks on frame 124, so "PromptHMR fixes #132" is currently unfalsifiable.
+Every number on this page compares candidate *fixes* to each other. Nobody had shown our own
+pipeline breaks on frame 124, so "PromptHMR fixes #132" was unfalsifiable.
 
-- **A1, tracking.** Follow tracks 97 and 110 across the crossing window (≈115–135). Do the ids
-  survive, swap, or fragment? ByteTrack is IoU-driven and these two boxes reach 0.649 overlap
-  with identical kit colour.
-- **A2, pose.** Run the production per-crop path — SMPLest-X Huge, `--pose gvhmr --pose-backend
-  pitch3d.adapters.models.smplestx_backend:make` — on frame 124 and score it with the metrics
-  below. This is the control every other arm is measured against.
+#### A1, tracking — **DONE 2026-08-05, and it fails hard**
+
+`scripts/track_continuity.py --window 115 135 --pair 97 110`, reading the same `tracks.npz`:
+
+```
+window 115-135: 19 tracks alive
+  10 of 19 tracks are broken somewhere in the window
+   33  DIED @123      99  DIED @124      85  DIED @127
+  110  BORN @124, DIED @130           113  BORN @128
+   97  gaps at 125,126,127
+box pairs above IoU 0.5:  frame 124, tracks 97 & 110, IoU 0.649, centres 15 px apart
+```
+
+Frame by frame, the two players converge, merge, and the tracker comes apart:
+
+| frame | 97 | 110 | |
+|---|---|---|---|
+| 115–123 | tracked, drifting right | — | one player visible to the tracker |
+| **124** | (1080, 673) | (1081, 658) | **two ids, 15 px apart, IoU 0.649** |
+| 125–127 | **MISSING** | (1077, 676) | 97 is gone for three frames |
+| 128–130 | (1100, 667) | (1070, 667) | they re-separate, IoU back to 0.13 |
+| 131+ | tracked | **dead** | 110 lasted 7 frames total |
+
+**This is #132, with numbers.** Track 110 is born at exactly the crossing frame and dies seven
+frames later — a phantom identity that exists only for the duration of the occlusion. Track 97,
+a real player who never left frame, blinks out for three frames. Around them 33, 99 and 85 die
+and 113 is born, so the crossing churns five identities in a 21-frame window. Downstream each
+new id is a *different person*: new avatar, new kit assignment, motion history reset.
+
+And at frame 124 the two boxes are 15 px apart with IoU 0.649, so **a per-crop estimator is
+handed essentially the same pixels twice** and has nothing to tell it which of the two players
+it is supposed to fit. That is the mechanism behind the second half of the ticket, and it is
+what A2 measures.
+
+#### A2, pose — next
+
+Run the production per-crop path — SMPLest-X Huge, `--pose gvhmr --pose-backend
+pitch3d.adapters.models.smplestx_backend:make` — on frame 124 and score it with the metrics
+below. This is the control every other arm is measured against. Weights verified by hand:
+`models/smplest-x/smplest_x_h.pth.tar`, 8.246 GB, loads to 519 tensors / **687.2M params**
+under key `network`, plus optimizer state (which is what makes an 687M model an 8.2 GB file).
 
 ### Stage B — the head-to-head, same boxes, same frame, same metrics
 
