@@ -257,13 +257,102 @@ So the null is real but narrow: **on the hardest overlap this 60-frame window co
 PromptHMR's multi-person machinery moves the mesh measurably.** It does not yet say anything
 about a true occlusion, because the clip window does not contain one.
 
-**Next, in order:**
+## The widened search (2026-08-05) — and the clip is two shots, not one
 
-1. Widen the search past 60 frames and rank by *mask* overlap, not box IoU, keeping only pairs
-   where one player is substantially hidden. If the clip has no such frame, #132's premise needs
-   re-grounding on a clip that does.
-2. Only then is the PromptHMR-vs-SMPLest-X head-to-head worth its 8 GB pod checkpoint.
-3. The SAM/mask branch is not earning its 6.5 GB on this evidence — do not wire it in.
+Ranking 60 frames by box IoU was wrong twice over. Corrected in
+`scripts/prompthmr_find_crossing.py`, which now also ranks by **cover** = `inter / area(back)`,
+the back player being the one whose box bottom sits *higher* (players stand on a plane under a
+raised camera, so lower feet = nearer = the occluder).
+
+**The clip contains a hard cut at frame 236.** A colour-histogram scan over all 334 frames finds
+exactly one boundary (L1 0.775; the largest delta anywhere else is the same frame). Frames 0–235
+are the wide broadcast shot the calibration was solved on; **236–333 are a close-up replay from a
+different camera.** Consequences, in order of how much they cost:
+
+- Every hit in the naive full-clip ranking (frames 237–292, cover 1.000) lives in shot 2 and is
+  unusable for #132.
+- In shot 2, RF-DETR/COCO emits a **738×806 px** "person" box swallowing half the frame, plus
+  crowd and touchline officials. `cover 1.000` was that blob containing a steward in a hi-vis bib.
+  Box-prompted SAM then cut out the *wrong* person, so the `--verify-masks` "visible fill" column
+  read 0.38–0.58 ("clear") for pairs that were not players at all. Sanity-bound the boxes.
+- **The pipeline has no shot-cut detection.** Nothing stops `--frames 334` from running tracking
+  and calibration straight through frame 236 and silently blending two cameras. Today we are only
+  safe because every run takes 48–60 frames from the start. This is its own defect.
+
+### The real #132 frame
+
+Re-ranked inside shot 1, with boxes bounded to plausible players (h < 0.45·H, w < 0.30·W, h > 25):
+
+| frame | cover | back ← front | h_back | h_front | box IoU |
+|---|---|---|---|---|---|
+| 121 | 0.867 | 33 ← 36 | 47 | 92 | — |
+| **124** | **0.779** | **110 ← 97** | **86** | **86** | **0.649** |
+| 34 | 0.708 | 5 ← 9 | 83 | 88 | 0.415 |
+| 87 | 0.682 | 85 ← 15 | 86 | 94 | — |
+| 207 | 0.657 | 126 ← 66 | 78 | 107 | — |
+
+**Frame 124 is the case.** `out/phmr_ab/f124_pair.jpg`: two Congo DR players in the *same
+light-blue kit*, one directly behind the other, equal apparent height (86 px, so equal depth),
+box IoU 0.649 — the highest in shot 1 — and the back player reduced to a head, a shoulder and one
+boot. Same kit means appearance re-ID cannot separate them either. Frame 29, which all the
+numbers above were measured on, is a far easier case that merely scored well on box IoU.
+
+## The plan from here
+
+### Stage A — prove the defect exists (this baseline was never measured)
+
+Every number on this page compares candidate *fixes* to each other. Nobody has shown our own
+pipeline breaks on frame 124, so "PromptHMR fixes #132" is currently unfalsifiable.
+
+- **A1, tracking.** Follow tracks 97 and 110 across the crossing window (≈115–135). Do the ids
+  survive, swap, or fragment? ByteTrack is IoU-driven and these two boxes reach 0.649 overlap
+  with identical kit colour.
+- **A2, pose.** Run the production per-crop path — SMPLest-X Huge, `--pose gvhmr --pose-backend
+  pitch3d.adapters.models.smplestx_backend:make` — on frame 124 and score it with the metrics
+  below. This is the control every other arm is measured against.
+
+### Stage B — the head-to-head, same boxes, same frame, same metrics
+
+Our ByteTrack boxes feed every arm, so nothing here measures a different detector or tracker.
+
+1. **SMPLest-X per-crop** — production today.
+2. **PromptHMR, box prompt** — full-frame, one pass, `crossperson` off (upstream default).
+3. **PromptHMR, mask prompt** — arm 2 plus SAM masks.
+4. **PromptHMR, box prompt, `interaction=True`** — the BUDDI cross-person block forced on.
+
+Arms 2–4 are cheap once arm 1 runs; the honest comparison is 1 vs 2, and 3/4 only earn their
+dependencies if they beat 2.
+
+### What exactly gets compared
+
+One number is not enough — own-mask IoU cannot tell a *bad fit* from a *fused* one.
+
+1. **Own-mask IoU** — mesh silhouette ∩ that player's SAM mask, over their union. "Is the mesh on
+   the right person?" Already implemented in `prompthmr_mask_ab.py`.
+2. **Cross-contamination** *(to add — this is the actual fusion metric #132 describes)* — the
+   fraction of player A's mesh silhouette landing inside player B's mask. Two per-crop meshes
+   both collapsing onto the front player is exactly the failure, and metric 1 alone reports it
+   only as a mild drop.
+3. **Depth order** — does the back player's solved root stay *behind* the front player's? A
+   per-crop estimator has no reason to preserve it, and a flipped pair is visible in the render.
+4. **The eye, on a ×5 zoom panel.** Per `CLAUDE.md` this outranks 1–3 when they disagree.
+
+Metrics 1–3 also run over the window 115–135, not just frame 124, so a lucky single frame cannot
+carry the verdict.
+
+### Stage C — the decision this buys
+
+- Arm 1 not measurably worse → #132's premise is wrong for this clip. Close it, and the whole
+  PromptHMR adoption is unnecessary. *This remains a live outcome.*
+- Arm 2 beats arm 1 → adopt PromptHMR for the multi-person pass; the SAM/mask branch (6.5 GB) and
+  the `interaction` flag both stay out unless arms 3/4 beat arm 2.
+- Either way, shot-cut detection gets fixed, because it is a real defect found on the way.
+
+### Status of the pieces
+
+- SMPLest-X Huge (8.2 GB, `waanqii/SMPLest-X`, ungated) downloading straight to `models/smplest-x/`;
+  code checkout in `backends/SMPLest-X`. No pod needed for either.
+- The 6.5 GB SAM 3 branch is still unjustified on the evidence so far — do not wire it in yet.
 
 ## What will bite (found by reading their code, not by running it)
 
