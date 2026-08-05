@@ -664,7 +664,48 @@ consecutive-frame L1 distance over 333 pairs:  median 0.064  p95 0.132  p99 0.14
 2 shots: 0-235 (236 frames), 236-333 (98 frames)
 ```
 
-The threshold is **0.45**, sitting in a 6× gap between 0.145 and 0.905 — separated, not tuned.
+#### The first version had a latent bug, found by attacking it rather than re-running it
+
+It used an **absolute** threshold of 0.45, "sitting in a 6× gap between 0.145 and 0.905 —
+separated, not tuned". That was true at `bins=8` and nowhere else, because **the distance itself
+scales with the bin count** while the threshold did not. `bins` was a public parameter on both
+`clip_histograms` and `scripts/shot_cuts.py`, so the detector could be broken by a caller who
+thought finer histograms would help:
+
+| bins | median | true cut | largest within-shot | old verdict |
+|---|---|---|---|---|
+| 4 | 0.028 | 0.559 | 0.068 | 2 shots ✓ |
+| 8 | 0.064 | 0.905 | 0.145 | 2 shots ✓ |
+| 16 | 0.144 | 1.446 | 0.307 | 2 shots ✓ |
+| 32 | 0.322 | 1.580 | 0.609 | **14 shots** ✗ |
+| 48 | 0.484 | 1.670 | 0.854 | **36 shots** ✗ |
+
+A 2-shot clip shredded into 36, which is precisely the failure my own test called the one that
+matters most — truncating a healthy clip costs more than missing a cut — and the design was one
+parameter away from it.
+
+**Fixed by making the decision scale-free.** A cut must now exceed `max(5 × the clip's own median
+distance, 0.25)`. The ratio removes the bin coupling *and* adapts to clips whose camera moves more
+or less than this one; the absolute floor stops a near-static clip, where the median is ~0 and
+every ratio is enormous, from manufacturing cuts out of compression noise. As a multiple of the
+median the signal is what actually separates:
+
+| bins | 4 | 8 | 16 | 32 | 48 | 64 |
+|---|---|---|---|---|---|---|
+| true cut | 20.1× | 14.1× | 10.0× | 4.9× | 3.5× | 2.8× |
+| within-shot | 2.44× | 2.26× | 2.13× | 1.89× | 1.76× | 1.64× |
+| **new verdict** | 2 shots | 2 shots | 2 shots | 1 shot | 1 shot | 1 shot |
+
+Note the **failure direction**: at silly bin counts the ratio for a real cut *falls*, so the
+detector goes quiet instead of inventing shots — 14 and 36 phantom shots became 1. `bins` is now
+`VALIDATED_BINS = 8` with the measurement in its docstring, `scripts/shot_cuts.py` prints the
+separation on every run so a bad binning is visible rather than silent, and an absolute
+`threshold=` override remains for a caller who has measured their own clip.
+
+A second, smaller defect fixed in the same pass: the CLI guard's docstring promised it trims to
+"the shot the run starts in" while the code always took shot 0, and `shot_containing` — written
+for exactly that — was dead. Harmless while every run starts at frame 0, wrong the moment one
+does not. It now scans from `clip.frames[0]` and reports cut positions in source-frame numbers.
 
 The CLI guard is on by default and follows R-6, *mark never hide*: it prints the cut frames and
 the shot spans, then trims to the shot the run starts in, rather than failing outright or quietly

@@ -56,27 +56,34 @@ def _truncate_to_first_shot(clip: ClipRef) -> ClipRef:
     """
     try:
         from ..adapters.models.shot_detect import clip_histograms
-        from ..core.orchestration.shots import find_shot_cuts, shot_bounds
+        from ..core.orchestration.shots import find_shot_cuts, shot_bounds, shot_containing
     except ImportError:  # pragma: no cover - cv2 absent (fakes-only runs)
         return clip
+    frames = np.asarray(clip.frames)
+    if frames.size == 0:
+        return clip
     try:
-        hists = clip_histograms(clip.uri, n_frames=int(clip.n_frames))
+        hists = clip_histograms(clip.uri, n_frames=int(frames.size), start=int(frames[0]))
     except Exception as exc:  # pragma: no cover - unreadable/synthetic uri
         print(f"== shot guard: could not scan {clip.uri} ({exc}); continuing unchecked")
         return clip
     cuts = find_shot_cuts(hists)
     if not cuts:
         return clip
-    bounds = shot_bounds(int(hists.shape[0]), cuts)
-    print(f"== shot guard: {len(bounds)} shots, cut(s) at {cuts} — "
-          f"{', '.join(f'{a}-{b}' for a, b in bounds)}")
-    keep = bounds[0][1] + 1
-    if keep >= clip.n_frames:
+    n = int(hists.shape[0])
+    bounds = shot_bounds(n, cuts)
+    # Offsets are relative to the frames we scanned, which start at clip.frames[0], not at 0.
+    base = int(frames[0])
+    print(f"== shot guard: {len(bounds)} shots, cut(s) at {[c + base for c in cuts]} — "
+          f"{', '.join(f'{a + base}-{b + base}' for a, b in bounds)}")
+    _first, last = shot_containing(cuts, n, 0)  # the shot this run starts in
+    keep = last + 1
+    if keep >= frames.size:
         return clip
-    print(f"== shot guard: TRUNCATING to the first shot, {keep} of {clip.n_frames} frames. "
-          f"Reconstructing across a cut blends two cameras into one episode; "
-          f"pass --no-shot-guard to override.")
-    return replace(clip, frames=np.asarray(clip.frames)[:keep])
+    print(f"== shot guard: TRUNCATING to frames {base}-{base + last}, "
+          f"{keep} of {frames.size}. Reconstructing across a cut blends two cameras into "
+          f"one episode; pass --no-shot-guard to override.")
+    return replace(clip, frames=frames[:keep])
 
 
 def _airborne_on_ground(n_frames: int) -> np.ndarray:

@@ -18,10 +18,36 @@ from __future__ import annotations
 
 import numpy as np
 
-#: L1 distance between consecutive normalised histograms above which a cut is declared. Measured
-#: on the target clip: the one true cut scores 0.775 and no within-shot pair exceeds ~0.2, so the
-#: gap is wide and this sits in the middle of it rather than hugging either side.
-DEFAULT_CUT_THRESHOLD = 0.45
+#: A cut must be this many times the clip's own **median** consecutive-frame distance.
+#:
+#: The first version of this module used an absolute distance (0.45) measured at ``bins=8``, and
+#: that was a latent bug rather than a tuning choice: the distance scales with the histogram's bin
+#: count, so the same clip that reads 2 shots at ``bins=8`` shredded into **14 shots at bins=32 and
+#: 36 at bins=48**. Normalising by the clip's own median removes that coupling and also adapts to
+#: clips with more or less camera motion than this one.
+#:
+#: Measured on the target clip, distance ÷ median, true cut vs the largest within-shot pair:
+#:
+#: ===== ======== ============
+#: bins  cut      within-shot
+#: ===== ======== ============
+#: 4     20.1     2.44
+#: 8     14.1     2.26
+#: 16    10.0     2.13
+#: 32     4.9     1.89
+#: 64     2.8     1.64
+#: ===== ======== ============
+#:
+#: 5 sits in the middle of the gap at the validated :data:`~pitch3d.adapters.models.shot_detect`
+#: binning, and note the failure direction if a caller does use a silly bin count: the ratio for a
+#: real cut *falls*, so the detector goes quiet rather than inventing shots. A missed cut is
+#: recoverable; truncating a healthy clip is not.
+DEFAULT_CUT_RATIO = 5.0
+
+#: Second condition, so a near-static clip (median ≈ 0, every ratio enormous) cannot manufacture
+#: cuts out of compression noise. Distances are L1 over L1-normalised rows, so this is in the same
+#: [0, 2] range for any bin count: a quarter of all colour mass must move at once.
+DEFAULT_CUT_FLOOR = 0.25
 
 
 def histogram_distances(hists: np.ndarray) -> np.ndarray:
@@ -38,19 +64,42 @@ def histogram_distances(hists: np.ndarray) -> np.ndarray:
     return np.abs(np.diff(h, axis=0)).sum(axis=1)
 
 
+def cut_threshold(
+    d: np.ndarray,
+    ratio: float = DEFAULT_CUT_RATIO,
+    floor: float = DEFAULT_CUT_FLOOR,
+) -> float:
+    """The distance a pair must beat to count as a cut: ``max(ratio × median, floor)``.
+
+    Both conditions have to hold. The ratio makes the decision scale-free — independent of bin
+    count and of how much this particular camera moves — and the floor stops a near-static clip,
+    where the median is ~0 and every ratio is enormous, from manufacturing cuts out of noise.
+    """
+    d = np.asarray(d, dtype=float)
+    if d.size == 0:
+        return float(floor)
+    return float(max(ratio * float(np.median(d)), floor))
+
+
 def find_shot_cuts(
     hists: np.ndarray,
-    threshold: float = DEFAULT_CUT_THRESHOLD,
+    ratio: float = DEFAULT_CUT_RATIO,
     min_shot_frames: int = 8,
+    floor: float = DEFAULT_CUT_FLOOR,
+    threshold: float | None = None,
 ) -> list[int]:
     """Frame indices (into ``hists``) where a new shot begins; ``[]`` for a single-shot clip.
 
     Args:
         hists: ``(T, B)`` per-frame colour histograms, one row per frame in order.
-        threshold: L1 distance above which consecutive frames are a cut, not motion.
+        ratio: Multiple of the clip's own median distance a cut must exceed
+            (:data:`DEFAULT_CUT_RATIO`).
         min_shot_frames: Cuts closer together than this are a flash, a replay wipe or a camera
             flare rather than two shots. The *first* of such a burst is kept, so a real cut
             followed by a bright frame still reports one cut, not two.
+        floor: Absolute distance a cut must also exceed (:data:`DEFAULT_CUT_FLOOR`).
+        threshold: Escape hatch — an absolute distance that replaces the adaptive rule entirely.
+            Auto-detect plus manual override; leave ``None`` unless you have measured this clip.
 
     Returns:
         Sorted frame indices, each the first frame of a new shot. Index 0 is never returned —
@@ -59,8 +108,9 @@ def find_shot_cuts(
     d = histogram_distances(hists)
     if d.size == 0:
         return []
+    thr = float(threshold) if threshold is not None else cut_threshold(d, ratio, floor)
     cuts: list[int] = []
-    for i in np.flatnonzero(d > threshold).tolist():
+    for i in np.flatnonzero(d > thr).tolist():
         frame = i + 1  # d[i] compares frame i and i+1, so the new shot starts at i+1
         if cuts and frame - cuts[-1] < min_shot_frames:
             continue
