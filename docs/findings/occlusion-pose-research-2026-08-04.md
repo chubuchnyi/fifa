@@ -571,12 +571,45 @@ is a **precondition** for the stitch.
 alike, but 9 of the 37 are ids covering two humans, and none of the 36 are. Fewer ids is what the
 broken tracker already scored well on, by fusing two players into one.
 
-**The honest remaining gap.** Shot 1 shows a median of **17** plausible players per frame (min 13,
-max 19), so a shot-long budget is ~17–19 identities. We are at **36** — about two ids per player.
-That is the stitcher's conservatism, not a defect: `max_gap = 12` frames (0.4 s) and a strict
-predicted-position gate, because per its own docstring "a missed merge leaves two fragments, but a
-*wrong* merge teleports a body". Widening those gates is the next measurable step, and this table
-is the harness to judge it by.
+#### The remaining gap is much smaller than the raw counts suggest — I got this wrong first
+
+The first version of this section read: "shot 1 shows a median of **17** plausible players per
+frame, so a shot-long budget is ~17–19 identities. We are at 36 — about two ids per player."
+**That is wrong, and it is wrong in the flattering direction for future work** — it invents a 2×
+gap for a stitcher improvement to close.
+
+It assumed a fixed cast. The shot is a **panning** broadcast camera over 8 seconds, and the cast
+turns over almost completely:
+
+```
+ids present at frame <= 5 : 18
+ids present at frame >= 230: 16
+present in both            :  6      <- only a third of the opening cast is still on screen
+```
+
+A start/end union alone puts **≥28 distinct humans** in the shot, before counting anyone who
+entered and left in between. So 36 ids is within roughly a third of plausible, not double it. The
+fragment lengths say the same: only **3** of the 36 are under 15 frames, 31 run 30+ frames and 24
+run 60+. This is not a pile of debris around a few real tracks.
+
+**And the stitcher's gates are not the constraint anyway.** Sweeping all three, one at a time
+(`identity_budget.py --gap-sweep`):
+
+| gate | 36 → |
+|---|---|
+| `max_gap` 12 → 24 → 48 → 72 | 36 → 35 → 34 → 34 |
+| `max_center_dist` 1.5 → 2.5 → 4.0 → 6.0 → 10.0 | 36 → 35 → 35 → 35 → 35 |
+| `max_size_ratio` 1.6 → 2.2 → 3.0 | 36 → 36 → 36 |
+
+An absurdly loose `max_center_dist = 10` bbox-widths buys exactly one merge. Whatever is blocking
+the rest is **structural, not a threshold** — the prime suspect is the deliberate rule that a
+continuation must start *strictly after* its predecessor ends, which no duplicate or phantom box
+overlapping its own player in time can ever satisfy. That points back at duplicate suppression
+(item 1 of the plan), not at tuning these numbers.
+
+**So: do not spend effort widening the stitch gates.** The measured payoff is one to two identities
+out of 36, against a real risk the docstring names — "a missed merge leaves two fragments, but a
+*wrong* merge teleports a body".
 
 ### Stage C — the decision, taken 2026-08-05
 
