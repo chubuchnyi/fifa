@@ -44,6 +44,8 @@ parser.add_argument('--frames', type=int, default=236)
 parser.add_argument('--classes', default='coco')
 parser.add_argument('--det-cache', metavar='NPZ')
 parser.add_argument('--min-run', type=int, default=3)
+parser.add_argument('--nms-sweep', action='store_true',
+                    help='does removing duplicate boxes before tracking unblock the stitcher?')
 parser.add_argument('--gap-sweep', type=int, nargs='*', metavar='MAX_GAP',
                     help='sweep StitchConfig.max_gap and score each by identity count AND by the '
                          'implied speed across every merged gap (a wrong merge teleports a body)')
@@ -112,6 +114,56 @@ def _seam_speeds(before, after, report):
             seams.append(float(d / max(1, b0 - a1)))
     return np.array(normal), np.array(seams)
 
+
+def _nms(dets, thr):
+    """Greedy per-frame NMS by score. RF-DETR is DETR-family and ships no NMS of its own.
+
+    The claim under test is that duplicate boxes are what block stitching -- a continuation must
+    start strictly after its predecessor ends, and a phantom box overlapping its own player can
+    never satisfy that. If true, removing duplicates should raise the merge count. If the numbers
+    do not move, the claim is wrong and the effort belongs elsewhere.
+    """
+    out = []
+    for fd in dets.frames:
+        items = sorted(fd.items, key=lambda d: -d.score)
+        kept = []
+        for d in items:
+            a = d.bbox_xyxy
+            clash = False
+            for k in kept:
+                if k.cls != d.cls:
+                    continue
+                b = k.bbox_xyxy
+                x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+                x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+                inter = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+                if inter <= 0:
+                    continue
+                union = ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter)
+                if union > 0 and inter / union > thr:
+                    clash = True
+                    break
+            if not clash:
+                kept.append(d)
+        out.append(FrameDetections(frame=fd.frame, items=kept))
+    return Detections(frames=out)
+
+
+if args.nms_sweep:
+    n0 = sum(len(f.items) for f in detections.frames)
+    print('\n  nms      boxes   ids before stitch   ids after   merges')
+    for thr in (None, 0.6, 0.5, 0.45, 0.4, 0.37):
+        d = detections if thr is None else _nms(detections, thr)
+        n = sum(len(f.items) for f in d.frames)
+        tracks = ByteTrackTracker(device='cpu', min_track_frames=4, kit_split=True,
+                                  kit_split_min_run=args.min_run).track(clip, d)
+        pre = len([t for t in tracks.tracklets if t.cls == 'player'])
+        out, rep = stitch_tracks_with_report(tracks, StitchConfig())
+        post = len([t for t in out.tracklets if t.cls == 'player'])
+        label = 'off ' if thr is None else f'{thr:.2f}'
+        print(f'  {label}  {n:7d} ({100 * n / n0:5.1f}%)  {pre:8d}  {post:10d}  '
+              f'{len(rep.merges):7d}', flush=True)
+    raise SystemExit(0)
 
 if args.gap_sweep is not None:
     grid = ([('max_gap', g) for g in (args.gap_sweep or [12, 24, 48, 72])]
