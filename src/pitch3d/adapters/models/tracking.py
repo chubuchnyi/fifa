@@ -49,6 +49,10 @@ class RawTracklet:
         classes: Per-frame detector label (length ``T``; may flicker frame to frame).
         appearance: ``(D,)`` team-appearance feature (e.g. jersey colour), or ``None`` when the
             backend could not sample one (the track then gets no team).
+        appearance_series: ``(T, D)`` the same feature sampled *per frame*, or ``None``. One
+            vector per track cannot represent a track that changes player mid-way, and #132
+            measured 9 of 38 tracks in the target clip doing exactly that; this is what
+            :func:`split_on_kit_change` reads to cut them apart.
     """
 
     track_id: int
@@ -56,6 +60,7 @@ class RawTracklet:
     bboxes_xyxy: np.ndarray
     classes: list[str]
     appearance: np.ndarray | None = None
+    appearance_series: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int).reshape(-1)
@@ -68,6 +73,8 @@ class RawTracklet:
             )
         if self.appearance is not None:
             self.appearance = np.asarray(self.appearance, dtype=float).reshape(-1)
+        if self.appearance_series is not None:
+            self.appearance_series = np.asarray(self.appearance_series, dtype=float).reshape(t, -1)
 
 
 @runtime_checkable
@@ -137,6 +144,82 @@ def _hsv_to_feature(hsv: np.ndarray) -> np.ndarray:
     return np.stack([sat * np.cos(hue), sat * np.sin(hue), 0.25 * val], axis=1)
 
 
+def split_on_kit_change(
+    raw: RawTracklet,
+    centroids: np.ndarray,
+    min_run: int = 4,
+    next_id: int = 0,
+) -> list[RawTracklet]:
+    """Cut one tracklet wherever its kit colour changes team, and hand each piece its own id.
+
+    A crossing can leave ByteTrack holding the *other* player, and nothing downstream notices: the
+    id keeps its avatar, its kit assignment and its motion history while the human under it has
+    changed. Measured on the target clip, 9 of 38 tracks in shot 1 do this (`#132`,
+    `scripts/track_continuity.py --kit-scan`).
+
+    Splitting is the R-6 answer — the discontinuity is *marked* by becoming two identities rather
+    than hidden by averaging two kits into one team label. A track that never changes kit comes
+    back unchanged, keeping its original id, so this is a no-op for the other 29.
+
+    Args:
+        raw: The tracklet to examine; returned as-is when it carries no ``appearance_series``.
+        centroids: ``(k, D)`` team centres in :func:`_hsv_to_feature` space, fitted over *all*
+            tracks — a single track is far too small a sample to find the teams from.
+        min_run: Frames a kit must hold before it may cut. A crossing briefly puts the other
+            player's shirt inside the box, and that must not split a healthy track.
+        next_id: First id to hand out for the 2nd and later pieces; the 1st keeps ``track_id``.
+
+    Returns:
+        One :class:`RawTracklet` per solid run of a single kit, in frame order.
+    """
+    if raw.appearance_series is None or raw.frames.shape[0] < 2 * min_run:
+        return [raw]
+    feats = _hsv_to_feature(raw.appearance_series)
+    labels = np.argmin(
+        np.sum((feats[:, None, :] - np.asarray(centroids, float)[None, :, :]) ** 2, axis=2), axis=1
+    )
+
+    runs: list[list[int]] = []  # [label, start_i, stop_i] over indices into frames
+    for i, lab in enumerate(labels.tolist()):
+        if runs and runs[-1][0] == lab:
+            runs[-1][2] = i
+        else:
+            runs.append([lab, i, i])
+    solid = [r for r in runs if r[2] - r[1] + 1 >= min_run]
+    merged: list[list[int]] = []
+    for r in solid:
+        if merged and merged[-1][0] == r[0]:
+            merged[-1][2] = r[2]
+        else:
+            merged.append(list(r))
+    if len(merged) < 2:
+        return [raw]
+
+    # Cut midway through the frames between two solid runs -- the boundary itself is the crossing,
+    # where the box holds both players and neither label is trustworthy.
+    cuts = [0]
+    for a, b in zip(merged, merged[1:], strict=False):
+        cuts.append((a[2] + b[1]) // 2 + 1)
+    cuts.append(raw.frames.shape[0])
+
+    out: list[RawTracklet] = []
+    for piece, (lo, hi) in enumerate(zip(cuts, cuts[1:], strict=False)):
+        if hi <= lo:
+            continue
+        series = raw.appearance_series[lo:hi]
+        out.append(
+            RawTracklet(
+                track_id=raw.track_id if piece == 0 else next_id + piece - 1,
+                frames=raw.frames[lo:hi],
+                bboxes_xyxy=raw.bboxes_xyxy[lo:hi],
+                classes=raw.classes[lo:hi],
+                appearance=np.median(series, axis=0),
+                appearance_series=series,
+            )
+        )
+    return out
+
+
 def _hsv_to_rgb01(hsv: np.ndarray) -> tuple[float, float, float]:
     """Pure-numpy mean-HSV (OpenCV ranges) → 0..1 RGB for ``Team.color_rgb`` (no cv2 here)."""
     h = (float(hsv[0]) / 180.0) * 6.0  # OpenCV hue [0,180] → sextant [0,6)
@@ -160,6 +243,9 @@ class ByteTrackTracker(Tracker):
         team_ids: Stable labels handed to clusters, ordered by the smallest track id they contain
             (so the first-appearing team is always ``team_ids[0]``).
         min_track_frames: Tracklets shorter than this are dropped as association blips.
+        kit_split: Cut a track in two where its kit colour changes team (#132). Auto-detect plus
+            manual override: set ``False`` to get the pre-fix single-identity behaviour back.
+        kit_split_min_run: Frames a kit must hold before it may cut a track.
         device: Inference device for the default backend.
     """
 
@@ -167,6 +253,8 @@ class ByteTrackTracker(Tracker):
     n_teams: int = 2
     team_ids: tuple[str, ...] = ("A", "B")
     min_track_frames: int = 1
+    kit_split: bool = True
+    kit_split_min_run: int = 4
     device: str = "cuda"
 
     def info(self) -> ModelInfo:
@@ -183,6 +271,7 @@ class ByteTrackTracker(Tracker):
             r for r in backend.associate(clip, detections)
             if r.frames.shape[0] >= self.min_track_frames
         ]
+        raw = self._split_swapped(raw)
         tracklets = [
             Tracklet(
                 track_id=r.track_id,
@@ -194,6 +283,44 @@ class ByteTrackTracker(Tracker):
         ]
         teams = self._assign_teams(raw, tracklets)
         return Tracks(tracklets=tracklets, teams=teams)
+
+    def _split_swapped(self, raw: list[RawTracklet]) -> list[RawTracklet]:
+        """Cut any track that changes team mid-way (#132). No-op without a sampled series.
+
+        The team centres are fitted over every frame of every track at once, because one track is
+        far too small a sample to find two kits in — and because a track that *swapped* would
+        otherwise define its own two clusters and split on noise.
+        """
+        if not self.kit_split:
+            return raw
+        # Referees are not on a team, so their kit is a third colour that would both pollute the
+        # centres and let a shadow split a perfectly good official in two. Fit and cut on players
+        # and goalkeepers only.
+        team_bearing = [
+            r for r in raw
+            if r.appearance_series is not None and _majority_class(r.classes) in TEAM_CLASSES
+        ]
+        if len(team_bearing) < 2:
+            return raw
+        feats = _hsv_to_feature(np.concatenate([r.appearance_series for r in team_bearing]))
+        k = min(self.n_teams, feats.shape[0])
+        labels = _kmeans(feats, k)
+        centroids = np.stack([feats[labels == c].mean(axis=0) for c in range(k)
+                              if np.any(labels == c)])
+        if centroids.shape[0] < 2:
+            return raw
+
+        splittable = {id(r) for r in team_bearing}
+        next_id = max(r.track_id for r in raw) + 1
+        out: list[RawTracklet] = []
+        for r in raw:
+            if id(r) not in splittable:
+                out.append(r)
+                continue
+            pieces = split_on_kit_change(r, centroids, self.kit_split_min_run, next_id)
+            next_id += max(0, len(pieces) - 1)
+            out.extend(pieces)
+        return out
 
     def _assign_teams(self, raw: list[RawTracklet], tracklets: list[Tracklet]) -> list[Team]:
         """Cluster team-bearing tracks by kit colour; stamp ``team_id`` + set ``color_rgb``."""
@@ -273,23 +400,49 @@ class ByteTrackBackend:
                     (int(fd.frame), np.asarray(xyxy, dtype=float), id_to_cls[int(cid)])
                 )
 
-        appearance = self._sample_appearance(clip, boxes)
+        sampled = self._sample_appearance(clip, boxes)
         out: list[RawTracklet] = []
         for tid, seq in sorted(boxes.items()):
             seq.sort(key=lambda r: r[0])
+            series = self._align_series(sampled.get(tid, {}), [f for f, _, _ in seq])
             out.append(
                 RawTracklet(
                     track_id=tid,
                     frames=np.array([f for f, _, _ in seq], dtype=int),
                     bboxes_xyxy=np.stack([b for _, b, _ in seq]),
                     classes=[c for _, _, c in seq],
-                    appearance=appearance.get(tid),
+                    appearance=None if series is None else np.median(series, axis=0),
+                    appearance_series=series,
                 )
             )
         return out
 
+    @staticmethod
+    def _align_series(per_frame, frames):  # pragma: no cover - heavy path (needs cv2 + media)
+        """``{frame: hsv}`` → ``(T, 3)`` aligned with ``frames``, holding across unsampled frames.
+
+        A crop can come back empty (a box clipped to the frame edge), so the sampler is allowed to
+        skip frames. The series must still be one row per frame or it cannot be sliced alongside
+        the boxes, so a gap holds the last value — never a fabricated colour.
+        """
+        if not per_frame:
+            return None
+        vals, last = [], None
+        for f in frames:
+            last = per_frame.get(f, last)
+            vals.append(last)
+        first = next((v for v in vals if v is not None), None)
+        if first is None:
+            return None
+        return np.stack([first if v is None else v for v in vals])
+
     def _sample_appearance(self, clip, boxes):  # pragma: no cover - heavy path (needs cv2 + media)
-        """Robust torso kit-colour (median HSV) per track id, from the first frames it appears in.
+        """Robust torso kit-colour (median HSV) per ``{track id: {frame: hsv}}``, over every frame.
+
+        It used to sample only the first 8 frames of each track, which made a mid-track player
+        swap undetectable *by construction*: track 97 of the target clip is scored on frames
+        112-119 and keeps that team label while wearing the other kit from frame 128 (#132).
+        Sampling the whole span costs no extra decode — the same pass just crops more boxes.
 
         Three robustness measures, because a raw mean over the whole bbox was washing the kit
         colour out (→ the 19/1 mis-cluster): (1) sample only a *central* upper-torso patch (middle
@@ -301,12 +454,12 @@ class ByteTrackBackend:
 
         wanted: dict[int, list[tuple[int, np.ndarray]]] = {}
         for tid, seq in boxes.items():
-            for frame, box, _ in seq[:8]:
+            for frame, box, _ in seq:
                 wanted.setdefault(frame, []).append((tid, box))
         if not wanted:
             return {}
 
-        acc: dict[int, list[np.ndarray]] = {}
+        acc: dict[int, dict[int, np.ndarray]] = {}
         import cv2
 
         for frame, image in _iter_frames(clip):
@@ -327,8 +480,8 @@ class ByteTrackBackend:
                 kept = hsv[~green]
                 if kept.shape[0] < max(8, hsv.shape[0] // 10):
                     kept = hsv  # almost all grass (bad box) → don't fabricate, use the raw patch
-                acc.setdefault(tid, []).append(np.median(kept, axis=0))
-        return {tid: np.median(np.stack(vals), axis=0) for tid, vals in acc.items() if vals}
+                acc.setdefault(tid, {})[frame] = np.median(kept, axis=0)
+        return acc
 
     def _import_sv(self):  # pragma: no cover - exercised only without the extra
         try:

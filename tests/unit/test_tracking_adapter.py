@@ -191,3 +191,61 @@ def test_default_backend_without_extra_is_actionable():
     # No backend injected and the `cv` extra absent → a clear, install-pointing error.
     with pytest.raises(RuntimeError, match=r"pitch3d\[cv\]"):
         ByteTrackTracker().track(_clip(), _DETS)
+
+
+# --- #132: a track that changes player mid-way must not keep one identity ------------------
+
+#: Two kits as mean-HSV rows (OpenCV H∈[0,180]): Colombia light blue, Congo DR yellow. Measured
+#: off the target clip, not invented -- these are the hues `_kit_scan` separates the teams on.
+_BLU_HSV, _YEL_HSV = (105.0, 180.0, 190.0), (25.0, 200.0, 195.0)
+
+
+def _swap_track(n_blue: int, n_yellow: int, track_id: int = 97) -> RawTracklet:
+    series = np.array([_BLU_HSV] * n_blue + [_YEL_HSV] * n_yellow, dtype=float)
+    t = n_blue + n_yellow
+    return RawTracklet(
+        track_id=track_id,
+        frames=np.arange(t),
+        bboxes_xyxy=np.tile(np.array([0.0, 0.0, 10.0, 20.0]), (t, 1)),
+        classes=["player"] * t,
+        appearance=np.median(series, axis=0),
+        appearance_series=series,
+    )
+
+
+def _centroids():
+    from pitch3d.adapters.models.tracking import _hsv_to_feature
+
+    return _hsv_to_feature(np.array([_BLU_HSV, _YEL_HSV], dtype=float))
+
+
+def test_kit_change_splits_the_track_and_each_piece_wears_one_kit():
+    from pitch3d.adapters.models.tracking import _hsv_to_feature, split_on_kit_change
+
+    pieces = split_on_kit_change(_swap_track(8, 8), _centroids(), min_run=4, next_id=500)
+
+    assert len(pieces) == 2, "a track wearing two kits must not stay one identity"
+    assert [p.track_id for p in pieces] == [97, 500], "the first piece keeps the original id"
+    # Every frame of a piece must sit nearer its own kit centre than the other one.
+    for piece, kit in zip(pieces, (_BLU_HSV, _YEL_HSV), strict=True):
+        d = np.sum((_hsv_to_feature(piece.appearance_series)
+                    - _hsv_to_feature(np.array([kit]))) ** 2, axis=1)
+        assert float(d.max()) < 1e-9, "a piece still contains the other team's frames"
+    assert sum(p.frames.shape[0] for p in pieces) == 16, "splitting must not drop frames"
+
+
+def test_a_track_that_never_changes_kit_is_returned_untouched():
+    from pitch3d.adapters.models.tracking import split_on_kit_change
+
+    one = _swap_track(16, 0)
+    assert split_on_kit_change(one, _centroids(), min_run=4, next_id=500) == [one]
+
+
+def test_a_brief_flicker_is_not_a_swap():
+    from pitch3d.adapters.models.tracking import split_on_kit_change
+
+    # The crossing itself puts the other player's shirt in the box for a frame or two. That is
+    # the occlusion, not a handover, and splitting on it would shred healthy tracks.
+    flicker = _swap_track(8, 0)
+    flicker.appearance_series[4:6] = _YEL_HSV
+    assert len(split_on_kit_change(flicker, _centroids(), min_run=4, next_id=500)) == 1

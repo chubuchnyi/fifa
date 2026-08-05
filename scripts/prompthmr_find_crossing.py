@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'src'))
 from pitch3d.adapters.models.detection import DETECTOR_CLASS_MAPS, RFDETRDetector  # noqa: E402
 from pitch3d.adapters.models.tracking import ByteTrackTracker  # noqa: E402
 from pitch3d.core.ports.io import ClipRef  # noqa: E402
+from pitch3d.core.ports.perception import Detection, Detections, FrameDetections  # noqa: E402
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--clip', default='samples/video/Colombia-1-0-Congo-DR1080p.mp4')
@@ -43,6 +44,12 @@ parser.add_argument('--classes', default='coco', choices=sorted(DETECTOR_CLASS_M
 parser.add_argument('--verify-masks', type=int, default=0, metavar='K',
                     help='run SAM on the top K occlusion candidates and report visible fill')
 parser.add_argument('--sam', default='facebook/sam-vit-base')
+parser.add_argument('--no-kit-split', action='store_true',
+                    help='disable the #132 team-change split (pre-fix behaviour)')
+parser.add_argument('--also-nosplit', metavar='OUT.npz',
+                    help='additionally track the SAME detections with the split off, as a control')
+parser.add_argument('--det-cache', metavar='NPZ',
+                    help='reuse detections from here (written on first run); tracker A/Bs are free')
 args = parser.parse_args()
 
 import cv2  # noqa: E402
@@ -64,15 +71,58 @@ clip = ClipRef(
     fps=fps,
 )
 
-print('detecting (RF-DETR, cpu) ...', flush=True)
-detections = RFDETRDetector(device='cpu', class_map=DETECTOR_CLASS_MAPS[args.classes]).detect(clip)
+cache = Path(args.det_cache or
+             f'out/phmr_ab/dets_{args.classes}_{args.start}_{args.frames}.npz')
+if cache.exists():
+    # Detection is minutes of CPU and does not depend on anything downstream, so an A/B over
+    # tracker settings should never pay for it twice.
+    c = np.load(cache, allow_pickle=True)
+    detections = Detections(frames=[
+        FrameDetections(frame=int(f), items=[
+            Detection(bbox_xyxy=b, cls=str(k), score=float(s))
+            for b, k, s in zip(bb, kk, ss, strict=True)])
+        for f, bb, kk, ss in zip(c['frame'], c['boxes'], c['classes'], c['scores'], strict=True)])
+    print(f'detections from cache {cache}', flush=True)
+else:
+    print('detecting (RF-DETR, cpu) ...', flush=True)
+    detections = RFDETRDetector(device='cpu',
+                                class_map=DETECTOR_CLASS_MAPS[args.classes]).detect(clip)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(cache,
+             frame=np.array([fd.frame for fd in detections.frames]),
+             boxes=np.array([np.stack([d.bbox_xyxy for d in fd.items]) if fd.items
+                             else np.zeros((0, 4)) for fd in detections.frames], dtype=object),
+             classes=np.array([[d.cls for d in fd.items] for fd in detections.frames],
+                              dtype=object),
+             scores=np.array([[d.score for d in fd.items] for fd in detections.frames],
+                             dtype=object),
+             allow_pickle=True)
+    print(f'  cached -> {cache}', flush=True)
 n_det = sum(len(f.items) for f in detections.frames)
 print(f'  {n_det} detections over {len(detections.frames)} frames', flush=True)
 
 print('tracking (ByteTrack) ...', flush=True)
-tracks = ByteTrackTracker(device='cpu', min_track_frames=4).track(clip, detections)
+tracks = ByteTrackTracker(device='cpu', min_track_frames=4,
+                          kit_split=not args.no_kit_split).track(clip, detections)
 players = [t for t in tracks.tracklets if t.cls == 'player']
-print(f'  {len(tracks.tracklets)} tracklets, {len(players)} players')
+print(f'  {len(tracks.tracklets)} tracklets, {len(players)} players'
+      f'  (kit_split={"off" if args.no_kit_split else "on"})')
+
+if args.also_nosplit:
+    # Same clip, same detections, same association -- only the #132 kit split differs, so any
+    # difference between the two npz files is that fix and nothing else.
+    ctrl = ByteTrackTracker(device='cpu', min_track_frames=4, kit_split=False).track(
+        clip, detections)
+    cp = [t for t in ctrl.tracklets if t.cls == 'player']
+    Path(args.also_nosplit).parent.mkdir(parents=True, exist_ok=True)
+    np.savez(args.also_nosplit,
+             frames=np.array([t.frames for t in cp], dtype=object),
+             boxes=np.array([t.bboxes_xyxy for t in cp], dtype=object),
+             track_ids=np.array([t.track_id for t in cp]),
+             ranking=np.zeros((0, 5)), occlusion=np.zeros((0, 5)), visible_fill=np.zeros((0, 5)),
+             width=width, height=height, fps=fps, start=args.start, n_frames=args.frames,
+             allow_pickle=True)
+    print(f'  control arm (kit_split off) -> {args.also_nosplit}: {len(cp)} players', flush=True)
 
 
 def iou(a, b):
