@@ -211,17 +211,59 @@ homography. The A/B only asks whether the mesh lands on its own player's pixels.
 now legible — and **the two panels are indistinguishable by eye.** One player up, the other down,
 mean inside the noise. That is the second null, and this one is not explained away by resolution.
 
-**So the mask prompt is not what fixes #132.** The thing that keeps two crossing players apart in
-PromptHMR is the *architecture* — one full-frame forward pass with cross-person attention, so the
-two bodies are decoded jointly and cannot both claim the same pixels. The mask is a refinement on
-top of that, and at broadcast scale it adds nothing measurable. Our pipeline's actual defect is
-upstream of the prompt: `GVHMRPoseEstimator` calls `HMRBackend.estimate_bodies` **per track**, so
-two crossing players are two independent forward passes that have never seen each other.
+**So the mask prompt is not what fixes #132.**
 
-**Next measurement, and it is a different one:** PromptHMR (box prompt, no masks) vs *our current
-per-crop backend*, same frame 29 crossing. That is the comparison #132 actually poses. If it
-lands, adopt PromptHMR for the multi-person pass and drop the SAM/mask branch entirely — which
-also deletes the 6.5 GB SAM 3 dependency from this path.
+### Cross-person attention is opt-in, and off by default
+
+The obvious follow-up was "then it must be the joint multi-person pass" — one forward with
+cross-person attention, so two bodies cannot both claim the same pixels, where our
+`GVHMRPoseEstimator` calls `HMRBackend.estimate_bodies` **per track**. `--joint-vs-solo` tests
+exactly that: co-decode both players in one pass, versus one pass per player, same weights and
+same image.
+
+First run came back **bit-identical** (+0.000 on both tracks). That is not a null, it is a bug
+report about the model:
+
+- `SMPLDecoder.forward` takes a `crossperson` flag, and only under it does the BUDDI-style block
+  in `twoway_transformer.py:256` flatten every person's two output tokens into one sequence.
+- The flag is fed from `batch['interaction']` (`phmr.py:73`), and upstream's own `prepare_batch`
+  leaves it `None` unless the caller asks (`inference.py:72`).
+
+**With it off — the default — a PromptHMR multi-person pass is N independent decodes.** The
+people share an image encoder, nothing more. Every earlier number on this page was measured that
+way, including both arms of the masks-vs-boxes A/B.
+
+### All four configurations, frame 29 crossing pair
+
+| arm | `crossperson` | track 1 (behind) | track 2 (in front) | mean |
+|---|---|---|---|---|
+| masks | off | 0.687 | 0.573 | **0.630** |
+| boxes | off | 0.658 | 0.593 | **0.625** |
+| joint (both in batch) | **on** | 0.662 | 0.552 | **0.607** |
+| solo (one per pass) | **on** | 0.666 | 0.522 | **0.594** |
+
+With the flag on, co-decoding does beat solo (+0.013 mean, **+0.030** on the front player, and
+`ab_f29_crop_solo_zoom.jpg` shows why — solo lets track 2's mesh slide right onto its neighbour's
+shorts). But turning the flag on at all *costs* 0.018 against plain boxes. The whole family sits
+in a 0.59–0.63 band.
+
+### The honest limit of this experiment
+
+`ranking` in `tracks.npz` says frame 29's box IoU **0.511 is the maximum over all 60 frames**
+(runner-up 0.415). Zoom in and the pair is two *adjacent* players — the front one covers the back
+one's legs, both are fully visible and separable. That is not the failure #132 describes.
+
+So the null is real but narrow: **on the hardest overlap this 60-frame window contains, none of
+PromptHMR's multi-person machinery moves the mesh measurably.** It does not yet say anything
+about a true occlusion, because the clip window does not contain one.
+
+**Next, in order:**
+
+1. Widen the search past 60 frames and rank by *mask* overlap, not box IoU, keeping only pairs
+   where one player is substantially hidden. If the clip has no such frame, #132's premise needs
+   re-grounding on a clip that does.
+2. Only then is the PromptHMR-vs-SMPLest-X head-to-head worth its 8 GB pod checkpoint.
+3. The SAM/mask branch is not earning its 6.5 GB on this evidence — do not wire it in.
 
 ## What will bite (found by reading their code, not by running it)
 

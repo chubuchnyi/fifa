@@ -1,24 +1,28 @@
-"""Mask-prompted vs box-prompted PromptHMR on the real clip, at a frame where players cross.
+"""Two A/Bs on the real clip, at the frame where players cross hardest (#132).
 
-#132's hypothesis in one image: when two players overlap, does prompting the HMR with each
-player's segmentation mask keep his mesh on his own pixels, where a box crop fuses the two?
+Both run the same PromptHMR checkpoint on the same frame and score each player by the IoU
+between his projected mesh silhouette and his own SAM mask -- higher means the mesh stays on
+its own player rather than drifting onto the neighbour. Masks come from box-prompted SAM and
+identity from our own ByteTrack ids, so nothing here measures a different tracker.
 
-Same checkpoint both ways -- `mask_prompt` is one flag -- so the panels differ only in the
-prompt. Masks come from box-prompted SAM, identity from our own ByteTrack ids, so this measures
-the HMR change alone and not a different tracker.
+    .venv/bin/python scripts/prompthmr_find_crossing.py --frames 60       # writes tracks.npz
+    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29              # whole frame
+    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29 --crop-pair  # crossing pair only
+    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29 --crop-pair --joint-vs-solo
 
-    .venv/bin/python scripts/prompthmr_find_crossing.py --frames 60          # writes tracks.npz
-    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29                 # whole frame
-    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29 --crop-pair     # crossing pair only
+**Default arms, masks vs boxes** (`mask_prompt` is one flag): does a segmentation prompt keep
+the mesh off the neighbour? Answered 2026-08-05, and the answer is no -- null whole-frame
+(mean 0.495 vs 0.477) and still null cropped (0.630 vs 0.625, panels alike by eye). Keep the
+whole-frame run as the honest control, but read it knowing a broadcast player is only ~30-50 px
+tall once 1920 is letterboxed to 896; --crop-pair puts the pair at the size the model expects.
 
-Writes <out>/ab_f<N>[_crop].jpg (masks | boxes, side by side) and prints, per track, the IoU
-between the projected mesh silhouette and that player's own SAM mask -- higher means the mesh
-sits on its own player rather than drifting onto the neighbour.
+**--joint-vs-solo**: the follow-up that null pointed at. Arm 1 co-decodes every player in one
+forward pass; arm 2 runs one pass per player, so no query can attend to the other. Same weights,
+same image, same boxes -- the only variable is the cross-person attention. Arm 2 is the regime
+our own path runs in (GVHMRPoseEstimator calls HMRBackend.estimate_bodies per track), so this is
+the mechanism question #132 actually poses, without needing SMPLest-X's 8 GB pod checkpoint.
 
-Run both. Whole-frame is the honest control and it came out flat (2026-08-05, frame 29: mean
-0.495 vs 0.477, crossing pair -0.006 / +0.021) -- but a broadcast player is only ~30-50 px tall
-once 1920 is letterboxed to 896, so that says more about scale than about masks. --crop-pair
-puts the two crossing players at the size the model was trained for.
+Writes <out>/ab_f<N>[_crop][_solo].jpg plus a 4x zoom on the overlapping pair.
 """
 import argparse
 import os
@@ -49,6 +53,8 @@ parser.add_argument('--crop-pair', action='store_true',
                     help='crop to the crossing pair first, so the players fill the 896 input')
 parser.add_argument('--crop-margin', type=float, default=1.0,
                     help='margin around the pair, as a fraction of their union box')
+parser.add_argument('--joint-vs-solo', action='store_true',
+                    help='swap the arms: co-decode all players in one pass vs one pass each')
 args = parser.parse_args()
 
 import cv2  # noqa: E402
@@ -261,11 +267,43 @@ item['image'] = norm(item['image_cv'])
 padded_rgb = np.array(item['image_cv'])
 item['image_cv'] = torch.tensor(item['image_cv'])
 
-runs = {}
-for label, use_mask in (('masks', True), ('boxes', False)):
-    print(f'forward, mask_prompt={use_mask} ...', flush=True)
+def forward(it, use_mask):
     with torch.no_grad():
-        runs[label] = model([item], mask_prompt=use_mask, kpt_prompt=False, text_prompt=False)[0]
+        return model([it], mask_prompt=use_mask, kpt_prompt=False, text_prompt=False)[0]
+
+
+def solo(it):
+    """One forward pass per player, so no query can attend to the other one.
+
+    Same image, same boxes, same weights, same `interaction` flag as the joint pass -- the only
+    thing removed is who else is in the batch. That is the regime our own pose path runs in:
+    GVHMRPoseEstimator calls HMRBackend.estimate_bodies per track, so crossing players are
+    never co-decoded.
+    """
+    outs = []
+    for i in range(len(present)):
+        one = dict(it)
+        one['boxes'] = it['boxes'][i:i + 1]
+        one['masks'] = it['masks'][i:i + 1]
+        one['track_ids'] = [it['track_ids'][i]]
+        outs.append(forward(one, False))
+    return {'vertices': torch.cat([o['vertices'] for o in outs])}
+
+
+if args.joint_vs_solo:
+    # SMPLDecoder's BUDDI-style cross-person attention is gated by batch['interaction'], and
+    # upstream's own inference leaves it unset -- so a plain multi-person pass is N independent
+    # decodes and joint-vs-solo comes out bit-identical. Turn it on for BOTH arms.
+    item['interaction'] = True
+    arms = (('joint', lambda: forward(item, False)), ('solo', lambda: solo(item)))
+else:
+    arms = (('masks', lambda: forward(item, True)), ('boxes', lambda: forward(item, False)))
+left, right = arms[0][0], arms[1][0]
+
+runs = {}
+for label, run_arm in arms:
+    print(f'forward, {label} ...', flush=True)
+    runs[label] = run_arm()
 
 # ---- overlay + silhouette agreement ----------------------------------------------------
 Kp = item['cam_int'][0].numpy()
@@ -298,22 +336,23 @@ for label, out in runs.items():
                       palette[i % len(palette)], 1)
         cv2.putText(canvas, str(tid), (int(bx[0]), max(10, int(bx[1]) - 3)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, palette[i % len(palette)], 1, cv2.LINE_AA)
-    cv2.putText(canvas, f'prompt: {label}', (12, 28), cv2.FONT_HERSHEY_SIMPLEX,
+    cv2.putText(canvas, label, (12, 28), cv2.FONT_HERSHEY_SIMPLEX,
                 0.9, (255, 255, 255), 2, cv2.LINE_AA)
     panels[label], scores[label] = canvas, sil_scores
 
 print('\nmesh-vs-own-mask IoU (higher = mesh stays on its own player)')
-print('  track   masks   boxes   delta')
+print(f'  track   {left:>5}   {right:>5}   delta')
 for i, (tid, _b) in enumerate(present):
-    m, b = scores['masks'][i], scores['boxes'][i]
+    m, b = scores[left][i], scores[right][i]
     print(f'  {tid:5d}   {m:.3f}   {b:.3f}   {m - b:+.3f}')
-mm, bb = float(np.mean(scores['masks'])), float(np.mean(scores['boxes']))
+mm, bb = float(np.mean(scores[left])), float(np.mean(scores[right]))
 print(f'  mean    {mm:.3f}   {bb:.3f}   {mm - bb:+.3f}')
 
 out_dir = REPO / args.out_dir
 out_dir.mkdir(parents=True, exist_ok=True)
-side = np.concatenate([panels['masks'], panels['boxes']], axis=1)
-tag = f'f{frame_idx}' + ('_crop' if args.crop_pair else '')
+side = np.concatenate([panels[left], panels[right]], axis=1)
+tag = f'f{frame_idx}' + ('_crop' if args.crop_pair else '') \
+    + ('_solo' if args.joint_vs_solo else '')
 dst = out_dir / f'ab_{tag}.jpg'
 cv2.imwrite(str(dst), cv2.cvtColor(side, cv2.COLOR_RGB2BGR))
 print(f'\nwrote {dst}')
@@ -336,7 +375,7 @@ if pair is not None and best > 0:
     x1 = int(min(IMG, max(pb[i][2], pb[j][2]) + 40))
     y1 = int(min(IMG, max(pb[i][3], pb[j][3]) + 40))
     crops = [cv2.resize(p[y0:y1, x0:x1], None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
-             for p in (panels['masks'], panels['boxes'])]
+             for p in (panels[left], panels[right])]
     zoom = np.concatenate(crops, axis=1)
     zdst = out_dir / f'ab_{tag}_zoom.jpg'
     cv2.imwrite(str(zdst), cv2.cvtColor(zoom, cv2.COLOR_RGB2BGR))
