@@ -648,6 +648,28 @@ humans from **9 to 0** and turned the dormant stitcher from 1 merge into 14.
 **So the tracking half of #132 is done for this clip**, and further identity work has no measured
 payoff here.
 
+### Does the split cost anything in the render? — measured 2026-08-05, no
+
+The worry was concrete: the split creates more identities, and a short-lived identity pops into
+the render and vanishes. Visible churn could easily cost more than the wrong-kit frames the split
+removes. Run both ways through the real detector and tracker over 48 frames, then stitched:
+
+| | subjects | merges | coverage (subject-frames) | short (<8 frames) | teams |
+|---|---|---|---|---|---|
+| `--no-kit-split` | 21 | 0 | 848 | 0 | A 10 / B 11 |
+| default | **21** | **6** | **848** | **0** | A 10 / B 11 |
+
+The split creates 6 extra fragments and the stitcher merges exactly 6 back. **Same subject count,
+identical coverage, no short-lived subjects in either arm** — it purely relabels, dropping and
+duplicating nothing. The churn risk is not real on this clip, and `--no-kit-split` exists if a
+future clip disagrees.
+
+One trap worth recording: the first version of `scripts/ab_subject_stability.py` read the exported
+`scene.json`, where under `--pose fake` every subject carries exactly 3 keyframes. It cheerfully
+reported "21 vs 21, identical" — a verdict it would have produced for *any* input. It now refuses
+to judge when every subject has the same tiny frame count, and the comparison above is measured at
+the tracklet level instead.
+
 ### Shot-cut detection — closed 2026-08-05
 
 The last real defect found on the way, and unlike the three above it was worth fixing, because it
