@@ -1,0 +1,37 @@
+# `models/` — every downloaded weight, in one place
+
+`models/` is gitignored and holds ~16 GB. Nothing in it is redistributable: SMPL-X is
+MPI non-commercial, the SAM families are behind Meta's gated repos. It is the *only*
+place weights should land — if you find a checkpoint elsewhere on the box, move it here.
+
+Consolidated 2026-08-05 from four scattered locations (`~/sam3`, `~/sam3dbody`,
+`AVATAR/SMPL-X`, `backends/PromptHMR/data`) plus the two framework caches. No compatibility
+symlinks were left at the old paths, so a stale absolute path fails loudly instead of
+silently reading a second copy.
+
+| Dir | Size | What | Reached by |
+|-----|------|------|-----------|
+| `smplx/` | 934 M | SMPL-X neutral body model + the MPI download zip | `$PITCH3D_SMPLX_MODELS`, else the repo-local default `models/smplx` (`smplx_lbs.locate_smplx_model`) |
+| `prompthmr/` | 3.4 G | PromptHMR image + video checkpoints, configs, body models | `scripts/check_prompthmr_weights.py`, `scripts/prompthmr_mask_ab.py` |
+| `sam3/` | 6.5 G | SAM 3 (`facebook/sam3`) | not wired yet — needs its own env (transformers 5.x vs our 4.57.6 pin) |
+| `sam3d-body/` | 2.7 G | SAM 3D Body + MHR rig (`facebook/sam-3d-body-dinov3`) | `adapters/models/sam3dbody_backend.py` (pod only) |
+| `hf/` | 443 M | Hugging Face cache — SAM ViT-B, DINOv2-small | `$HF_HOME` |
+| `torch/` | 1.3 G | torch.hub cache — MaskPose-b, RTMDet-ins-l-mask | `$TORCH_HOME` |
+
+## The two things that will bite you
+
+**`prompthmr/data/` is named after upstream, not after us.** PromptHMR hardcodes its asset
+paths relative to the process cwd (`data/pretrain/…`, `data/body_models/…` — see
+`prompt_hmr/models/phmr.py:11-13`). So our scripts `chdir` into `models/prompthmr` and put
+the *code* checkout on `sys.path` instead. Renaming that `data/` level breaks the backend.
+
+Its `data/body_models/smplx/SMPLX_NEUTRAL.npz` is a relative symlink into `models/smplx/`
+— the same licensed 104 MB file, not a second copy.
+
+**`HF_HOME` / `TORCH_HOME` only apply if the shell exports them.** They live in `.env`, and
+`.env` is read by the pod shell scripts and by `pitch3d.env.load_env()` — *not* by a bare
+`.venv/bin/python -m pitch3d.app.cli`. That run will re-download into `~/.cache`. To be sure:
+
+```bash
+set -a; . ./.env; set +a
+```

@@ -89,7 +89,7 @@ def test_matches_reference_smplx_package(model: SmplxModel):
     torch = pytest.importorskip("torch")
     import os
 
-    models_dir = os.environ.get("PITCH3D_SMPLX_MODELS") or "SMPL-X/models"
+    models_dir = os.environ.get("PITCH3D_SMPLX_MODELS") or "models/smplx"
     ref = smplx.create(
         models_dir, model_type="smplx", gender="neutral", use_pca=False,
         flat_hand_mean=True, num_betas=10, use_face_contour=False, ext="npz",

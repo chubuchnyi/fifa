@@ -76,7 +76,7 @@ def main() -> None:
     ap.add_argument("--out", default=os.environ.get(
         "PITCH3D_DEBUG_OUT", "out/physics_debug/frames.npz"))
     ap.add_argument("--models", default=os.environ.get(
-        "PITCH3D_SMPLX_MODELS", "SMPL-X/models"))
+        "PITCH3D_SMPLX_MODELS", "models/smplx"))
     ap.add_argument("--fps", type=float, default=29.97)
     args = ap.parse_args()
 

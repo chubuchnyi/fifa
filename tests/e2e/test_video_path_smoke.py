@@ -25,7 +25,7 @@ RENDER_SCRIPT = REPO / "scripts" / "blender_animate.py"
 
 def _models_dir() -> str | None:
     load_env()
-    d = os.environ.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models")
+    d = os.environ.get("PITCH3D_SMPLX_MODELS", "models/smplx")
     return d if os.path.exists(os.path.join(d, "smplx", "SMPLX_NEUTRAL.npz")) else None
 
 

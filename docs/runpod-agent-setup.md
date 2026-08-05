@@ -206,14 +206,14 @@ If any of these 401/403: the account hasn't accepted that repo's terms in a brow
 ## Step 6 — SMPL-X body model (MANUAL transfer — the agent cannot download it)
 
 The SMPL-X model is behind an MPI login form (non-commercial license) — there is **no token-based
-download**. The human already has the verified archive locally at `AVATAR/SMPL-X/models_smplx_v1_1.zip`
+download**. The human already has the verified archive locally at `AVATAR/models/smplx/models_smplx_v1_1.zip`
 (870 MB). **From the local machine** (not from inside the box), copy it up — build the SSH endpoint
 from `get-pod` (`publicIp` + mapped `22` port), as in runbook §3:
 
 ```bash
 # --- run this on the LOCAL machine ---
 scp -P <mappedPort> -i ~/.ssh/id_ed25519_runpod \
-  ~/AVATAR/SMPL-X/models_smplx_v1_1.zip  root@<publicIp>:/workspace/weights/
+  ~/AVATAR/models/smplx/models_smplx_v1_1.zip  root@<publicIp>:/workspace/weights/
 ```
 
 Then, **on the box**, verify + extract the NEUTRAL model (what we use for soccer):

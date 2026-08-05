@@ -170,7 +170,7 @@ class PlaceholderJointModel:
 
 
 _SMPLX_ENV_PATH = "PITCH3D_SMPLX_MODEL_PATH"
-_SMPLX_DEFAULT_DIR = "SMPL-X/models"
+_SMPLX_DEFAULT_DIR = "models/smplx"
 
 #: SMPL-X joint index for each of the 16 canonical :data:`JOINT_NAMES`, in order (rest-pose probe).
 SMPLX_TO_CANONICAL: tuple[int, ...] = (0, 6, 12, 15, 16, 17, 18, 19, 20, 21, 1, 2, 4, 5, 7, 8)
@@ -224,7 +224,7 @@ class SmplxJointModel:
     use, so importing this module stays pure (no torch at load time).
 
     Asset: ``smplx`` package + ``SMPLX_{GENDER}.npz``, resolved from ``model_path`` →
-    ``$PITCH3D_SMPLX_MODEL_PATH`` → ``SMPL-X/models``.
+    ``$PITCH3D_SMPLX_MODEL_PATH`` → ``models/smplx``.
     """
 
     model_path: str | None = None

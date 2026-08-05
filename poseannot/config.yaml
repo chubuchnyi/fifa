@@ -5,7 +5,7 @@
 # the one the producer invents when it cannot build a camera from PnLCalib's homographies (#61).
 scene_json: out/physics_debug/scene_replayed_v2_rigid.json
 source_video: samples/video/Colombia-1-0-Congo-DR1080p.mp4
-smplx_models: SMPL-X/models
+smplx_models: models/smplx
 fps: 29.97
 
 users_yaml: poseannot/users.yaml

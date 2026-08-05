@@ -37,7 +37,7 @@ import numpy as np  # noqa: E402
 from pitch3d.core.correction.coherence import add_temporal_coherence  # noqa: E402
 from pitch3d.core.scene.serialization import from_json  # noqa: E402
 
-MODEL_DIR = "SMPL-X/models"
+MODEL_DIR = "models/smplx"
 CLIPS = {"A (SMPLest-X, production)": "A_smplestx", "B (SAM 3D Body)": "B_sam3dbody"}
 FPS = 29.97
 

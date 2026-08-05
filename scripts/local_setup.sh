@@ -23,7 +23,7 @@
 # So we install `smplx` directly instead. The full `hmr` extra is the GPU/cloud path
 # (scripts/cloud_setup.sh), not this local demo path.
 #   PITCH3D_BLENDER=<path>           Blender binary for the demo (else auto-detected)
-#   PITCH3D_SMPLX_MODELS=SMPL-X/models   dir holding smplx/SMPLX_NEUTRAL.npz
+#   PITCH3D_SMPLX_MODELS=models/smplx   dir holding smplx/SMPLX_NEUTRAL.npz
 set -euo pipefail
 
 VENV="${PITCH3D_VENV:-.venv}"
@@ -32,7 +32,7 @@ TORCH_VERSION="${PITCH3D_TORCH:-2.6.0}"
 EXTRAS="${PITCH3D_LOCAL_EXTRAS:-export,demo,dev}"
 SMPLX_PIN="smplx==0.1.28"   # == the pin in pyproject's [hmr] extra; installed sans chumpy (see header)
 SKIP_TORCH="${PITCH3D_SKIP_TORCH:-0}"
-SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-SMPL-X/models}"
+SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-models/smplx}"
 
 cd "$(dirname "$0")/.."   # repo root, regardless of where this is invoked from
 set -a; [ -f .env ] && . ./.env; set +a   # machine paths/keys (PITCH3D_BLENDER, ...) from .env

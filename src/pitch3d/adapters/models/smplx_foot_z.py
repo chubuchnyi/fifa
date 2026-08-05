@@ -63,7 +63,7 @@ def make_smplx_foot_z_provider(
 
     * ``model_path`` — if ``None``, resolved via
       :func:`locate_smplx_model` (env vars ``PITCH3D_SMPLX_MODEL`` /
-      ``PITCH3D_SMPLX_MODELS`` or a repo-local ``SMPL-X/models`` fallback).
+      ``PITCH3D_SMPLX_MODELS`` or a repo-local ``models/smplx`` fallback).
     * Returns ``None`` when the model is unavailable — the gate then falls
       back to its shared ``cfg.target_pelvis_m`` per T6a defaults.
 

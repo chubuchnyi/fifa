@@ -38,9 +38,10 @@ samples/
 *.safetensors
 *.pkl
 
-# Licensed body models — must NOT enter the public repo (non-commercial MPI SMPL-X
-# license). Local downloads/model workspace: the saved download page + the 830 MB model.
-/SMPL-X/
+# Every downloaded model checkpoint lives here, in one place (~14 GB): PromptHMR, SAM 3,
+# SAM 3D Body, SMPL-X. Layout: docs/models-dir.md. Some are licence-gated (the MPI SMPL-X
+# licence is non-commercial) and none may enter the public repo.
+/models/
 
 # Datasets (large / gated; live outside git — e.g. WorldPose annotations + footage).
 /data/

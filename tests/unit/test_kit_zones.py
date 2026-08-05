@@ -72,7 +72,7 @@ def test_zones_knee_split_and_thigh_cut_on_synthetic_rig():
 
 
 def test_zones_on_real_smplx_model_are_anatomically_ordered():
-    path = locate_smplx_model("SMPL-X/models")
+    path = locate_smplx_model("models/smplx")
     if path is None:
         pytest.skip("no local SMPL-X model")
     from pitch3d.adapters.models.smplx_lbs import SmplxModel

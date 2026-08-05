@@ -8,7 +8,7 @@ Example ``poseannot/config.yaml``::
 
     scene_json: out/anim_full_realism/scene.json
     source_video: samples/video/Colombia-1-0-Congo-DR1080p.mp4
-    smplx_models: SMPL-X/models
+    smplx_models: models/smplx
     fps: 29.97
     users_yaml: poseannot/users.yaml
     jwt_secret: change-me-before-deploy
@@ -79,7 +79,7 @@ def load(path: Path | None = None) -> PoseAnnotConfig:
             ov.get("source_video") or _get("source_video")
             or "samples/video/Colombia-1-0-Congo-DR1080p.mp4"
         ),
-        smplx_models=_resolve(_get("smplx_models") or "SMPL-X/models"),
+        smplx_models=_resolve(_get("smplx_models") or "models/smplx"),
         fps=float(_get("fps") or 29.97),
         users_yaml=_resolve(_get("users_yaml") or "poseannot/users.yaml"),
         jwt_secret=str(_get("jwt_secret") or "dev-secret-change-me"),

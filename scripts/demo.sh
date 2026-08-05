@@ -52,7 +52,7 @@ esac; shift; done
 # local tool resolution (from .env, with sane fallbacks)
 PY_LOCAL="${PITCH3D_PY_LOCAL:-.venv/bin/python}"
 BLENDER="${PITCH3D_BLENDER:-$(command -v blender 2>/dev/null || echo blender)}"
-SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-SMPL-X/models}"
+SMPLX_MODELS="${PITCH3D_SMPLX_MODELS:-models/smplx}"
 EXPORT_DIR="$OUT_LOCAL/export/scene.smplx_npz"
 MESH_DIR="$OUT_LOCAL/mesh"
 

@@ -1,8 +1,8 @@
 """Does the released PromptHMR checkpoint fit the released code, key for key?
 
 Evidence for docs/findings/occlusion-pose-research-2026-08-04.md — run it instead of trusting
-the write-up. CPU only, ~1 min, needs the gitignored checkout at backends/PromptHMR (see that
-doc for what to clone and fetch).
+the write-up. CPU only, ~1 min, needs the gitignored code checkout at backends/PromptHMR and its
+weights at models/prompthmr (see that doc for what to clone and fetch).
 
     .venv/bin/python scripts/check_prompthmr_weights.py             # key coverage, ~1 min
     .venv/bin/python scripts/check_prompthmr_weights.py --forward   # + a real forward, ~4 min
@@ -27,14 +27,17 @@ import torch
 import torch.nn as nn
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--backend-dir', default='backends/PromptHMR',
-                    help='PromptHMR checkout (its config paths are relative, so we chdir into it)')
+parser.add_argument('--backend-dir', default='backends/PromptHMR', help='the code checkout')
+parser.add_argument('--weights', default='models/prompthmr',
+                    help='the weights bundle (holds data/)')
 parser.add_argument('--forward', action='store_true',
                     help='also run a forward pass and A/B the mask prompt')
 args = parser.parse_args()
 
-os.chdir(args.backend_dir)
-sys.path.insert(0, '.')
+# Upstream hardcodes its asset paths relative to cwd ('data/pretrain/...', 'data/body_models/...'),
+# so run from the weights bundle and import the code from wherever the checkout lives.
+sys.path.insert(0, os.path.abspath(args.backend_dir))
+os.chdir(args.weights)
 
 pl = types.ModuleType('pytorch_lightning')
 pl.LightningModule = nn.Module

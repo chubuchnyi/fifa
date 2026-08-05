@@ -15,7 +15,7 @@ path (broadcast soccer GT is body-only — see the pose-backend notes).
 
 The model is located like every gated asset (mirroring ``locate_blender``): an explicit path →
 ``$PITCH3D_SMPLX_MODEL`` (a direct ``.npz``) → ``$PITCH3D_SMPLX_MODELS`` (the models dir, the
-``smplx/SMPLX_<gender>.npz`` convention) → a repo-local ``SMPL-X/models`` fallback → ``None``.
+``smplx/SMPLX_<gender>.npz`` convention) → a repo-local ``models/smplx`` fallback → ``None``.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ _RIGHT_HAND_START = 40
 
 def locate_smplx_model(explicit: str | None = None, gender: str = "NEUTRAL") -> str | None:
     """Find a SMPL-X model ``.npz``: explicit → ``$PITCH3D_SMPLX_MODEL`` → ``$PITCH3D_SMPLX_MODELS``
-    → repo-local ``SMPL-X/models`` → ``None`` (mirrors :func:`...adapters.blender.locate_blender`).
+    → repo-local ``models/smplx`` → ``None`` (mirrors :func:`...adapters.blender.locate_blender`).
     """
     name = f"SMPLX_{gender.upper()}.npz"
     if explicit and os.path.isfile(explicit):
@@ -46,7 +46,7 @@ def locate_smplx_model(explicit: str | None = None, gender: str = "NEUTRAL") -> 
     direct = os.environ.get("PITCH3D_SMPLX_MODEL")
     if direct and os.path.isfile(direct):
         return direct
-    roots = [os.environ.get("PITCH3D_SMPLX_MODELS"), "SMPL-X/models"]
+    roots = [os.environ.get("PITCH3D_SMPLX_MODELS"), "models/smplx"]
     for root in roots:
         if not root:
             continue

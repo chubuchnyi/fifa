@@ -35,7 +35,7 @@ First `/api/scene` call warms the SMPL-X FK cache — expect ~30 s on a
 
 ## RunPod deploy
 
-`.venv` + `pitch3d` package + `SMPL-X/models/` + video file + `scene.json`
+`.venv` + `pitch3d` package + `models/smplx/` + video file + `scene.json`
 must all be on the pod's persistent volume.  Then:
 
 ```bash

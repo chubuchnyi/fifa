@@ -28,7 +28,7 @@ the same mesh **without Blender** (quick look / pod sanity check).
 | Need | Local path |
 |---|---|
 | Blender binary | `/home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender` (5.1.2) |
-| SMPL-X body model (gated) | `/home/chubuchnyi/AVATAR/SMPL-X/models/` (`smplx/SMPLX_NEUTRAL.npz`) |
+| SMPL-X body model (gated) | `/home/chubuchnyi/AVATAR/models/smplx/` (`smplx/SMPLX_NEUTRAL.npz`) |
 | `smplx` python pkg | repo venv `/home/chubuchnyi/AVATAR/.venv` |
 | A `smplx_npz` export | e.g. `out/cuda/export/scene.smplx_npz/subject_*.npz` |
 

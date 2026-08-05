@@ -47,6 +47,7 @@ Each doc has one job. If two docs seem to say the same thing, the table below sa
 | [`runpod-runbook.md`](runpod-runbook.md) | **Step 1 — from your laptop:** provision a RunPod box (`runpodctl`/MCP, GPU pick, SSH). |
 | [`runpod-agent-setup.md`](runpod-agent-setup.md) | **Step 2 — on the box:** install the stack, pull weights/datasets, verify CUDA. |
 | [`pose-bakeoff-runbook.md`](pose-bakeoff-runbook.md) | The pose-model bake-off procedure (SMPLest-X vs fallback), scored in metres. |
+| [`models-dir.md`](models-dir.md) | Where every downloaded checkpoint lives (`models/`, gitignored, ~16 GB) and what reaches it. |
 
 ## Archive
 

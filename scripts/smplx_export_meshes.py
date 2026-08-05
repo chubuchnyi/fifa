@@ -30,7 +30,7 @@ from pitch3d.env import load_env
 
 load_env()  # PITCH3D_SMPLX_MODELS and friends come from the repo-root .env, never hard-coded
 
-MODELS = os.environ.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models")
+MODELS = os.environ.get("PITCH3D_SMPLX_MODELS", "models/smplx")
 NPZ_DIR = os.environ.get("PITCH3D_NPZ_DIR", "out/cuda/export/scene.smplx_npz")
 OUT = os.environ.get("PITCH3D_MESH_OUT", "out/cuda/mesh")
 FRAME = int(os.environ.get("PITCH3D_MESH_FRAME", "0"))

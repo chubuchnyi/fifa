@@ -84,7 +84,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=env.get("PITCH3D_CORRECTIONS_JSON", ""),
         help="annotator edits.json to fold in; default is the sidecar beside --scene",
     )
-    p.add_argument("--smplx-models", default=env.get("PITCH3D_SMPLX_MODELS", "SMPL-X/models"))
+    p.add_argument("--smplx-models", default=env.get("PITCH3D_SMPLX_MODELS", "models/smplx"))
     p.add_argument("--source-video", default=env.get("PITCH3D_STADIUM_VIDEO", ""))
     p.add_argument(
         "--crowd-mode",
