@@ -395,7 +395,40 @@ essentially the same pixels twice" and call that the second half of the ticket. 
 same pixels twice — because it is the same man twice. That is a *tracking* fault presented to the
 pose stage, not evidence that pose fusion happens. A2 has to be run on a real occlusion instead.
 
-#### A2, pose — next, **on frame 87, not 124**
+#### A2, pose — **DONE 2026-08-05, and it does NOT fail**
+
+`scripts/smplestx_occlusion.py --frame 87 --pair 15 85`, SMPLest-X Huge on CPU, fed our own
+ByteTrack boxes through the production `_infer_crop`. Both SAM masks were checked against kit
+colour before anything was scored (15 → BLU, 85 → YEL, both as expected), so these numbers are
+measured against the right two men:
+
+| | track 15 (front, BLU) | track 85 (back, YEL) |
+|---|---|---|
+| own-mask IoU | 0.567 | 0.575 |
+| mesh landing on **its own** player | **0.787** | **0.897** |
+| mesh landing on **the other** player | 0.114 | 0.089 |
+| solved depth | 39.58 m | 38.15 m |
+
+**No fusion.** Two crops of an overlapping pair produce two distinct bodies on two distinct
+players; 79 % and 90 % of each mesh sits on its own man and under 12 % strays onto the other.
+`out/phmr_ab/a2_smplestx_f87_15_85.png` says the same by eye — the only visible defect is one
+splayed right leg on the occluded player, which is a pose error, not an identity error.
+
+Two things weaken this frame as a test, and both must be said rather than buried:
+
+- **The depth order flips** (back player solves 1.42 m *nearer* than the front one) — but our
+  pipeline never reads HMR depth. `SMPLestXBackend.estimate_bodies` returns orientation, body
+  pose, betas and pelvis-above-foot and *no translation at all*; world position comes from the
+  foot point through the pitch homography. So metric 3 measures a quantity our architecture
+  already routes around. It is listed here because it was promised, not because it costs us.
+- **The occlusion is mild.** `cover = 0.682` is box arithmetic. In pixels, SAM gives the back
+  player 1973 px inside a 3354 px box — a fill of **0.59**, where an *unoccluded* standing player
+  runs 0.30–0.45. He is barely hidden. This is the worst genuine two-player overlap in the shot,
+  so the honest reading is that **this clip does not contain a hard occlusion at all**.
+
+#### A2 setup notes (superseded plan text below kept for the run recipe)
+
+**On frame 87, not 124**
 
 Run the production per-crop path — SMPLest-X Huge, `--pose gvhmr --pose-backend
 pitch3d.adapters.models.smplestx_backend:make` — on **frame 87 (track 85 YEL behind track 15 BLU,
@@ -412,11 +445,19 @@ the three MPI `SMPLX_{NEUTRAL,MALE,FEMALE}.npz` out of `models/smplx/`, plus `SM
 carry and which came from the ungated `camenduru/SMPLer-X`. The `SMPLX` singleton loads clean
 under our numpy 2.4.6 / smplx 0.1.28 (10475 verts, 20908 faces, J14 regressor 14×10475).
 
-**One blocker left:** SMPLest-X hardcodes `.cuda()` in ~15 places on the inference path
-(`models/SMPLest_X.py:25,47,54`, `utils/transforms.py`, `main/base.py`), and our local torch is
-`2.12.1+cpu`. They are all `.cuda()` *method* calls, so a two-line shim in our own probe script —
-identity `torch.Tensor.cuda` / `torch.nn.Module.cuda` when the device is CPU — clears it without
-patching the vendored checkout. `DataParallel` already degrades to a plain call with no devices.
+**Two things it took to run locally**, both solved and both in `scripts/smplestx_occlusion.py`:
+
+- SMPLest-X hardcodes `.cuda()` in ~15 places on the inference path (`models/SMPLest_X.py:25,47,54`,
+  `utils/transforms.py`, `main/base.py`) and our torch is `2.12.1+cpu`. They are all `.cuda()`
+  *method* calls, so making `torch.Tensor.cuda` / `torch.nn.Module.cuda` identity for the run
+  clears every one without patching the vendored checkout. `DataParallel` already degrades to a
+  plain call when there are no devices.
+- **The shipped checkpoint froze this machine twice.** `smplest_x_h.pth.tar` is 8.25 GB of which
+  two thirds is optimizer state; loading it plus the model plus three SMPL-X gender layers
+  exceeded the ~12 GB free here. `models/smplest-x/smplest_x_h_slim.pth.tar` is the same 519
+  tensors / 687.2M params with `optimizer` dropped — **2.75 GB**, and it is the script's default
+  (`--ckpt`). Written with `torch.load(..., mmap=True)` so the strip itself never holds 8 GB.
+  `--threads 6` keeps a ViT-H off all 16 cores; without it the laptop is unusable while it runs.
 
 ### Stage B — the head-to-head, same boxes, same frame, same metrics
 
@@ -429,6 +470,13 @@ Our ByteTrack boxes feed every arm, so nothing here measures a different detecto
 
 Arms 2–4 are cheap once arm 1 runs; the honest comparison is 1 vs 2, and 3/4 only earn their
 dependencies if they beat 2.
+
+**Not run, and on this evidence it should not be — 2026-08-05.** Stage B exists to find a pose
+model that fuses two crossing players less than arm 1 does. A2 measured arm 1 fusing by 0.09–0.11
+at the hardest genuine overlap in the clip. There is no gap for arms 2–4 to close, and the three
+of them together cost a 2.2 GB checkpoint, a 6.5 GB SAM branch and a new inference path. Running
+them would produce a table, not an improvement. Revisit only if a clip with real occlusion
+appears, or if A1's tracking fix changes which boxes reach the pose stage.
 
 ### What exactly gets compared
 
@@ -447,19 +495,44 @@ One number is not enough — own-mask IoU cannot tell a *bad fit* from a *fused*
 Metrics 1–3 also run over the window 115–135, not just frame 124, so a lucky single frame cannot
 carry the verdict.
 
-### Stage C — the decision this buys
+### Stage C — the decision, taken 2026-08-05
 
-- Arm 1 not measurably worse → #132's premise is wrong for this clip. Close it, and the whole
-  PromptHMR adoption is unnecessary. *This remains a live outcome.*
-- Arm 2 beats arm 1 → adopt PromptHMR for the multi-person pass; the SAM/mask branch (6.5 GB) and
-  the `interaction` flag both stay out unless arms 3/4 beat arm 2.
-- Either way, shot-cut detection gets fixed, because it is a real defect found on the way.
+The first bullet is the one that landed:
+
+> Arm 1 not measurably worse → #132's premise is wrong for this clip.
+
+**#132 splits in two, and only one half survives contact with the pixels.**
+
+- **"…and fuse per-crop poses (occlusion)" — not reproduced. Drop it.** At the clip's hardest
+  genuine two-player overlap the production estimator keeps 79 % and 90 % of each mesh on its own
+  player. The overlap itself is mild (back player fills 0.59 of his box). No pose model can be
+  justified against a failure that does not occur, so **PromptHMR is not adopted**: no 2.2 GB
+  image checkpoint, no 6.5 GB SAM 3 branch, no `interaction` flag, no second inference path. The
+  work is not wasted — it is what proved the mask prompt, the joint pass and the cross-person
+  attention all buy nothing here, and that is a permanent answer, not a deferral.
+- **"Player crossings break ByteTrack IDs" — reproduced, and worse than the ticket says.** All 38
+  player tracks in shot 1 break somewhere; **9 change team**; 2 duplicate detections put two ids
+  on one man. That is where the effort goes.
+
+The tracking work #132 actually needs, in the order it pays:
+
+1. **Reject duplicate detections** — same kit, IoU ≥ 0.35, box heights within 25 % is already a
+   working test (`--kit-scan` finds exactly 2 in shot 1, both confirmed by eye). NMS before
+   ByteTrack, not after.
+2. **Refuse to hand an id to a new kit.** Team colour is a one-line per-box feature that our two
+   teams make trivially separable, and it catches the swap class that appearance re-ID is meant
+   to catch, at no model cost. It cannot fix a swap on its own, but it can *mark* one — which is
+   R-6, and better than a silent handover.
+3. **Shot-cut detection** — a real defect found on the way, unrelated to occlusion but still open.
 
 ### Status of the pieces
 
-- SMPLest-X Huge (8.2 GB, `waanqii/SMPLest-X`, ungated) downloading straight to `models/smplest-x/`;
-  code checkout in `backends/SMPLest-X`. No pod needed for either.
-- The 6.5 GB SAM 3 branch is still unjustified on the evidence so far — do not wire it in yet.
+- SMPLest-X Huge runs locally on CPU (`--ckpt smplest_x_h_slim`, 2.75 GB, `--threads 6`). No pod
+  was needed for the download or the run.
+- The 6.5 GB SAM 3 branch stays out. So does PromptHMR — see Stage C.
+- SAM ViT-B (443 MB, already cached) earns its place as the *measurement* tool: it is what makes
+  own-mask IoU and cross-contamination checkable, and the kit test is what makes SAM's own output
+  checkable.
 
 ## What will bite (found by reading their code, not by running it)
 
