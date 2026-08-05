@@ -611,6 +611,45 @@ overlapping its own player in time can ever satisfy. That points back at duplica
 out of 36, against a real risk the docstring names — "a missed merge leaves two fragments, but a
 *wrong* merge teleports a body".
 
+#### Nor is duplicate suppression the answer — the suspect was tested and cleared
+
+The paragraph above named overlapping duplicate boxes as the structural blocker and pointed at
+duplicate suppression as the fix. **That was a hypothesis, and it is false.**
+`identity_budget.py --nms-sweep` puts greedy per-frame NMS ahead of tracking (RF-DETR is
+DETR-family and ships none of its own) and re-measures the whole chain:
+
+| NMS IoU | boxes kept | ids before stitch | ids after | merges |
+|---|---|---|---|---|
+| off | 4362 (100 %) | 56 | 36 | 14 |
+| 0.60 | 4346 (99.6 %) | 54 | 35 | 13 |
+| 0.50 | 4332 (99.3 %) | 54 | 35 | 13 |
+| 0.45 | 4325 (99.2 %) | 55 | 35 | 14 |
+| 0.40 | 4319 (99.0 %) | 55 | 35 | 14 |
+| 0.37 | 4315 (98.9 %) | 56 | 36 | 14 |
+
+Duplicate boxes are **~1 % of all detections**, and removing them moves the identity count by at
+most one. The column is not even monotone — 0.37 lands back on the un-suppressed 36/14 — so what
+movement there is sits inside run-to-run re-association jitter. Merges go *down* slightly if
+anything, the opposite of the prediction.
+
+A note on why the threshold could not have been picked by eye either: the borderline same-kit pair
+at frame 122 (tracks 36/99, IoU 0.325) is **not a duplicate**. `out/phmr_ab/pair_36_99.png` shows
+box 36 spanning a standing yellow player *and* a prone blue one, so both torso samples read yellow.
+A bad multi-person box, not one player twice — and NMS would have deleted one of the two, at even
+odds of deleting the good one.
+
+### Where the tracking half actually stands
+
+Three candidate improvements were measured and all three came back empty: stitch gates (≤2 ids),
+duplicate suppression (≤1 id), and the identity budget itself was over-stated (36 ids against ≥28
+real humans, not 17). The one change that did land — the kit split — took tracks carrying two
+humans from **9 to 0** and turned the dormant stitcher from 1 merge into 14.
+
+**So the tracking half of #132 is done for this clip**, and further identity work has no measured
+payoff here. What remains open is **shot-cut detection**, which is a real latent defect rather than
+a quality dial: nothing stops `--frames 334` from tracking and calibrating straight through the cut
+at frame 236 and silently blending two cameras.
+
 ### Stage C — the decision, taken 2026-08-05
 
 The first bullet is the one that landed:
