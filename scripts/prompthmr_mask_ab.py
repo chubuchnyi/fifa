@@ -7,12 +7,18 @@ Same checkpoint both ways -- `mask_prompt` is one flag -- so the panels differ o
 prompt. Masks come from box-prompted SAM, identity from our own ByteTrack ids, so this measures
 the HMR change alone and not a different tracker.
 
-    .venv/bin/python scripts/prompthmr_find_crossing.py --frames 60      # writes tracks.npz
-    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 41
+    .venv/bin/python scripts/prompthmr_find_crossing.py --frames 60          # writes tracks.npz
+    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29                 # whole frame
+    .venv/bin/python scripts/prompthmr_mask_ab.py --frame 29 --crop-pair     # crossing pair only
 
-Writes <out>/ab_f<N>.jpg (masks | boxes, side by side) and prints, per track, the IoU between
-the projected mesh silhouette and that player's own SAM mask -- higher means the mesh sits on
-its own player rather than drifting onto the neighbour.
+Writes <out>/ab_f<N>[_crop].jpg (masks | boxes, side by side) and prints, per track, the IoU
+between the projected mesh silhouette and that player's own SAM mask -- higher means the mesh
+sits on its own player rather than drifting onto the neighbour.
+
+Run both. Whole-frame is the honest control and it came out flat (2026-08-05, frame 29: mean
+0.495 vs 0.477, crossing pair -0.006 / +0.021) -- but a broadcast player is only ~30-50 px tall
+once 1920 is letterboxed to 896, so that says more about scale than about masks. --crop-pair
+puts the two crossing players at the size the model was trained for.
 """
 import argparse
 import os
@@ -39,6 +45,10 @@ parser.add_argument('--out-dir', default='out/phmr_ab')
 parser.add_argument('--frame', type=int, default=None,
                     help='frame to run; default = the strongest crossing in tracks.npz')
 parser.add_argument('--sam', default='facebook/sam-vit-base')
+parser.add_argument('--crop-pair', action='store_true',
+                    help='crop to the crossing pair first, so the players fill the 896 input')
+parser.add_argument('--crop-margin', type=float, default=1.0,
+                    help='margin around the pair, as a fraction of their union box')
 args = parser.parse_args()
 
 import cv2  # noqa: E402
@@ -67,6 +77,47 @@ if not ok:
     sys.exit(f'could not read frame {frame_idx}')
 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 H, W = frame_rgb.shape[:2]
+principal = (W / 2.0, H / 2.0)  # the solve stores no principal point; the frame centre is it
+
+
+def box_iou(a, b):
+    x0, y0 = max(a[0], b[0]), max(a[1], b[1])
+    x1, y1 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+    if inter <= 0:
+        return 0.0
+    ab = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1])
+    return float(inter / (ab - inter))
+
+
+if args.crop_pair:
+    # Full-frame is the wrong regime for this question: letterboxing 1920 -> 896 leaves a
+    # broadcast player ~30-50 px tall and his 256-px mask prompt ~10 px, so the prompt carries
+    # almost no shape. Cropping to the crossing pair first restores the scale the model expects.
+    pair = max(((i, j) for i in range(len(present)) for j in range(i + 1, len(present))),
+               key=lambda p: box_iou(present[p[0]][1], present[p[1]][1]))
+    a, b = present[pair[0]][1], present[pair[1]][1]
+    ux0, uy0 = min(a[0], b[0]), min(a[1], b[1])
+    ux1, uy1 = max(a[2], b[2]), max(a[3], b[3])
+    mx, my = (ux1 - ux0) * args.crop_margin, (uy1 - uy0) * args.crop_margin
+    cx0, cy0 = int(max(0, ux0 - mx)), int(max(0, uy0 - my))
+    cx1, cy1 = int(min(W, ux1 + mx)), int(min(H, uy1 + my))
+
+    frame_rgb = frame_rgb[cy0:cy1, cx0:cx1]
+    principal = (principal[0] - cx0, principal[1] - cy0)  # NOT the crop centre
+    kept = []
+    for tid, bx in present:
+        shifted = bx.copy()
+        shifted[[0, 2]] -= cx0
+        shifted[[1, 3]] -= cy0
+        inside = shifted[0] >= 0 and shifted[1] >= 0
+        if inside and shifted[2] <= cx1 - cx0 and shifted[3] <= cy1 - cy0:
+            kept.append((tid, shifted))
+    present = kept
+    H, W = frame_rgb.shape[:2]
+    print(f'crop [{cx0},{cy0}]-[{cx1},{cy1}] = {W}x{H}, {len(present)} whole players; '
+          f'tallest {max(b[3] - b[1] for _t, b in present):.0f} px '
+          f'-> {max(b[3] - b[1] for _t, b in present) * 896 / max(W, H):.0f} px at 896')
 
 # ---- masks: SAM prompted by each tracked box, so identity comes from ByteTrack ----------
 print(f'segmenting with {args.sam} ...', flush=True)
@@ -147,9 +198,15 @@ model.is_train = False
 
 calib = np.load(REPO / args.calib)
 focal = float(np.asarray(calib['focal']).reshape(-1)[0])
-# npz 'centre' is the camera's world position in metres, not the principal point, which the
-# solve does not store -- so use the frame centre.
-principal = (W / 2.0, H / 2.0)
+if args.crop_pair:
+    # The solved 4169 px focal describes the 1920-wide frame; on a 370 px window that is a ~5
+    # degree FOV, and the model -- which has never seen one -- puts every body off-canvas.
+    # Substitute a plain ~53 degree pinhole centred on the crop. Depth from this run is
+    # therefore not metric, which costs nothing: world placement comes from our own field
+    # homography, so all this A/B asks is whether the mesh sits on its own player's pixels.
+    print(f'crop intrinsics: focal {max(W, H)} px replaces the solved {focal:.1f} px '
+          '-- depth is not metric here, by design')
+    focal, principal = float(max(W, H)), (W / 2.0, H / 2.0)
 print(f'camera: focal {focal:.1f} px, principal point {principal}')
 
 K = torch.eye(3)
@@ -235,7 +292,7 @@ for label, out in runs.items():
         inter = float((sil & ref_masks[i]).sum())
         union = float((sil | ref_masks[i]).sum())
         sil_scores.append(inter / union if union else 0.0)
-    for i, (_tid, _b) in enumerate(present):
+    for i, (tid, _b) in enumerate(present):
         bx = item['boxes'][i].numpy()
         cv2.rectangle(canvas, (int(bx[0]), int(bx[1])), (int(bx[2]), int(bx[3])),
                       palette[i % len(palette)], 1)
@@ -247,7 +304,7 @@ for label, out in runs.items():
 
 print('\nmesh-vs-own-mask IoU (higher = mesh stays on its own player)')
 print('  track   masks   boxes   delta')
-for i, (_tid, _b) in enumerate(present):
+for i, (tid, _b) in enumerate(present):
     m, b = scores['masks'][i], scores['boxes'][i]
     print(f'  {tid:5d}   {m:.3f}   {b:.3f}   {m - b:+.3f}')
 mm, bb = float(np.mean(scores['masks'])), float(np.mean(scores['boxes']))
@@ -256,7 +313,8 @@ print(f'  mean    {mm:.3f}   {bb:.3f}   {mm - bb:+.3f}')
 out_dir = REPO / args.out_dir
 out_dir.mkdir(parents=True, exist_ok=True)
 side = np.concatenate([panels['masks'], panels['boxes']], axis=1)
-dst = out_dir / f'ab_f{frame_idx}.jpg'
+tag = f'f{frame_idx}' + ('_crop' if args.crop_pair else '')
+dst = out_dir / f'ab_{tag}.jpg'
 cv2.imwrite(str(dst), cv2.cvtColor(side, cv2.COLOR_RGB2BGR))
 print(f'\nwrote {dst}')
 
@@ -280,7 +338,7 @@ if pair is not None and best > 0:
     crops = [cv2.resize(p[y0:y1, x0:x1], None, fx=4, fy=4, interpolation=cv2.INTER_NEAREST)
              for p in (panels['masks'], panels['boxes'])]
     zoom = np.concatenate(crops, axis=1)
-    zdst = out_dir / f'ab_f{frame_idx}_zoom.jpg'
+    zdst = out_dir / f'ab_{tag}_zoom.jpg'
     cv2.imwrite(str(zdst), cv2.cvtColor(zoom, cv2.COLOR_RGB2BGR))
     ids = (present[i][0], present[j][0])
     print(f'wrote {zdst}  (tracks {ids[0]} & {ids[1]}, overlap {best:.0f} px^2)')

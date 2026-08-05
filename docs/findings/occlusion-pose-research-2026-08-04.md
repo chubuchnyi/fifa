@@ -161,6 +161,68 @@ ship-time task, not a prerequisite for measuring whether this helps.
   injecting our PnLCalib R/T/focal/centre skips DROID-SLAM, Metric3D *and* SPEC. Their
   `phmr_vid.py` already builds its intrinsics from `results['camera']`, so the seam exists.
 
+## The run on our own clip (2026-08-05) — masks do not beat boxes; the prompt was the wrong hypothesis
+
+`scripts/prompthmr_find_crossing.py` ranks 60 frames of the Colombia clip by the strongest
+player–player box IoU using **our own** RF-DETR + ByteTrack, so the boxes are the ones the real
+pipeline produces. Winner: **frame 29, tracks 1 vs 2, IoU 0.511** (18 players in frame).
+
+`scripts/prompthmr_mask_ab.py --frame 29` then runs the image model twice on that frame — once
+`mask_prompt=True` with SAM masks prompted by those same boxes, once `False` — and scores each
+player by the IoU between his projected mesh silhouette and his own SAM mask.
+
+| | masks | boxes | delta |
+|---|---|---|---|
+| track 1 (crossing) | 0.614 | 0.620 | −0.006 |
+| track 2 (crossing) | 0.413 | 0.392 | +0.021 |
+| mean over 18 | 0.495 | 0.477 | +0.019 |
+
+**Flat.** Nine players improved, nine got worse; the crossing pair — the entire point — moved by
+less than the spread. Do not read this as "masks don't help". Read the scale:
+
+- PromptHMR letterboxes the **whole frame** to 896², so 1920 → 896 is 0.467×. Our players are
+  63–115 px tall at 1080p, i.e. **29–54 px** in the model's input.
+- The mask prompt is 256², a further 0.286× — so each player's mask is **~10 px tall**. There is
+  almost no shape in it to prompt with.
+- The metric degrades with it: the reference is a SAM mask cut at that same size, and the mesh
+  "silhouette" is projected vertices plus a 3×3 dilation, which at 40 px is a blob.
+
+So the whole-frame A/B is a control that came out null for a reason that is about resolution, not
+about the hypothesis. `--crop-pair` crops to the crossing pair first (frame 29 → a 124×370 window,
+the taller player 112 px → **271 px** at 896) and re-runs the identical A/B in the regime the model
+was trained for. Both runs are kept: the flat one is the honest control.
+
+One thing the crop forces: the solved **4169 px** focal describes the 1920-wide frame, and on a
+370 px window it is a ~5° FOV. The model has never seen one, and its first crop run put every
+vertex off-canvas (IoU 0.000, no mesh drawn). The script now substitutes a plain `max(W, H)`
+pinhole centred on the crop. Depth from that run is not metric — which costs nothing, because
+per "We keep our own world grounding" above, `pose.py estimate()` places the root by field
+homography. The A/B only asks whether the mesh lands on its own player's pixels.
+
+### Crop result: also flat
+
+| | masks | boxes | delta |
+|---|---|---|---|
+| track 1 (Colombia, behind) | 0.687 | 0.658 | +0.029 |
+| track 2 (Congo DR, in front) | 0.573 | 0.593 | −0.021 |
+| mean | 0.630 | 0.625 | **+0.004** |
+
+`out/phmr_ab/ab_f29_crop_zoom.jpg`. The scale fix worked — IoU rose 0.50 → 0.63 and both meshes are
+now legible — and **the two panels are indistinguishable by eye.** One player up, the other down,
+mean inside the noise. That is the second null, and this one is not explained away by resolution.
+
+**So the mask prompt is not what fixes #132.** The thing that keeps two crossing players apart in
+PromptHMR is the *architecture* — one full-frame forward pass with cross-person attention, so the
+two bodies are decoded jointly and cannot both claim the same pixels. The mask is a refinement on
+top of that, and at broadcast scale it adds nothing measurable. Our pipeline's actual defect is
+upstream of the prompt: `GVHMRPoseEstimator` calls `HMRBackend.estimate_bodies` **per track**, so
+two crossing players are two independent forward passes that have never seen each other.
+
+**Next measurement, and it is a different one:** PromptHMR (box prompt, no masks) vs *our current
+per-crop backend*, same frame 29 crossing. That is the comparison #132 actually poses. If it
+lands, adopt PromptHMR for the multi-person pass and drop the SAM/mask branch entirely — which
+also deletes the 6.5 GB SAM 3 dependency from this path.
+
 ## What will bite (found by reading their code, not by running it)
 
 1. ~~**Gated classic SMPL blocks any run.**~~ **Withdrawn — measured false.** `PHMR.__init__`
