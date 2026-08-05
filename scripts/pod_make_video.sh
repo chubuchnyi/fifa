@@ -59,6 +59,26 @@ else
 fi
 test -f "$SCENE_JSON" || { echo "pod_make_video: missing $SCENE_JSON" >&2; exit 1; }
 
+# 1b) #129: put the ONE fitted camera (#119) into the scene before anything consumes it.
+# PnLCalib solves each frame as a free 8-DOF DLT with nothing tying it to a pinhole, so the
+# scene draws its pitch through the measured homography and its players through an invented
+# fallback camera — that split IS #61. The fit (`calib/*.npz`, committed, 7 kB) was approved by
+# the user's eye on 2026-08-03 and until now no pod script called it, which is #129.
+# RIGID_CAMERA=0 reverts to the pre-#129 chain; the fit covers frames 0-59, so a longer run
+# needs `scripts/fit_rigid_camera.py --frames N` first (the script refuses rather than guesses).
+if [ "${RIGID_CAMERA:-1}" = "1" ]; then
+  RIGID_NPZ="${RIGID_CAMERA_NPZ:-calib/Colombia-1-0-Congo-DR1080p.npz}"
+  if [ ! -f "$RIGID_NPZ" ]; then
+    echo "pod_make_video: RIGID_CAMERA=1 but no fit at $RIGID_NPZ" >&2; exit 1
+  fi
+  RIGID_JSON="${SCENE_JSON%.json}_rigid.json"
+  echo "== rigid camera (#129): $RIGID_NPZ + $SCENE_JSON -> $RIGID_JSON =="
+  "$PY" scripts/apply_rigid_camera.py "$RIGID_NPZ" --scene "$SCENE_JSON" --out "$RIGID_JSON"
+  SCENE_JSON="$RIGID_JSON"
+else
+  echo "== rigid camera (#129): DISABLED (RIGID_CAMERA=0) — pre-#129 chain =="
+fi
+
 # 2) forward all frames through SMPL-X + resolve the ball (venv: torch+smplx).
 # The staged clip doubles as the MEASURED-appearance source (stadium crowd, per-vertex body
 # texture, floodlight colour): without it anim_export silently skips all three, so default it to
