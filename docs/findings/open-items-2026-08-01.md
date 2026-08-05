@@ -120,3 +120,49 @@ mine.
 
 ---
 
+
+## #129 — the one fitted camera, A/B'd on the pod (2026-08-05)
+
+`scripts/pod_129_ab.sh` ran `pod_finish_batch.sh` twice on `tn2gfx13mxu5c6`, same clip, same
+`sideline` framing, `RIGID_CAMERA` the only difference. The two reconstructions came out
+**identical to the digit** — 24 subjects, 60/60 calibration frames measured / 0 carried,
+confidence 0.540 / 0.452 / 0.645, physics 12→0 speed and 1037→0 accel violations — so anything
+that differs downstream is the camera and nothing else.
+
+### What the scene actually carries, measured off both exported scenes
+
+| | `RIGID_CAMERA=0` (control) | `RIGID_CAMERA=1` (#129) |
+|---|---|---|
+| focal fx = fy | **772.0 px** | **4169.3 px** |
+| resolution | 1280×720 (the *render* size) | 1920×1080 (the *clip* size) |
+| principal point | (640, 360) — dead centre | (960, 540) |
+| `raw_frame_aligned` | `False` | `True` |
+| root spread | 34.0 × 40.5 m | 34.0 × 40.5 m |
+| pelvis height | 0.88 m (0.68–1.00) | 0.88 m (0.68–1.00) |
+
+The control's camera is not a bad measurement, it is **not a measurement at all**:
+`controller.py:654` builds "a static broadcast camera replicated over the whole clip (fallback
+render path)" from `standard_viewpoints(Viewpoint.BROADCAST)` when `camera_from_calibration`
+refuses — and it refuses on this clip because the closest realizable pinhole is 525 px from the
+stored homographies (#119). A focal at render resolution with the principal point exactly at the
+frame centre is the signature of that placeholder.
+
+Normalising for resolution, 772/1280 = 0.60 against 4169/1920 = 2.17 — **a factor of 3.6**, which
+is #61's documented "players through a synthetic camera 3.9× too small", now measured on both
+sides of the fix rather than argued.
+
+### The limitation, which the same measurement exposes
+
+**The players do not move.** Root spread and pelvis height are bit-identical between the arms,
+because world position is computed from the foot point through the pitch homography *during
+reconstruction*, and `apply_rigid_camera.py` replaces the calibration *after* it. So as wired,
+#129 corrects the camera and everything baked through it — the stadium backdrop, the crowd tile,
+the per-vertex body texture and light-from-clip all sample the source video via `scene.camera`
+(`anim_export.py:421, 648, 650, 738, 800`) — but it does **not** re-place the subjects.
+
+Both arms already sit at the v0 bar of 34×40 m, so this is not a defect being hidden; it is a
+statement of what the fix does and does not reach. Grounding the players through the rigid camera
+would mean applying the fit *before* pose grounding, which is a pipeline change, not a post-pass.
+
+Artifacts: `out/cmp_129/side_by_side.mp4` and `out/cmp_129/beauty_f*.png`
+(`scripts/ab_compare_render.sh`).
