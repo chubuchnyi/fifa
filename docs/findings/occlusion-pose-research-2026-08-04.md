@@ -537,6 +537,14 @@ min_run=4, 15 splits from 9 parents -- 8 of them on the --kit-scan swap list, 1 
 excluded from both the centre fit and the cut: their kit is a third colour that would pollute the
 centres and split good officials.
 
+**Verified end to end, not just in the probe.** The split fires inside the standard 48-frame window
+too (21 → 27 player tracks), and `python -m pitch3d.app.cli --frames 48 --detector rfdetr --tracker
+bytetrack --render overlay --export gltf` consumes the new ids without complaint: 21 subjects, both
+teams assigned, every gate run, `scene.json` written. It also cannot be quietly undone downstream —
+`core/orchestration/continuity.py` carries `require_same_team = True`, so the structural stitcher
+may re-link fragments of one team but never bridge a kit change. The two compose: the split
+separates humans the tracker fused, the stitcher re-joins fragments of the same human.
+
 **What this does not do.** Splitting fixes *membership* — each piece is one human wearing one kit —
 but it does not re-link. The yellow player in piece `97→144` and track 85 are the same man under
 two ids. Tracklet stitching (GTA-Link, in the survey above) is the follow-up, and it is now the
