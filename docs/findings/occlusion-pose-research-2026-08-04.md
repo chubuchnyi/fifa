@@ -291,11 +291,69 @@ Re-ranked inside shot 1, with boxes bounded to plausible players (h < 0.45·H, w
 | 87 | 0.682 | 85 ← 15 | 86 | 94 | — |
 | 207 | 0.657 | 126 ← 66 | 78 | 107 | — |
 
-**Frame 124 is the case.** `out/phmr_ab/f124_pair.jpg`: two Congo DR players in the *same
-light-blue kit*, one directly behind the other, equal apparent height (86 px, so equal depth),
-box IoU 0.649 — the highest in shot 1 — and the back player reduced to a head, a shoulder and one
-boot. Same kit means appearance re-ID cannot separate them either. Frame 29, which all the
-numbers above were measured on, is a far easier case that merely scored well on box IoU.
+~~**Frame 124 is the case.**~~ **Withdrawn 2026-08-05 — I never looked at the pixels.** The
+paragraph that stood here read "two Congo DR players in the *same light-blue kit*, one directly
+behind the other, equal apparent height (86 px, so equal depth) … the back player reduced to a
+head, a shoulder and one boot". Every word of it was inferred from box geometry. `out/phmr_ab/
+f124_pair_boxes.png` shows what is actually there: **one** light-blue player, with both boxes
+drawn around him 15 px apart. There is no hidden second player. See "What frame 124 really is".
+
+### What frame 124 really is — and the measurement that settles it
+
+The two teams wear light blue (Colombia) and yellow (Congo DR), so the **mean torso colour inside
+a box says which player an id is on**. That is a ground truth no IoU can supply, it needs no model,
+and `scripts/track_continuity.py --kit-scan` now reads it for every box in the clip.
+
+Sampling the upper-middle of each box across the crossing:
+
+| frame | track 97 | track 110 | track 85 |
+|---|---|---|---|
+| 121–123 | **BLU** | — | YEL |
+| **124** | **BLU** | **BLU** ← duplicate | YEL |
+| 125–127 | missing | BLU | YEL |
+| **128–130** | **YEL** ← swapped | BLU | dead @127 |
+| 131+ | YEL | dead @130 | — |
+
+So the failure at frame 124 is two failures, and neither is the one the ticket assumes:
+
+1. **A duplicate detection.** RF-DETR emits two boxes for the same blue player; ByteTrack accepts
+   the second as a new identity. Track 110 is not a player, it is a second box on player 97.
+2. **An identity swap.** Three frames later track 97 reappears **on the yellow player** and keeps
+   that id to frame 180, while track 85 — the yellow player's real id — dies at 127. Nothing marks
+   the handover: id 97 silently becomes a different human, carrying its avatar, kit assignment and
+   motion history with it.
+
+Extended to the whole of shot 1 (frames 0–235, 38 plausible player tracks):
+
+```
+38 of 38 tracks are broken somewhere in the window
+ 9 tracks change team  — 3, 7, 9, 14, 15, 36, 90, 97, 126   (track 15 flips three times)
+ 2 duplicate detections — f34 (5,9, IoU 0.415, YEL) and f124 (97,110, IoU 0.649, BLU)
+```
+
+Spot-checked by eye at ×6: `out/phmr_ab/swap_t3.png` shows track 3's box sitting on a blue player
+at frames 34–35 and on the yellow player at 36–37. The swap is real, not a colour artefact.
+
+**This is the strongest evidence for #132 so far, and it is entirely about tracking.** Nine of
+thirty-eight identities in an 8-second shot end up on the wrong human. That defect needs no pose
+model to demonstrate and no pose model can repair it downstream.
+
+### The real occlusions, now that duplicates are excluded
+
+Requiring the two boxes to hold **opposing** kits — the honest definition of "two different men" —
+re-ranks shot 1 by cover:
+
+| frame | cover | back ← front | kits |
+|---|---|---|---|
+| **87** | **0.682** | 85 ← 15 | YEL behind BLU |
+| 134 | 0.542 | 104 ← 15 | YEL behind BLU |
+| 140 | 0.504 | 104 ← 15 | YEL behind BLU |
+| 226 | 0.500 | 130 ← 71 | YEL behind BLU |
+| 13 | 0.494 | 21 ← 17 | YEL behind BLU |
+
+Frame 87 replaces frame 124 as the pose test case, and it is a better one: opposing kits mean the
+two players are separable by colour, so per-player masks can be built and *verified* rather than
+assumed. `out/phmr_ab/occ_f85_88.png`.
 
 ## The plan from here
 
@@ -327,24 +385,38 @@ Frame by frame, the two players converge, merge, and the tracker comes apart:
 | 128–130 | (1100, 667) | (1070, 667) | they re-separate, IoU back to 0.13 |
 | 131+ | tracked | **dead** | 110 lasted 7 frames total |
 
-**This is #132, with numbers.** Track 110 is born at exactly the crossing frame and dies seven
-frames later — a phantom identity that exists only for the duration of the occlusion. Track 97,
-a real player who never left frame, blinks out for three frames. Around them 33, 99 and 85 die
-and 113 is born, so the crossing churns five identities in a 21-frame window. Downstream each
-new id is a *different person*: new avatar, new kit assignment, motion history reset.
+**This is #132, with numbers** — but read the mechanism off the kit scan above, not off this
+table. Track 110 is a *duplicate box on player 97*, not a phantom identity for a hidden player;
+track 97 blinks out for three frames and comes back **on the other team's player**. Clip-wide,
+9 of 38 identities in shot 1 end up on the wrong human and all 38 are broken somewhere.
 
-And at frame 124 the two boxes are 15 px apart with IoU 0.649, so **a per-crop estimator is
-handed essentially the same pixels twice** and has nothing to tell it which of the two players
-it is supposed to fit. That is the mechanism behind the second half of the ticket, and it is
-what A2 measures.
+The last paragraph here used to claim that at frame 124 "a per-crop estimator is handed
+essentially the same pixels twice" and call that the second half of the ticket. It is handed the
+same pixels twice — because it is the same man twice. That is a *tracking* fault presented to the
+pose stage, not evidence that pose fusion happens. A2 has to be run on a real occlusion instead.
 
-#### A2, pose — next
+#### A2, pose — next, **on frame 87, not 124**
 
 Run the production per-crop path — SMPLest-X Huge, `--pose gvhmr --pose-backend
-pitch3d.adapters.models.smplestx_backend:make` — on frame 124 and score it with the metrics
-below. This is the control every other arm is measured against. Weights verified by hand:
-`models/smplest-x/smplest_x_h.pth.tar`, 8.246 GB, loads to 519 tensors / **687.2M params**
-under key `network`, plus optimizer state (which is what makes an 687M model an 8.2 GB file).
+pitch3d.adapters.models.smplestx_backend:make` — on **frame 87 (track 85 YEL behind track 15 BLU,
+cover 0.682)** and score it with the metrics below. This is the control every other arm is
+measured against.
+
+Ready to run locally, no pod. Weights verified by hand: `models/smplest-x/smplest_x_h.pth.tar`,
+8.246 GB, 519 tensors / **687.2M params** under key `network`, plus optimizer state (which is what
+makes a 687M model an 8.2 GB file). Staged into the layout the loader expects at
+`backends/SMPLest-X/pretrained_models/smplest_x_h/` and
+`backends/SMPLest-X/human_models/human_model_files/smplx/` — the latter is six relative symlinks:
+the three MPI `SMPLX_{NEUTRAL,MALE,FEMALE}.npz` out of `models/smplx/`, plus `SMPLX_to_J14.pkl`,
+`MANO_SMPLX_vertex_ids.pkl` and `SMPL-X__FLAME_vertex_ids.npy`, which the MPI zip does **not**
+carry and which came from the ungated `camenduru/SMPLer-X`. The `SMPLX` singleton loads clean
+under our numpy 2.4.6 / smplx 0.1.28 (10475 verts, 20908 faces, J14 regressor 14×10475).
+
+**One blocker left:** SMPLest-X hardcodes `.cuda()` in ~15 places on the inference path
+(`models/SMPLest_X.py:25,47,54`, `utils/transforms.py`, `main/base.py`), and our local torch is
+`2.12.1+cpu`. They are all `.cuda()` *method* calls, so a two-line shim in our own probe script —
+identity `torch.Tensor.cuda` / `torch.nn.Module.cuda` when the device is CPU — clears it without
+patching the vendored checkout. `DataParallel` already degrades to a plain call with no devices.
 
 ### Stage B — the head-to-head, same boxes, same frame, same metrics
 
