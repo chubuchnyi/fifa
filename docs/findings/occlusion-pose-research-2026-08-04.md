@@ -64,9 +64,11 @@ research terms; SAM License has restrictions; McByte / SAM-Body4D / MoGe-2 are M
 
 # PromptHMR — hands-on check (2026-08-04)
 
-User picked candidate 1. Repo + weights pulled to `backends/PromptHMR` (gitignored; the
-box-local glue pattern `backends/pnlcalib_backend.py` already uses, which also keeps the
-non-commercial code out of the public `pitch3d` tree).
+User picked candidate 1. Code pulled to `backends/PromptHMR` (gitignored; the box-local glue
+pattern `backends/pnlcalib_backend.py` already uses, which also keeps the non-commercial code
+out of the public `pitch3d` tree); weights to `models/prompthmr` with everything else we have
+downloaded (`docs/models-dir.md`). Paths below are relative to the weights bundle — upstream
+resolves its assets against the process cwd, so the scripts run from there.
 
 ## Weights, verified not assumed
 
