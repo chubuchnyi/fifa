@@ -127,6 +127,7 @@ def run_dry_run(
     identity: bool = False,
     demo_edits: bool = True,
     shot_guard: bool = True,
+    kit_split: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -146,7 +147,7 @@ def run_dry_run(
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
-        motion_prior=motion_prior, camera_carry=camera_carry,
+        motion_prior=motion_prior, camera_carry=camera_carry, kit_split=kit_split,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -622,6 +623,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="disable track-continuity stitching (ON by default): without it, "
                              "occluded players re-enter as NEW track ids and spawn phantom "
                              "bodies (the #202 swarm)")
+    parser.add_argument("--no-kit-split", dest="kit_split", action="store_false",
+                        help="disable the #132 team-change track split (ON by default): "
+                             "without it a crossing can hand one track id to a different "
+                             "human, which keeps its avatar, kit and motion history")
     parser.add_argument("--no-shot-guard", dest="shot_guard", action="store_false",
                         help="reconstruct across camera cuts (guard is ON by default): a "
                              "broadcast clip cuts between cameras, and tracking + calibrating "
@@ -700,6 +705,7 @@ def main(argv: list[str] | None = None) -> int:
         camera_carry=args.camera_carry,
         stitch=args.stitch,
         shot_guard=args.shot_guard,
+        kit_split=args.kit_split,
         coherence=args.coherence,
         physics=args.physics,
         physics_profile=args.physics_profile,

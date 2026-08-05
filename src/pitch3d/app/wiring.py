@@ -86,7 +86,7 @@ def default_ports(
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
-    motion_prior: str = "fake", camera_carry: int = 8,
+    motion_prior: str = "fake", camera_carry: int = 8, kit_split: bool = True,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -204,6 +204,9 @@ def default_ports(
             # Kept low so genuine multi-frame fragments survive for the stitch pass to re-link
             # (raising this further would starve stitch, which runs AFTER this filter). See #202.
             min_track_frames=2,
+            # #132: cut a track where its kit colour changes team. Measured on the target clip,
+            # 9 of 38 tracks carried an avatar onto a different human; this takes that to 0.
+            kit_split=kit_split,
             backend=_resolve_backend(tracker_backend, TrackingBackend)
             if tracker_backend else None,
         )
