@@ -646,9 +646,39 @@ real humans, not 17). The one change that did land — the kit split — took tr
 humans from **9 to 0** and turned the dormant stitcher from 1 merge into 14.
 
 **So the tracking half of #132 is done for this clip**, and further identity work has no measured
-payoff here. What remains open is **shot-cut detection**, which is a real latent defect rather than
-a quality dial: nothing stops `--frames 334` from tracking and calibrating straight through the cut
-at frame 236 and silently blending two cameras.
+payoff here.
+
+### Shot-cut detection — closed 2026-08-05
+
+The last real defect found on the way, and unlike the three above it was worth fixing, because it
+is a correctness hole rather than a quality dial.
+
+`core/orchestration/shots.py` (pure) + `adapters/models/shot_detect.py` (decode) +
+`scripts/shot_cuts.py` (probe). The signal is a per-frame BGR colour histogram on a 96-px-wide
+downscale; within a shot consecutive frames differ a little as players and camera move, across a
+cut the whole distribution changes at once. On the target clip:
+
+```
+consecutive-frame L1 distance over 333 pairs:  median 0.064  p95 0.132  p99 0.140  max 0.905
+  235->236  0.9051  <-- CUT          largest WITHIN-shot distance: 0.1454
+2 shots: 0-235 (236 frames), 236-333 (98 frames)
+```
+
+The threshold is **0.45**, sitting in a 6× gap between 0.145 and 0.905 — separated, not tuned.
+
+The CLI guard is on by default and follows R-6, *mark never hide*: it prints the cut frames and
+the shot spans, then trims to the shot the run starts in, rather than failing outright or quietly
+producing a blend. `--no-shot-guard` overrides. Verified all three ways:
+
+| run | result |
+|---|---|
+| `--frames 334` | `shot guard: 2 shots, cut(s) at [236]` → **truncates to 236**, pipeline completes |
+| `--frames 334 --no-shot-guard` | registers all 334, no message |
+| `--frames 48` | registers 48, guard silent (single shot) |
+
+Seven unit tests cover the pure half with synthetic histograms straddling the same measured gap,
+including the case that matters most in practice — **within-shot motion must not trip it**, since
+truncating a healthy clip costs more than missing a cut.
 
 ### Stage C — the decision, taken 2026-08-05
 

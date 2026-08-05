@@ -43,6 +43,42 @@ def _synthetic_clip(*, n_frames: int, width: int = 1280, height: int = 720, fps:
     )
 
 
+def _truncate_to_first_shot(clip: ClipRef) -> ClipRef:
+    """Stop the pipeline reconstructing two cameras as one episode (#132).
+
+    A broadcast clip cuts between cameras; the target clip cuts at frame 236. Tracking identities
+    and solving one camera across that boundary silently blends two views, and until now nothing
+    checked. Every run was safe only because they all took 48-60 frames from the start.
+
+    R-6 says mark, never hide: the cut is printed with its frame and the clip is trimmed to the
+    shot the run starts in, rather than either failing outright or quietly producing a blend.
+    ``--no-shot-guard`` turns this off for a caller who genuinely wants the whole file.
+    """
+    try:
+        from ..adapters.models.shot_detect import clip_histograms
+        from ..core.orchestration.shots import find_shot_cuts, shot_bounds
+    except ImportError:  # pragma: no cover - cv2 absent (fakes-only runs)
+        return clip
+    try:
+        hists = clip_histograms(clip.uri, n_frames=int(clip.n_frames))
+    except Exception as exc:  # pragma: no cover - unreadable/synthetic uri
+        print(f"== shot guard: could not scan {clip.uri} ({exc}); continuing unchecked")
+        return clip
+    cuts = find_shot_cuts(hists)
+    if not cuts:
+        return clip
+    bounds = shot_bounds(int(hists.shape[0]), cuts)
+    print(f"== shot guard: {len(bounds)} shots, cut(s) at {cuts} — "
+          f"{', '.join(f'{a}-{b}' for a, b in bounds)}")
+    keep = bounds[0][1] + 1
+    if keep >= clip.n_frames:
+        return clip
+    print(f"== shot guard: TRUNCATING to the first shot, {keep} of {clip.n_frames} frames. "
+          f"Reconstructing across a cut blends two cameras into one episode; "
+          f"pass --no-shot-guard to override.")
+    return replace(clip, frames=np.asarray(clip.frames)[:keep])
+
+
 def _airborne_on_ground(n_frames: int) -> np.ndarray:
     """Ground contact only at the first/last frame ⇒ a bracketed airborne arc in between.
 
@@ -83,6 +119,7 @@ def run_dry_run(
     auto_tune: bool = False, ball_id: str = "match_ball_1",
     identity: bool = False,
     demo_edits: bool = True,
+    shot_guard: bool = True,
 ) -> int:
     """Drive the full reconstruction→edit→resolve→render→export path; return an exit code.
 
@@ -112,6 +149,8 @@ def run_dry_run(
         clip = FFmpegIngestor().clip(clip_path, max_frames=n_frames)
         print(f"== ingested {clip_path}: {clip.width}x{clip.height} @ {clip.fps:.3f}fps, "
               f"{clip.n_frames} frame(s)")
+        if shot_guard:
+            clip = _truncate_to_first_shot(clip)
     else:
         clip = _synthetic_clip(n_frames=n_frames)
     n = clip.n_frames
@@ -576,6 +615,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="disable track-continuity stitching (ON by default): without it, "
                              "occluded players re-enter as NEW track ids and spawn phantom "
                              "bodies (the #202 swarm)")
+    parser.add_argument("--no-shot-guard", dest="shot_guard", action="store_false",
+                        help="reconstruct across camera cuts (guard is ON by default): a "
+                             "broadcast clip cuts between cameras, and tracking + calibrating "
+                             "through one blends two views into a single 'episode'")
     parser.add_argument("--coherence", action="store_true",
                         help="bridge short interior pose gaps (slerp/lerp) + add auto "
                              "temporal-smoothing corrections (off by default)")
@@ -649,6 +692,7 @@ def main(argv: list[str] | None = None) -> int:
         motion_prior=args.motion_prior,
         camera_carry=args.camera_carry,
         stitch=args.stitch,
+        shot_guard=args.shot_guard,
         coherence=args.coherence,
         physics=args.physics,
         physics_profile=args.physics_profile,
