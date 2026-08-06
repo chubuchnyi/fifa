@@ -288,3 +288,38 @@ full, not the account. Free GPUs exist in EU-RO-1 (A40 at $0.44/h with 48 GB, ch
 than the RTX PRO 4500s), but `create-pod` in this toolset has no field for attaching an existing
 network volume, and without `pitch3d-vol` a fresh pod has no repo, weights or clip. Attaching it
 takes one field in the web UI; after that `pod_stage_mcbyte.sh` does the rest.
+
+### The mask cue, measured on the real clip (2026-08-06)
+
+Cutie propagated one mask per track over shot 1 on the pod — **236 frames in 686 s** at ~2.8 s/frame
+against 63.5 s/frame on CPU, so the GPU is worth 90x here — carrying all 53 track ids. Then the same
+detections through the same tracker and stitch, with only the cue differing:
+
+| cue | tracks | after stitch | mid-pitch events | kit changes |
+|---|---|---|---|---|
+| off | 38 | 37 | **28** | 10 |
+| **on** | 38 | 35 | **24** | 10 |
+
+**It works, and it is weak.** Four fewer identity events out of 28 — a 14 % reduction — against a
+measured ceiling of 96 % of events having a detection available. It costs nothing: kit changes are
+unchanged at 10, so the cue is not grabbing the wrong player to buy the improvement.
+
+That is well short of McByte's own result (HOTA 85.0 vs 72.1 on SoccerNet-tracking), and the gap
+should not be explained away. The most likely cause is **this repo's two-pass design, not the rule**:
+masks are seeded from pass-1 tracks, which are the broken ones. A track already sitting on the wrong
+player propagates a mask that follows the wrong player and then confidently confirms the wrong
+pairing. McByte is online precisely because its masks are seeded as tracks are born, before the
+error accumulates.
+
+Testable consequences, in the order worth trying:
+
+1. Seed only from a track's **first few frames**, where it is most likely to be on the right player,
+   rather than wherever it happens to start after a mid-clip birth.
+2. Drop a mask whose track later changes kit (#132 already detects this), so a known-wrong mask
+   stops voting.
+3. Go online: seed each track at birth inside the association loop, which is McByte's own design
+   and the honest way to close the gap.
+
+`PITCH3D_MASK_CUE` carries the cue into the production pipeline; unset it and the tracker is plain
+ByteTrack byte for byte. Not made the default: a 14 % gain on one clip does not justify a Cutie pass
+in every run, and the ceiling says the remaining 82 % is still on the table.
