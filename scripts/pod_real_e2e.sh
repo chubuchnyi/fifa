@@ -105,6 +105,10 @@ if [ "${PHYSICS:-0}" = "1" ]; then COH_ARGS+=(--physics); echo "== physics: --ph
 # strict / no_smoothing / future_full / safe_new / humanize_teleports). safe_new turns on
 # foot_floor + joint + orientation (T1a/b/c) without collision (which introduces accel
 # spikes without a compose-order fix). humanize_teleports interpolates ID-swap regions.
+# This script is also run standalone, so it cannot rely on a caller having sourced the
+# defaults; pull them in here (idempotent) before resolving the profile.
+[ -f "$REPO/scripts/video_defaults.sh" ] && . "$REPO/scripts/video_defaults.sh"
+PHYSICS_PROFILE="${PHYSICS_PROFILE:-${VIDEO_PHYSICS_PROFILE_DEFAULT:-safe_new}}"
 if [ -n "${PHYSICS_PROFILE:-}" ] && [ "${PHYSICS:-0}" = "1" ]; then
   COH_ARGS+=(--physics-profile "$PHYSICS_PROFILE")
   echo "== physics profile: $PHYSICS_PROFILE"

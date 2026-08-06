@@ -193,3 +193,48 @@ fix in ground placement.
 0.31 m is also not a number anything here can adjudicate: both calibrations place every player on
 the pitch, and we have no ground truth that says which is righter. Building a `RigidFieldCalibrator`
 to chase it would be motion without evidence.
+
+### Poses: the joint/orientation ceilings were measured and never enforced (2026-08-06)
+
+Chasing "positions and poses more accurate", the position half came back null (above). The pose
+half did not. `scripts/motion_stats.py` on the 2026-08-05 pod scene:
+
+```
+speed_viol=0  accel_viol=0  teleport_intervals=0  hover_frac_mean=0%
+orient_viol=11   joint_viol_samples=118
+```
+
+Root motion is clean; the **angular** rates are not. Worst per subject: joint 2212 deg/s against a
+600 ceiling, orientation 4514 against 720. That is what "poses are inaccurate" looks like in a
+render — bodies twitching and snapping faster than a human can move.
+
+**Why nothing fixed it.** `config/physics.yaml` ships `joint.enabled: false` and
+`orientation.enabled: false`, both commented "NOT YET BUILT (schema reserved)" — but the gates
+*are* built (`core/correction/joint_kinematics.py`, `orientation.py`); with `enabled: false` they
+take a documented **measure-only** path and emit nothing. The same file carries a `safe_new`
+profile described as **"Recommended for pod runs"** which turns them on, and no pod script ever
+set `PHYSICS_PROFILE`, so every run went out on `default` — "Ships-today defaults … no future
+gates". The comment was stale, not the code.
+
+**Measured before switching it on**, because this repo has been bitten by a clamp before: an
+iterative MA on HMR yaw removed 90 % of the jitter *and* flattened 100°+ real turns.
+`scripts/pose_gate_ab.py` reports the fix and its cost together:
+
+| | before | after |
+|---|---|---|
+| joint violations | 118 | **0** |
+| orientation violations | 11 | **0** |
+| worst joint rate | 2212 deg/s | 600 (the cap) |
+| worst orientation rate | 4514 deg/s | 720 (the cap) |
+| root angular travel kept | — | **97.8 %** |
+| body-joint angular travel kept | — | **98.5 %** |
+
+Removing every violation costs 1.5–2.2 % of the real angular motion, so this is a clamp landing on
+noise, not the yaw low-pass eating turns. `VIDEO_PHYSICS_PROFILE_DEFAULT=safe_new` is now the pod
+default; `PHYSICS_PROFILE=` still overrides.
+
+**One measurement trap fixed on the way.** `motion_stats.py` counted violations with a strict `>`,
+so a fully-clamped scene still read "89 joint violations" — every one of them the clamp's own
+output at 600.0000000000017 against a 600.0 limit. It now compares against the limit plus one part
+in a million. Without that, the next person to enable these gates would have concluded they do not
+work.

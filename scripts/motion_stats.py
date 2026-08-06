@@ -132,8 +132,17 @@ def orient_stats(frames: np.ndarray, global_orient: np.ndarray,
         "n": len(frames),
         "orient_p95_dps": float(np.percentile(rates, 95)) if rates.size else 0.0,
         "orient_max_dps": float(rates.max()) if rates.size else 0.0,
-        "orient_viol": int((rates > flag_dps).sum()),
+        "orient_viol": int((rates > flag_dps * _VIOL_TOL).sum()),
     }
+
+
+#: A clamp lands *on* its ceiling, and the arithmetic to get there leaves it a few ULPs
+#: above: the joint gate reports clamped rates of 600.0000000000017 against a 600.0 limit.
+#: A strict ``>`` then counts a fully-fixed scene as still violating -- measured 2026-08-06,
+#: where enabling the gates took the worst joint rate 2212 -> 600 deg/s while this counter
+#: still read 89 "violations", every one of them at the cap. Compare against the limit plus
+#: one part in a million so a clamped scene reads clean and a real violation still does not.
+_VIOL_TOL = 1.0 + 1e-6
 
 
 def joint_stats(frames: np.ndarray, body_pose: np.ndarray,
@@ -163,7 +172,7 @@ def joint_stats(frames: np.ndarray, body_pose: np.ndarray,
         "n": len(frames),
         "joint_p95_dps": float(np.percentile(flat, 95)) if flat.size else 0.0,
         "joint_max_dps": float(flat.max()) if flat.size else 0.0,
-        "joint_viol_samples": int((flat > flag_dps).sum()),
+        "joint_viol_samples": int((flat > flag_dps * _VIOL_TOL).sum()),
         "hottest_joint_idx": int(per_joint_max.argmax()),
         "hottest_joint_max_dps": float(per_joint_max.max()),
     }
