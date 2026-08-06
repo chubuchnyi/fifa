@@ -62,7 +62,7 @@ ls -l "$W" | sed 's/^/   /'
 echo "== 4/4 python deps =="
 "$PY" -m pip install -q hydra-core omegaconf lap cython_bbox loguru 2>&1 | tail -2 || true
 "$PY" - <<'EOF'
-import importlib
+import importlib.util  # find_spec lives in the submodule; plain `import importlib` has no .util
 missing = [m for m in ("hydra", "omegaconf", "torch", "transformers")
            if not importlib.util.find_spec(m)]
 print("   missing:", missing or "none")
