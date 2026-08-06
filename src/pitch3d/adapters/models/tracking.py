@@ -375,6 +375,19 @@ class ByteTrackBackend:
     """
 
     device: str = "cuda"
+    #: IoU a detection must share with a track's prediction to be matched to it.
+    #:
+    #: supervision defaults this to 0.8, which is tuned for pedestrian-scale boxes. Our players
+    #: are ~35 px wide at broadcast distance, where a 6 px prediction error already drops IoU well
+    #: under 0.8 — so the match is refused and the detection is orphaned. Measured on shot 1 of
+    #: the target clip: 55 of 78 mid-pitch identity births/deaths had an unclaimed detection
+    #: sitting a median 6-23 px from where the dying track was heading, and 72 % of those orphans
+    #: scored under 0.4 (`scripts/identity_failure_kind.py`).
+    match_threshold: float = 0.8
+    #: Score above which a detection may *start* a new track (supervision's default).
+    activation_threshold: float = 0.25
+    #: Frames a lost track is kept alive waiting to be re-matched.
+    lost_buffer: int = 30
     #: Stable class→id map fed to ByteTrack (ball is excluded from association on purpose).
     class_ids: dict[str, int] = field(
         default_factory=lambda: {"goalkeeper": 1, "player": 2, "referee": 3}
@@ -385,7 +398,12 @@ class ByteTrackBackend:
     ) -> list[RawTracklet]:
         sv = self._import_sv()
         id_to_cls = {v: k for k, v in self.class_ids.items()}
-        tracker = sv.ByteTrack(frame_rate=int(round(clip.fps or 25.0)))
+        tracker = sv.ByteTrack(
+            frame_rate=int(round(clip.fps or 25.0)),
+            minimum_matching_threshold=self.match_threshold,
+            track_activation_threshold=self.activation_threshold,
+            lost_track_buffer=self.lost_buffer,
+        )
 
         # Accumulate per-track boxes/classes keyed by ByteTrack's tracker id.
         boxes: dict[int, list[tuple[int, np.ndarray, str]]] = {}

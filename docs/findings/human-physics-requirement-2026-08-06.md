@@ -116,3 +116,45 @@ training-free) is ByteTrack plus a temporally-propagated mask cue, reporting **H
 for plain ByteTrack on SoccerNet-tracking. Our tracker *is* ByteTrack, so it is an upgrade in
 place rather than a new stack. Not adopted yet — the sweep has to finish first, because adopting a
 model on partial evidence is exactly the mistake that produced the withdrawn A2 verdict.
+
+## Splitting the identity failure: association or detection? (2026-08-06)
+
+60 mid-pitch identity events is a symptom, not a cause, and the two possible causes have opposite
+cures. `scripts/identity_failure_kind.py` separates them off the cached detections and the
+tracker's own output, running no model: an **orphan** is a detection no live track claims, and an
+event is an *association* miss if an orphan sits near where constant-velocity extrapolation puts
+the dying track.
+
+| | mid-pitch events | association miss | detection miss |
+|---|---|---|---|
+| `min_track_frames=4` | 60 | 44 (73 %) | 16 (27 %) |
+| `min_track_frames=1` | 78 | 55 (70 %) | 23 (30 %) |
+
+The second row exists because the first is confounded: tracks under 4 frames are filtered out of
+the npz, so a track that *was* created could masquerade as an orphan. Dropping the filter raises
+the absolute counts and leaves the proportion alone, so the confound is not the explanation.
+
+**~70 % is therefore the ceiling for any association work** — masks, re-ID, McByte. The other 30 %
+is detector recall and no tracker change reaches it. The orphans sit a median of **6–23 px** from
+the extrapolated position, and **72 % of them score under 0.4** against a claimed-detection median
+of 0.663.
+
+### The knob I checked before the model — and got backwards
+
+We construct `sv.ByteTrack(frame_rate=…)` and nothing else, so `minimum_matching_threshold` sits at
+its default 0.8. Reading "matching threshold" as an IoU floor, I predicted it was too strict for
+35-px-wide players and that lowering it would recover the orphans. **Wrong on the semantics:** it is
+a threshold on ``1 - IoU``, so 0.8 already means "match anything above 0.2 IoU", and lowering it
+*tightens* association. The sweep says so plainly:
+
+| `minimum_matching_threshold` | player tracks | mid-pitch events |
+|---|---|---|
+| **0.80 (default, current)** | 56 | **66** |
+| 0.70 | 67 | 88 |
+| 0.60 | 97 | 142 |
+| 0.50 | 104 | 162 |
+
+A second flaw in that first sweep: the kit-change column read 0 at every setting, because it ran
+with the #132 split **on** — which cuts swapped tracks apart by construction, so the sweep was blind
+to its own downside. Both are fixed: the threshold sweep now runs upward from 0.8 and with the split
+off, so a looser threshold that starts matching the *wrong* player shows up as kit changes.
