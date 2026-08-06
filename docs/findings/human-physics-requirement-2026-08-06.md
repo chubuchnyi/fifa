@@ -78,3 +78,41 @@ Order to work through, cheapest evidence first:
 3. `identity` for requirement 3, against the kit-split baseline already measured in #132.
 4. Only then consider what is genuinely absent — arm swing, per-limb collision, and whether any of
    this needs to become a real dynamics pass rather than a stack of clamps.
+
+## Requirement 3 measured: how often does a player pop in or out? (2026-08-06)
+
+The user's phrasing — *"футболисты спекаются, потом рождаются новые из 2-х - 3"* — names two
+symptoms. The second one is measurable without any model, and it is large.
+
+A track that starts or ends **at the frame border** is a player walking into or out of shot, which
+is legitimate. A track that starts or ends **mid-pitch** is not: nobody entered, the tracker simply
+invented or dropped an identity. Splitting shot 1's events that way (53 tracks, raw tracker output):
+
+| | total | of them mid-pitch |
+|---|---|---|
+| births after the clip start | 35 | **31** |
+| deaths before the clip end | 37 | **29** |
+
+**60 identity events in 8 seconds that no entry or exit explains** — about one spurious birth or
+death *per track*. That is the "new ones are born out of two or three" the user sees, counted.
+
+Two honesties about the number:
+
+* It is the **raw tracker output, before stitching**. `continuity.py` re-links some of them — it
+  takes 56 ids to 36 with 14 merges on the same shot — so the residual reaching the render is
+  smaller, but still tens of events.
+* It says nothing about *why*. It is consistent with the crossing hypothesis (94 % of these events
+  fall within ±2 frames of a frame holding a contaminated crop, against a 76 % base rate) but does
+  not prove the crossing caused them.
+
+**Where this points.** Against it, the pose side is so far quiet: 11 stratified overlapping pairs
+scored at the time of writing, every one **separate**, cross-contamination 0.01–0.24. If the tail
+of that sweep stays quiet, the visible "fusing and multiplying" is an **identity** failure, not a
+pose one — the player is not merging with his neighbour's body, he is losing his id and being
+replaced by a new subject with a new avatar.
+
+That class of failure has a direct candidate in the 2026-08-04 survey: **McByte** (CVPRW 2025, MIT,
+training-free) is ByteTrack plus a temporally-propagated mask cue, reporting **HOTA 85.0 vs 72.1**
+for plain ByteTrack on SoccerNet-tracking. Our tracker *is* ByteTrack, so it is an upgrade in
+place rather than a new stack. Not adopted yet — the sweep has to finish first, because adopting a
+model on partial evidence is exactly the mistake that produced the withdrawn A2 verdict.
