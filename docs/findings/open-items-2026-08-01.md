@@ -166,3 +166,30 @@ would mean applying the fit *before* pose grounding, which is a pipeline change,
 
 Artifacts: `out/cmp_129/side_by_side.mp4` and `out/cmp_129/beauty_f*.png`
 (`scripts/ab_compare_render.sh`).
+
+### Positions: swapping the calibrator is NOT the fix — measured 2026-08-06
+
+After #129 closed, the obvious next step looked like "ground the players through the rigid camera
+too, since PnLCalib's homographies are 525 px from any realizable pinhole". **Measured first, and
+the premise is wrong.**
+
+Projecting the real ByteTrack foot points (frames 0–59, n=1053) through both calibrations:
+
+| | x range | y range | inside the 105×68 pitch |
+|---|---|---|---|
+| PnLCalib | −50.6 … −16.8 m | −11.3 … 29.8 m | 100 % |
+| rigid fit (#119) | −50.8 … −17.6 m | −11.5 … 29.1 m | 100 % |
+
+Per-point displacement between them: **median 0.31 m**, p90 0.67 m, max 1.80 m; 30 % move more
+than half a metre.
+
+The reason is in `apply_rigid_camera.py`'s own docstring and I had read past it: *"The
+homographies still fit the visible paint (that is why the marks land), they just extrapolate to a
+pitch 9157 px wide in a 1920 px image."* On the ground plane — where the paint is and where feet
+are — a homography fitted to that paint is fine. It is only wrong when **extrapolated off the
+plane**, which is what a camera is. So #129 fixed the camera, and there is little left for it to
+fix in ground placement.
+
+0.31 m is also not a number anything here can adjudicate: both calibrations place every player on
+the pitch, and we have no ground truth that says which is righter. Building a `RigidFieldCalibrator`
+to chase it would be motion without evidence.
