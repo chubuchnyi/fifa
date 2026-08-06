@@ -81,6 +81,7 @@ from .scene_state import (
     camera,
     edited_frames,
     get_state,
+    get_state_b,
     layout_panel_context,
     layout_panel_matrix,
     set_layout_panel_edit,
@@ -372,7 +373,9 @@ def api_world_geometry(user: str = Depends(current_user)) -> dict:
 
 
 @app.get("/api/world/{n}/skeletons")
-def api_world_skeletons(n: int, user: str = Depends(current_user)) -> dict:
+def api_world_skeletons(
+    n: int, arm: str = "a", user: str = Depends(current_user),
+) -> dict:
     """Every subject's 3D body joints at position ``n``, in world metres — one round trip.
 
     The per-subject `/api/subject/{tid}/joints/{frame}` endpoint is for the joint editor, which
@@ -380,7 +383,12 @@ def api_world_skeletons(n: int, user: str = Depends(current_user)) -> dict:
     spends its time in HTTP; this is the 3D twin of `/api/frame/{n}/skeletons`.
     """
     del user
-    st = get_state()
+    # arm="b" serves POSEANNOT_SCENE_JSON_B, so the viewer can lay one reconstruction over another
+    # and see where they disagree. Absent second scene -> empty, not an error: the overlay is a
+    # toggle, and a viewer with nothing to compare should just draw one run.
+    st = get_state() if arm == "a" else get_state_b()
+    if st is None:
+        return {"frame": n, "subjects": [], "names": BODY_JOINT_NAMES, "arm": arm}
     teams = {s.track_id: s.team_id for s in st.scene.subjects}
     subjects = []
     for tid, sub in sorted(st.subjects.items()):
@@ -392,7 +400,7 @@ def api_world_skeletons(n: int, user: str = Depends(current_user)) -> dict:
             # Already world z-up: scene_state adds the root translation when it bakes the cache.
             "joints": np.round(sub.joints[n], 4).tolist(),
         })
-    return {"frame": n, "subjects": subjects, "names": BODY_JOINT_NAMES}
+    return {"frame": n, "subjects": subjects, "names": BODY_JOINT_NAMES, "arm": arm}
 
 
 @app.get("/api/pitch/{frame}")

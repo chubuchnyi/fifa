@@ -418,3 +418,28 @@ def get_state(force_reload: bool = False) -> SceneState:
         if _STATE is None or force_reload:
             _STATE = build_scene_state()
     return _STATE
+
+
+_STATE_B: SceneState | None = None
+
+
+def get_state_b() -> SceneState | None:
+    """A SECOND scene, for overlaying one reconstruction on another (#133).
+
+    Set ``POSEANNOT_SCENE_JSON_B`` to a scene of the *same clip and frame range* — the point is to
+    see where two runs disagree, so anything else produces a meaningless overlay. ``None`` when
+    unset, and the viewer simply has nothing to draw on top.
+
+    Its own FK cache, so the first request pays the same 5-22 s build as the primary scene.
+    """
+    global _STATE_B
+    import os
+    from dataclasses import replace as _replace
+
+    path = os.environ.get("POSEANNOT_SCENE_JSON_B")
+    if not path:
+        return None
+    with _STATE_LOCK:
+        if _STATE_B is None:
+            _STATE_B = build_scene_state(_replace(load_config(), scene_json=path))
+    return _STATE_B
