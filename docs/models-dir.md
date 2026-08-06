@@ -17,6 +17,7 @@ silently reading a second copy.
 | `sam3/` | 6.5 G | SAM 3 (`facebook/sam3`) | not wired yet — needs its own env (transformers 5.x vs our 4.57.6 pin) |
 | `sam3d-body/` | 2.7 G | SAM 3D Body + MHR rig (`facebook/sam-3d-body-dinov3`) | `adapters/models/sam3dbody_backend.py` (pod only) |
 | `smplest-x/` | 11 G | SMPLest-X Huge (ViT-H) — our per-crop pose primary (`waanqii/SMPLest-X`, ungated). **Two** checkpoints: shipped `smplest_x_h.pth.tar` (8.2 G) and `smplest_x_h_slim.pth.tar` (2.75 G) | `adapters/models/smplestx_backend.py` via `$PITCH3D_SMPLESTX_REPO/pretrained_models/<ckpt_name>/`, linked by `scripts/stage_smplestx_weights.sh` |
+| `cutie/` | 173 M | Cutie video object segmentation — the temporal mask cue for #133 (`hkchengrex/Cutie` v1.0, MIT) | `adapters/models/mask_propagation.py` via `$PITCH3D_CUTIE_REPO/weights/`, symlinked from here |
 | `hf/` | 443 M | Hugging Face cache — SAM ViT-B, DINOv2-small | `$HF_HOME` |
 | `torch/` | 1.3 G | torch.hub cache — MaskPose-b, RTMDet-ins-l-mask | `$TORCH_HOME` |
 
