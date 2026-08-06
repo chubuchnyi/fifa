@@ -251,3 +251,40 @@ while leaving the validated tracker untouched.
 SAM and propagates with **Cutie**, which needs `hydra`, `omegaconf`, `segment_anything`, its own
 weights, and a pass over the clip. `lap`, `cython_bbox` and `loguru` are installed;
 `backends/McByte` is cloned. That is where the next session starts.
+
+### The mask chain, proven end to end and priced (2026-08-06)
+
+Built and verified locally before spending any pod time:
+
+* `adapters/models/mask_propagation.py` — Cutie (MIT) as `seed()` / `step()` over label images.
+* `MaskCue` in the tracking adapter — McByte's rule, wired by wrapping supervision's module-level
+  `matching.iou_distance` and restored in a `finally`. `mask_cue=None` leaves plain ByteTrack.
+* `scripts/build_track_masks.py` — two-pass: track once, seed each track's first box with SAM,
+  propagate by appearance, track again with the cue.
+* `scripts/pod_stage_mcbyte.sh` — the checkout, weights (checked by size **and** md5) and deps in
+  one command, so a billed pod session is compute only.
+
+**It works.** Over 12 frames: 19 tracks seeded, masks propagated, and the cue fired on **48 cost
+matrices, discounting 198 (track, detection) pairs** — live, not silently passing through. Tracks
+identical with and without, which is correct on twelve frames holding no crossing.
+
+**And it is a GPU job, by measurement rather than by assumption:**
+
+| | CPU, 1920×1080, 19 masks |
+|---|---|
+| seed frame (SAM over 19 boxes + Cutie's first step) | 213 s |
+| steady-state propagation | **63.5 s/frame** |
+| 236 frames, one pass | **4.2 h** |
+| passes the design needs | 2 |
+
+Halving the resolution is not the escape: a 35 px player becomes 17 px, which is precisely the
+detail the cue exists to read. Cutie also holds every object simultaneously, so cost grows with the
+twenty-odd players on the pitch — if the GPU number disappoints, running them in groups is the next
+thing to measure, not to assume.
+
+**Blocked on hardware, not on work.** Pod start was refused on all four `/workspace` pods across
+four rounds over ~20 minutes — "not enough free GPUs on the host machine", i.e. the machines are
+full, not the account. Free GPUs exist in EU-RO-1 (A40 at $0.44/h with 48 GB, cheaper and roomier
+than the RTX PRO 4500s), but `create-pod` in this toolset has no field for attaching an existing
+network volume, and without `pitch3d-vol` a fresh pod has no repo, weights or clip. Attaching it
+takes one field in the web UI; after that `pod_stage_mcbyte.sh` does the rest.
