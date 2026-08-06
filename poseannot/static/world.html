@@ -36,6 +36,7 @@
 <div id="hud">
   <div><b>pitch view</b> <span class="muted">— drag to orbit, wheel to zoom, right-drag to pan</span></div>
   <div class="muted"><span id="stat">loading…</span></div>
+  <div style="color:#ff3ea5"><span id="stat2"></span></div>
 </div>
 <div id="err"></div>
 <div id="bar">
@@ -77,6 +78,7 @@ const ARM_B_COLOUR = 0xff3ea5;
 const view = document.getElementById("view");
 const err = (m) => { document.getElementById("err").textContent = m || ""; };
 const stat = (m) => { document.getElementById("stat").textContent = m; };
+const stat2 = (m) => { document.getElementById("stat2").textContent = m; };
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#14161a");
@@ -149,7 +151,7 @@ const jointGeoB = new THREE.SphereGeometry(0.04, 6, 6);
 // Arm B is drawn as bones only, thinner and in one colour, so the primary run stays readable
 // underneath it. Where the two agree the magenta sits inside the coloured skeleton and reads as
 // trim; where they disagree it separates, and that separation is the whole point.
-function drawArmB(subjects) {
+function drawArmB(subjects, showIds) {
   poseGroupB.clear();
   const mat = new THREE.MeshBasicMaterial({ color: ARM_B_COLOUR });
   const lineMat = new THREE.LineBasicMaterial({ color: ARM_B_COLOUR });
@@ -166,6 +168,12 @@ function drawArmB(subjects) {
     }
     poseGroupB.add(new THREE.LineSegments(
       new THREE.BufferGeometry().setFromPoints(segs), lineMat));
+    // Arm B needs its own labels, offset above arm A's, or a magenta skeleton standing on its own
+    // — which is exactly the interesting case, a track one run has and the other does not — is
+    // unidentifiable.
+    if (showIds) {
+      labelGroup.add(makeLabel(s.track_id, s.joints[15] || s.joints[0], ARM_B_COLOUR, 1.05));
+    }
   }
 }
 
@@ -191,7 +199,7 @@ function drawSkeletons(subjects, showIds) {
   }
 }
 
-function makeLabel(text, at, colour) {
+function makeLabel(text, at, colour, dz = 0.55) {
   const c = document.createElement("canvas");
   c.width = 128; c.height = 64;
   const ctx = c.getContext("2d");
@@ -201,7 +209,7 @@ function makeLabel(text, at, colour) {
   ctx.fillText(String(text), 64, 46);
   const spr = new THREE.Sprite(new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(c), depthTest: false }));
-  spr.position.set(at[0], at[1], at[2] + 0.55);
+  spr.position.set(at[0], at[1], at[2] + dz);
   spr.scale.set(1.6, 0.8, 1);
   return spr;
 }
@@ -236,10 +244,15 @@ async function show(n) {
     if (overlayBox.checked) {
       const b = await subjectsAt(frame, "b");
       nb = b.length;
-      drawArmB(b);
+      drawArmB(b, idsBox.checked);
+      const only = b.filter((x) => !subs.some((y) => y.track_id === x.track_id))
+                    .map((x) => x.track_id);
+      if (only.length) stat2(`only in B: ${only.join(", ")}`);
+      else stat2("");
       if (!nb) err("overlay: no second scene — set POSEANNOT_SCENE_JSON_B and restart");
     } else {
       poseGroupB.clear();
+      stat2("");
     }
     if (trailsBox.checked) await drawTrails(); else trailGroup.clear();
     scrub.value = String(frame);
