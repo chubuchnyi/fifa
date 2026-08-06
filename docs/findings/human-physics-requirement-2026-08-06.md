@@ -197,3 +197,57 @@ directions, with the short-track confound removed and measured post-stitch, and 
 ~70 % association ceiling is real and reaching it needs a better association *cue* — a temporally
 propagated mask — not a threshold. The remaining ~30 % is detector recall and stays out of reach
 of any tracker change.
+
+### Detector recall: also a null, and it raises the ceiling to 96 %
+
+The 30 % "detection miss" share looked like a hard limit. It was our own threshold.
+`RFDETRDetector.score_threshold` is 0.3 while the backend predicts down to 0.05, so boxes between
+those values were being discarded. Re-detecting shot 1 at **0.10** (8810 boxes vs 4362) and
+re-running the split against the *same* tracks:
+
+| detections used | mid-pitch events | association miss | detection miss |
+|---|---|---|---|
+| threshold 0.30 | 78 | 55 (70 %) | 23 (30 %) |
+| threshold 0.10 | 78 | **75 (96 %)** | **3 (4 %)** |
+
+So the boxes are almost always there — the ceiling for an association cue is **96 %**, not 70 %.
+
+But handing them to the tracker changes nothing:
+
+| detection threshold | boxes | tracks | after stitch | mid-pitch events | kit changes |
+|---|---|---|---|---|---|
+| **0.30** | 4362 | 56 | 36 | **26** | 0 |
+| 0.10 | 8810 | 56 | 37 | 28 | 0 |
+
+Doubling the detections leaves the identity churn where it was (26 → 28). **The information is
+present and ByteTrack cannot use it** — IoU plus a Kalman prediction cannot say which of two
+adjacent boxes belongs to which track when players cross. That is precisely the gap a propagated
+mask fills, and it is now measured rather than assumed: three separate cheap fixes (match
+threshold both ways, detector threshold) came back null against the same failure.
+
+### McByte: the mechanism, and where it has to attach
+
+Read out of `backends/McByte/yolox/tracker/mcbyte_tracker.py` (MIT). For each candidate
+(track, detection) pair, with `prediction_mask` a per-frame label image and each track owning a
+propagated mask id:
+
+* `mm1` = mask pixels inside the box ÷ that mask's total pixels — "is the mask mostly in this box"
+* `mm2` = mask pixels inside the box ÷ box area — "how much of the box is this mask"
+* if the mask is confident (`≥ 0.6`), fills the box enough (`mm2 ≥ 0.05`) and sits mostly inside it
+  (`mm1 ≥ 0.9`), then **`cost[i][j] -= mm2`** — a discount on the right pairing.
+
+The cue is temporal by construction: the mask arrives from previous frames, so it is independent of
+the current detection. A per-frame SAM mask prompted by the box cannot substitute — it would be
+derived from the very box under test.
+
+**Where it attaches, in our stack.** McByte modifies the cost matrix *inside* the tracker, and we
+use `sv.ByteTrack` as a black box. Vendoring their tracker drags in `yolox/__init__` → `utils` →
+`visualize` → Cutie's GUI, which is a packaging tangle for four files of classic ByteTrack. The
+smaller seam: supervision calls the module-level `matching.iou_distance(tracks, detections)`, and
+`STrack` exposes `.tlbr` and `external_track_id`. Wrapping that one function applies the discount
+while leaving the validated tracker untouched.
+
+**What remains, honestly.** The cue is small; the mask *propagation* is the work. McByte seeds with
+SAM and propagates with **Cutie**, which needs `hydra`, `omegaconf`, `segment_anything`, its own
+weights, and a pass over the clip. `lap`, `cython_bbox` and `loguru` are installed;
+`backends/McByte` is cloned. That is where the next session starts.
