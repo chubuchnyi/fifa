@@ -395,7 +395,15 @@ essentially the same pixels twice" and call that the second half of the ticket. 
 same pixels twice — because it is the same man twice. That is a *tracking* fault presented to the
 pose stage, not evidence that pose fusion happens. A2 has to be run on a real occlusion instead.
 
-#### A2, pose — **DONE 2026-08-05, and it does NOT fail**
+#### ⚠ A2's conclusion is WITHDRAWN as under-powered — see the 2026-08-06 note at the end of this file
+
+The section below tested **one frame and one pair** and generalised to the whole clip. Measured
+2026-08-06: **23.5 %** of player crops carry >5 % of another player's box, **10.7 %** carry >20 %,
+and **76 % of frames** contain at least one contaminated crop. Frame 87 was one sample out of 423,
+and one where the pixel occlusion was mild by my own measurement. The numbers below stand; the
+verdict drawn from them does not.
+
+#### A2, pose — measured 2026-08-05 on frame 87 only
 
 `scripts/smplestx_occlusion.py --frame 87 --pair 15 85`, SMPLest-X Huge on CPU, fed our own
 ByteTrack boxes through the production `_infer_crop`. Both SAM masks were checked against kit
@@ -807,3 +815,42 @@ The tracking work #132 actually needs, in the order it pays:
 8. **Three stacked non-commercial licences**: Meshcapade (PromptHMR), ZJU/GVHMR (the vendored
    video head), NAVER CC BY-NC-SA 4.0 (the Multi-HMR image encoder). Research-fine; a product
    needs three conversations.
+
+
+## 2026-08-06 — the pose verdict reopened, by the user's eye and then by counting
+
+The user, watching the render: *"футболисты спекаются, потом рождаются новые из 2-х - 3"* — players
+bake together, then new ones are born out of two or three. Per this project's own rule the eye
+outranks my headless check, and here the eye was sampling 60 frames of output while I had sampled
+one crop.
+
+**What I had actually measured.** A2 ran the production per-crop path on frame 87, tracks 15 and 85,
+found 79 % and 90 % of each mesh on its own player, and concluded "the pose half does not
+reproduce". I even recorded in the same section that the occlusion there was mild — the back player
+filled 0.59 of his box, against 0.30–0.45 for an unoccluded one. A single mild case is not a sample.
+
+**How common the failure condition actually is**, over shot 1 (3969 plausible player boxes):
+
+| another player covers ≥ this much of the crop | share of crops |
+|---|---|
+| 5 % | **23.5 %** (932) |
+| 10 % | 19.1 % (760) |
+| 20 % | **10.7 %** (423) |
+| 30 % | 5.3 % (212) |
+| 50 % | 0.6 % (24) |
+
+**76 % of frames** hold at least one crop contaminated above 20 %, 1.8 players per frame on average
+and 7 in the worst frame. So "one crop, two bodies" is not an edge case; it is the normal condition
+for roughly one player in five.
+
+**And the identity churn sits on top of it.** Shot 1 carries **72 track births and deaths** away from
+the clip edges. They concentrate where crops overlap: 94 % of them fall within ±2 frames of a
+contaminated frame against a 76 % base rate, and the local density of contaminated crops rises from
+1.79 to 2.25 per frame. That is the "2 → 3" the user describes, located.
+
+**What this does and does not overturn.** It does not resurrect the mask-prompt A/B — masks vs boxes
+came back null twice on frame 29, and that was a separate question. It does overturn the *scope* of
+A2's conclusion: PromptHMR was dropped on evidence from one mild crop, which was not enough to
+settle a clip where 423 crops are contaminated above 20 %. The honest state is **unknown**, not
+"does not reproduce", and the next measurement is A2 repeated over a sample of the 423 rather than
+the one.
