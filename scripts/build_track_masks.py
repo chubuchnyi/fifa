@@ -19,6 +19,7 @@ Cost warning, measured before you spend it: Cutie is a video model at full 1920x
 the slow half of the whole idea. Time a short ``--frames`` before committing to the clip.
 """
 import argparse
+import os
 import sys
 import time
 from pathlib import Path
@@ -93,7 +94,13 @@ def sam_mask(rgb, box):
         inp['reshaped_input_sizes'].cpu())[0][0, 0].numpy().astype(bool)
 
 
-cap = cv2.VideoCapture(str(REPO / args.clip))
+# Absolute paths win over the repo-relative default: on the pod the clip lives OUTSIDE the
+# checkout (/workspace/…), and silently reading zero frames used to surface only at save time as
+# "need at least one array to stack".
+clip_path = args.clip if os.path.isabs(args.clip) else str(REPO / args.clip)
+cap = cv2.VideoCapture(clip_path)
+if not cap.isOpened():
+    raise SystemExit(f'cannot open {clip_path!r} — pass --clip with the path on THIS machine')
 if args.start:
     cap.set(cv2.CAP_PROP_POS_FRAMES, args.start)
 labels: dict[int, np.ndarray] = {}
@@ -102,6 +109,7 @@ t0 = time.time()
 for n in range(args.start, END):
     ok, frame = cap.read()
     if not ok:
+        print(f'  clip ended at frame {n} (asked for {END})', flush=True)
         break
     new = seeds.get(n, [])
     if args.max_objects:
@@ -131,6 +139,8 @@ cap.release()
 
 out_path = REPO / args.out
 out_path.parent.mkdir(parents=True, exist_ok=True)
+if not labels:
+    raise SystemExit(f'no frames decoded from {clip_path!r} — nothing to write')
 np.savez_compressed(
     out_path,
     frames=np.array(sorted(labels)),
