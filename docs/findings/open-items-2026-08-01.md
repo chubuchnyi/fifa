@@ -244,3 +244,32 @@ so a fully-clamped scene still read "89 joint violations" — every one of them 
 output at 600.0000000000017 against a 600.0 limit. It now compares against the limit plus one part
 in a million. Without that, the next person to enable these gates would have concluded they do not
 work.
+
+### Orientation: a metric I had to withdraw (2026-08-06)
+
+Looking for the next pose defect after the joint clamps, I measured the angle between each
+subject's body axis and their direction of travel, over every moving subject-frame:
+
+```
+best axis: 63% within 90 deg, 35% within 45 deg   (random = 50% / 25%)
+```
+
+and read it as "body orientation is barely better than random". **Withdrawn — the user pointed out
+why: footballers legitimately move backwards and sideways.** A defender backpedalling and a winger
+side-stepping produce exactly the same disagreement as a wrong orientation, and this metric cannot
+separate them. It measures "how often does a player run forwards", which is a fact about football,
+not about our reconstruction.
+
+Two things survive the withdrawal:
+
+* **The camera-rotation hypothesis is dead anyway.** If the defect were the missing camera→world
+  rotation (`global_orient` is camera-relative and nothing in the production path rotates it —
+  `camera_to_world` exists only in `eval/`), applying the measured #129 rotation should have moved
+  the number. It gives 68 % / 36 % against a raw 63 % / 35 %: noise. Not worth building.
+* **Scale is a real constraint.** Players in this clip are ~86 px tall. How much facing information
+  the pixels can even carry at that size is an open question, and until there is a metric that does
+  not confuse error with backpedalling, "orientation is inaccurate" is not something this repo can
+  claim or refute.
+
+Contrast with the joint-rate defect, which is why that one was worth acting on: 2212 deg/s against
+a 600 deg/s human ceiling is impossible regardless of which way the player is facing or running.
