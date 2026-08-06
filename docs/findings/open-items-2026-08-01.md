@@ -233,6 +233,12 @@ Removing every violation costs 1.5–2.2 % of the real angular motion, so this i
 noise, not the yaw low-pass eating turns. `VIDEO_PHYSICS_PROFILE_DEFAULT=safe_new` is now the pod
 default; `PHYSICS_PROFILE=` still overrides.
 
+**The obvious risk, checked before the pod run rather than after.** A joint clamp could buy
+smoothness by introducing foot slide. `scripts/bench_subject_steadiness.py` over the two scenes:
+displacement **0.0000 m** (median, p95 and max), frame-to-frame step **0.0527 m in both**. The
+gates touch `body_pose` and `global_orient` only and never the translation, so they cannot move a
+player at all — the smoothing is free of that trade.
+
 **One measurement trap fixed on the way.** `motion_stats.py` counted violations with a strict `>`,
 so a fully-clamped scene still read "89 joint violations" — every one of them the clamp's own
 output at 600.0000000000017 against a 600.0 limit. It now compares against the limit plus one part
