@@ -158,3 +158,42 @@ A second flaw in that first sweep: the kit-change column read 0 at every setting
 with the #132 split **on** — which cuts swapped tracks apart by construction, so the sweep was blind
 to its own downside. Both are fixed: the threshold sweep now runs upward from 0.8 and with the split
 off, so a looser threshold that starts matching the *wrong* player shows up as kit changes.
+
+### The knob, checked in the permissive direction too — and it is a null
+
+Corrected sweep (running **upward** from 0.8, and with the #132 kit split **off** so swaps are
+visible):
+
+| `minimum_matching_threshold` | tracks | mid-pitch events | kit changes |
+|---|---|---|---|
+| 0.70 | 58 | 70 | 2 |
+| **0.80 (default)** | 38 | 28 | 9 |
+| 0.85 | 36 | 26 | 10 |
+| 0.90 | 33 | 20 | 9 |
+| 0.95 | 30 | **12** | 11 |
+
+On its own that looks like a win: churn more than halved for two extra swaps, and swaps are what
+the kit split already fixes. But measured **with the split on and after stitching** — i.e. on what
+actually reaches the render:
+
+| match | split | tracks | after stitch | mid-pitch events | kit changes |
+|---|---|---|---|---|---|
+| 0.80 | off | 38 | 37 | 28 | 9 |
+| **0.80** | **on** | 56 | **36** | **26** | **0** |
+| 0.95 | off | 30 | 29 | 12 | 11 |
+| 0.95 | on | 52 | 37 | **28** | 0 |
+
+**The gain is entirely eaten by the split.** At 0.95 the tracker grabs the wrong player more often
+(11 swaps vs 9); the split then cuts those tracks apart, and every cut *is* a mid-pitch birth and
+death. So the churn returns through the other door and 0.95 ends up marginally worse than 0.80 at
+the same final subject count.
+
+The two fixes address the same failure — association taking the wrong player at a crossing — so
+they do not compose; one just moves the cost onto the other. `match_threshold` stays at 0.80 (the
+default was never changed, only exposed).
+
+**This is what licenses McByte rather than assuming it.** The cheap knob was checked in both
+directions, with the short-track confound removed and measured post-stitch, and it is a null. The
+~70 % association ceiling is real and reaching it needs a better association *cue* — a temporally
+propagated mask — not a threshold. The remaining ~30 % is detector recall and stays out of reach
+of any tracker change.
