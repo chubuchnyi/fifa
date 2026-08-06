@@ -400,7 +400,15 @@ def api_world_skeletons(
             # Already world z-up: scene_state adds the root translation when it bakes the cache.
             "joints": np.round(sub.joints[n], 4).tolist(),
         })
-    return {"frame": n, "subjects": subjects, "names": BODY_JOINT_NAMES, "arm": arm}
+    # The MEASURED kit colour, not a palette: team ids are k-means cluster labels, so "A" is not
+    # reliably one team or the other and hard-coding a colour per id gets the two sides swapped —
+    # which is exactly what happened, and the user caught it before I did.
+    teams_rgb = {
+        t.id: [round(float(c), 4) for c in (t.color_rgb or (0.7, 0.7, 0.7))]
+        for t in st.scene.teams
+    }
+    return {"frame": n, "subjects": subjects, "names": BODY_JOINT_NAMES, "arm": arm,
+            "teams": teams_rgb}
 
 
 @app.get("/api/pitch/{frame}")

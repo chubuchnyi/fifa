@@ -69,8 +69,13 @@ const BONES = [
   [3,6],[6,9],[9,12],[12,15], [9,13],[13,16],[16,18],[18,20],
   [9,14],[14,17],[17,19],[19,21],
 ];
-const TEAM_COLOUR = { A: 0x4fc3f7, B: 0xffd54f };   // light blue / yellow, as the clip's kits
+// Filled from the scene's MEASURED kit colours (see /api/world/{n}/skeletons). Hard-coding a
+// colour per team id was wrong: the ids are k-means cluster labels, so "A" is not reliably the
+// blue side, and the two teams came out swapped against the video.
+let TEAM_COLOUR = {};
 const NO_TEAM = 0xbdbdbd;
+const rgbToHex = (c) => (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8)
+                        | Math.round(c[2] * 255);
 // The overlay arm gets ONE colour, not team colours: the question it answers is "where do these
 // two runs disagree", and two palettes on top of each other answer nothing.
 const ARM_B_COLOUR = 0xff3ea5;
@@ -229,6 +234,9 @@ async function subjectsAt(n, arm = "a") {
   const r = await fetch(`/api/world/${n}/skeletons?arm=${arm}`);
   if (!r.ok) throw new Error(`frame ${n} (${arm}): HTTP ${r.status}`);
   const d = await r.json();
+  if (arm === "a" && d.teams) {
+    for (const [id, rgb] of Object.entries(d.teams)) TEAM_COLOUR[id] = rgbToHex(rgb);
+  }
   cache.set(key, d.subjects);
   return d.subjects;
 }
