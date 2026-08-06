@@ -249,3 +249,57 @@ def test_a_brief_flicker_is_not_a_swap():
     flicker = _swap_track(8, 0)
     flicker.appearance_series[4:6] = _YEL_HSV
     assert len(split_on_kit_change(flicker, _centroids(), min_run=4, next_id=500)) == 1
+
+
+# --- #133: the McByte mask cue -----------------------------------------------------------
+
+def _cue_scene():
+    """A 100x100 frame with track 7's propagated mask filling the box at (10,10)-(30,50)."""
+    from pitch3d.adapters.models.tracking import MaskCue
+
+    lab = np.zeros((100, 100), dtype=int)
+    lab[10:50, 10:30] = 7                      # 800 px, exactly the left box
+    return MaskCue(labels={3: lab}, frame=3)
+
+
+def test_mask_cue_discounts_the_box_its_mask_agrees_with():
+    cue = _cue_scene()
+    boxes = np.array([[10.0, 10.0, 30.0, 50.0],    # the mask's own box
+                      [60.0, 10.0, 80.0, 50.0]])   # a neighbour, no mask in it
+    cost = np.ones((1, 2))
+    out = cue.apply(cost, [7], boxes)
+    assert out[0, 1] == 1.0, "a box with none of the mask must not be discounted"
+    # mm2 = 800/800 = 1.0 here, so the discount is the full fill ratio.
+    assert out[0, 0] == pytest.approx(0.0), "the mask's own box must get the mm2 discount"
+
+
+def test_a_box_that_swallows_the_mask_and_the_pitch_is_outbid_by_the_tight_one():
+    """The discount is *proportional* to fill, which is what keeps the ranking right.
+
+    A huge box containing the whole mask passes both guards — mm1 is 1.0 by definition and mm2
+    (800/10000 = 0.08) clears min_fill. It is not refused, and it should not be: it earns a
+    discount of 0.08 against the tight box's 1.0, so the correct pairing still wins by a mile.
+    Asserting a refusal here was my own misreading of which guard does what.
+    """
+    cue = _cue_scene()
+    tight = np.array([[10.0, 10.0, 30.0, 50.0]])
+    huge = np.array([[0.0, 0.0, 100.0, 100.0]])
+    d_tight = 1.0 - cue.apply(np.ones((1, 1)), [7], tight)[0, 0]
+    d_huge = 1.0 - cue.apply(np.ones((1, 1)), [7], huge)[0, 0]
+    assert d_huge == pytest.approx(0.08), "discount tracks the fill ratio, not mere containment"
+    assert d_tight > 10 * d_huge, "the tight box must outbid the greedy one by a wide margin"
+
+
+def test_mask_cue_refuses_a_box_holding_only_a_sliver():
+    """mm2 guards the opposite case: clipping a corner of the mask is not evidence either."""
+    cue = _cue_scene()
+    sliver = np.array([[28.0, 48.0, 78.0, 98.0]])  # 2x2 of the mask inside a 50x50 box
+    out = cue.apply(np.ones((1, 1)), [7], sliver)
+    assert out[0, 0] == 1.0
+
+
+def test_mask_cue_is_inert_on_a_frame_it_has_no_mask_for():
+    cue = _cue_scene()
+    cue.frame = 999
+    cost = np.ones((1, 1))
+    assert cue.apply(cost, [7], np.array([[10.0, 10.0, 30.0, 50.0]])) is cost

@@ -36,6 +36,64 @@ TEAM_CLASSES: frozenset[str] = frozenset({"player", "goalkeeper"})
 
 
 @dataclass
+class MaskCue:
+    """McByte's mask cue: discount the association cost of the pair a propagated mask agrees with.
+
+    Measured need (#133): three cheap fixes came back null against the same failure — 96 % of
+    mid-pitch identity births/deaths have an unclaimed detection a median 6-23 px away, so the
+    boxes are there and IoU plus a Kalman prediction cannot say which belongs to which track.
+    A mask propagated from *earlier* frames is independent of the detection being judged and can.
+
+    The rule is McByte's, read off `yolox/tracker/mcbyte_tracker.py` (MIT), with their constants:
+
+    * ``mm1`` = mask pixels inside the box ÷ that mask's total pixels — is the mask mostly here?
+    * ``mm2`` = mask pixels inside the box ÷ box area — how much of the box is this mask?
+    * if ``mm2 >= min_fill`` **and** ``mm1 >= min_inside``, subtract ``mm2`` from the cost.
+
+    Both conditions matter and they guard opposite errors: ``mm2`` alone would reward a box that
+    happens to contain a sliver of the mask, ``mm1`` alone would reward a box that swallows the
+    mask *and* half the pitch.
+
+    Attributes:
+        labels: ``{frame: (H, W) int label image}``; 0 is background, other values are track ids.
+        frame: The frame currently being associated — set by the backend before each update.
+        min_fill / min_inside: McByte's ``MIN_MM2`` / ``MIN_MM1``.
+    """
+
+    labels: dict[int, np.ndarray] = field(default_factory=dict)
+    frame: int = -1
+    min_fill: float = 0.05
+    min_inside: float = 0.9
+
+    def apply(self, cost: np.ndarray, track_ids: list[int], boxes: np.ndarray) -> np.ndarray:
+        """Return ``cost`` with the mask discount applied. Unknown frames pass through unchanged."""
+        lab = self.labels.get(int(self.frame))
+        if lab is None or cost.size == 0:
+            return cost
+        out = cost.copy()
+        h, w = lab.shape
+        for i, tid in enumerate(track_ids):
+            if tid is None:
+                continue
+            total = int((lab == tid).sum())
+            if total <= 0:
+                continue
+            for j, b in enumerate(boxes):
+                x0, y0 = max(0, int(b[0])), max(0, int(b[1]))
+                x1, y1 = min(w, int(b[2])), min(h, int(b[3]))
+                if x1 <= x0 or y1 <= y0:
+                    continue
+                inside = int((lab[y0:y1, x0:x1] == tid).sum())
+                if inside <= 0:
+                    continue
+                mm2 = inside / float((y1 - y0) * (x1 - x0))
+                if mm2 < self.min_fill or inside / total < self.min_inside:
+                    continue
+                out[i, j] -= mm2
+        return out
+
+
+@dataclass
 class RawTracklet:
     """Backend output for one associated identity: boxes over time + an appearance feature.
 
@@ -388,6 +446,8 @@ class ByteTrackBackend:
     activation_threshold: float = 0.25
     #: Frames a lost track is kept alive waiting to be re-matched.
     lost_buffer: int = 30
+    #: Optional McByte mask cue (#133). ``None`` = plain ByteTrack, byte for byte.
+    mask_cue: MaskCue | None = None
     #: Stable class→id map fed to ByteTrack (ball is excluded from association on purpose).
     class_ids: dict[str, int] = field(
         default_factory=lambda: {"goalkeeper": 1, "player": 2, "referee": 3}
@@ -405,9 +465,43 @@ class ByteTrackBackend:
             lost_track_buffer=self.lost_buffer,
         )
 
+        # The mask cue has to reach INSIDE the association, where supervision builds its cost
+        # matrix — that is the only place the evidence can change a pairing. supervision calls the
+        # module-level `matching.iou_distance(tracks, detections)`, so wrapping that one function
+        # applies McByte's discount and leaves the validated tracker untouched. Restored in the
+        # `finally` below: a module-level patch that outlives this call would silently alter every
+        # later tracker in the process.
+        unpatch = self._patch_matching(sv) if self.mask_cue is not None else None
+        try:
+            return self._associate_frames(sv, tracker, clip, detections, id_to_cls)
+        finally:
+            if unpatch is not None:
+                unpatch()
+
+    def _patch_matching(self, sv):  # pragma: no cover - heavy path
+        from supervision.tracker.byte_tracker import matching
+
+        original = matching.iou_distance
+        cue = self.mask_cue
+
+        def patched(atracks, btracks):
+            cost = original(atracks, btracks)
+            try:
+                ids = [getattr(t, "external_track_id", None) for t in atracks]
+                boxes = np.asarray([t.tlbr for t in btracks], dtype=float).reshape(-1, 4)
+            except (AttributeError, TypeError):
+                return cost          # the self-distance call passes raw arrays, not STracks
+            return cue.apply(cost, ids, boxes)
+
+        matching.iou_distance = patched
+        return lambda: setattr(matching, "iou_distance", original)
+
+    def _associate_frames(self, sv, tracker, clip, detections, id_to_cls):  # pragma: no cover
         # Accumulate per-track boxes/classes keyed by ByteTrack's tracker id.
         boxes: dict[int, list[tuple[int, np.ndarray, str]]] = {}
         for fd in detections.frames:
+            if self.mask_cue is not None:
+                self.mask_cue.frame = int(fd.frame)
             people = [d for d in fd.items if d.cls in self.class_ids]
             det = sv.Detections(
                 xyxy=np.array([d.bbox_xyxy for d in people], dtype=float).reshape(-1, 4),
