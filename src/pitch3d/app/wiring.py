@@ -77,6 +77,30 @@ def _resolve_backend(spec: str, protocol: Any) -> Any:
     return backend
 
 
+def _bytetrack_backend(device: str):
+    """The real association backend, with #133's mask cue attached when one is staged.
+
+    `PITCH3D_MASK_CUE` points at a `track_masks.npz` from `scripts/build_track_masks.py`. Unset —
+    the default — means plain ByteTrack, byte for byte, so this cannot change a run by accident;
+    it exists so the cue can reach the *rendered* scene, not only the offline A/B harness.
+    """
+    import os
+
+    from ..adapters.models.tracking import ByteTrackBackend, MaskCue
+
+    path = os.environ.get("PITCH3D_MASK_CUE")
+    cue = None
+    if path:
+        import numpy as np
+
+        blob = np.load(path)
+        cue = MaskCue(labels={
+            int(f): lab for f, lab in zip(blob["frames"], blob["labels"], strict=True)
+        })
+        print(f"== tracking: mask cue ON from {path} ({len(cue.labels)} frames)")
+    return ByteTrackBackend(device=device, mask_cue=cue)
+
+
 def default_ports(
     *, out_dir: str | Path = "out", n_subjects: int = 4,
     detector: str = "fake", tracker: str = "fake", calibrator: str = "fake", pose: str = "fake",
@@ -208,7 +232,7 @@ def default_ports(
             # 9 of 38 tracks carried an avatar onto a different human; this takes that to 0.
             kit_split=kit_split,
             backend=_resolve_backend(tracker_backend, TrackingBackend)
-            if tracker_backend else None,
+            if tracker_backend else _bytetrack_backend(device),
         )
     else:
         raise ValueError(f"unknown tracker {tracker!r}; expected 'fake' or 'bytetrack'")
