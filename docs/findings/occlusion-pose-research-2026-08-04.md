@@ -854,3 +854,43 @@ A2's conclusion: PromptHMR was dropped on evidence from one mild crop, which was
 settle a clip where 423 crops are contaminated above 20 %. The honest state is **unknown**, not
 "does not reproduce", and the next measurement is A2 repeated over a sample of the 423 rather than
 the one.
+
+### A2 redone over 40 pairs — fusion is real, and it is not the main event
+
+`scripts/smplestx_occlusion_sweep.py --pairs 40 --min-cover 0.20`, stratified over cover 0.20–0.87,
+production SMPLest-X, SAM masks kit-checked:
+
+| | all 40 | opposing kits (27) |
+|---|---|---|
+| cross-contamination, median | 0.158 | 0.158 |
+| p90 | 0.381 | 0.382 |
+| max | 0.737 | 0.537 |
+| mesh on its **own** player, median | 0.802 | 0.822 |
+| **FUSED** (mesh lands more on the neighbour than on itself) | **2 / 40** | **1 / 27** |
+
+**The 2026-08-05 verdict was wrong and this supersedes it.** Fusion happens. It is just not what a
+single mild crop showed.
+
+**Where it happens.** Both fusions sit at cover **0.41** and **0.49**; the 18 pairs below 0.31 were
+all clean. Restricted to the sample above cover 0.40 the rate is **2/10 = 20 %**, and shot 1 holds
+**61** such pair-instances → roughly **12 fused meshes per 236 frames**.
+
+**How it happens — and why box IoU never found it.** The clearer case, frame 118, tracks 139 (front,
+BLU) and 99 (back, YEL): the back player's mesh lands **52 %** inside the front player's mask, more
+than on his own. Their **box IoU is 0.126**. Fusion does not need boxes to overlap much; it needs the
+*back* player to be small and substantially covered, which is what happens when a distant player
+passes behind a near one. Ranking candidates by box IoU — where this whole investigation started —
+looks for big intersections and therefore looks away from exactly this case. Neither fused pair is a
+duplicate box (IoU 0.126 and 0.297, heights differing 20 % and 11 %), so the frame-124 artefact is
+not involved.
+
+**And the size of it, against the other failure.** ~12 fused mesh-instances per 236 frames, versus
+**60 spurious identity births/deaths** in the same 236 frames (`human-physics-requirement-2026-08-06.md`).
+Identity churn is roughly **5× more frequent**. Both are real; the user's *"спекаются, потом
+рождаются новые из 2-х - 3"* is dominated by the second.
+
+**What this licenses.** Not a wholesale pose-model swap: the typical contaminated crop is fine
+(80 % of the mesh on its own player, 16 % on the neighbour). It licenses (a) treating the ~61
+heavily-covered pair-instances per shot as a real defect worth a targeted fix, and (b) putting
+identity first, where **McByte** — our own ByteTrack plus a temporally-propagated mask cue, MIT,
+training-free, HOTA 85.0 vs 72.1 on SoccerNet-tracking — is the direct candidate.
