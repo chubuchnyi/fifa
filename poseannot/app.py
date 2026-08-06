@@ -49,6 +49,7 @@ from pitch3d.core.scene.pitch import (
     pitch_upright_polylines,
 )
 from pitch3d.core.scene.projection import quat_to_rotation_matrix
+from pitch3d.core.scene.units import FieldDimensions
 
 from . import clips as clips_mod
 from . import rerun as rerun_mod
@@ -123,6 +124,21 @@ async def main_app(user: str = Depends(current_user)) -> FileResponse:
     # stale index.html (a cached build silently masks shipped fixes).
     return FileResponse(
         STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-store, must-revalidate"},
+    )
+
+
+@app.get("/world", response_class=HTMLResponse)
+async def world_view(user: str = Depends(current_user)) -> FileResponse:
+    """Whole-pitch 3D scrubber: every player's skeleton on the measured pitch, free to orbit.
+
+    Exists so pose and physics work can be judged by scrubbing frames instead of paying ~30 min
+    of GPU for a full render just to see whether the bodies move like bodies. Separate from /app
+    on purpose — that view is a single-subject joint editor, pelvis-centred on one player.
+    """
+    del user
+    return FileResponse(
+        STATIC_DIR / "world.html",
         headers={"Cache-Control": "no-store, must-revalidate"},
     )
 
@@ -336,6 +352,47 @@ def api_frame_skeletons(
             continue
         subjects.append({"track_id": tid, "pts": _joints2d_for(st, sub, n, vsize, adj)})
     return {"subjects": subjects, "names": BODY_JOINT_NAMES}
+
+
+@app.get("/api/world/geometry")
+def api_world_geometry(user: str = Depends(current_user)) -> dict:
+    """The pitch itself, in world metres — markings on Z=0 plus goals and flagposts.
+
+    Static for a clip, so the viewer fetches it once and then only asks for skeletons per frame.
+    Both lists come from `core.scene.pitch`, the same geometry the overlay and the render use, so
+    the 3D view cannot drift from the 2D one.
+    """
+    del user
+    return {
+        "markings": [p.tolist() for p in pitch_polylines()],
+        "uprights": [p.tolist() for p in pitch_upright_polylines()],
+        "length": FieldDimensions().length,
+        "width": FieldDimensions().width,
+    }
+
+
+@app.get("/api/world/{n}/skeletons")
+def api_world_skeletons(n: int, user: str = Depends(current_user)) -> dict:
+    """Every subject's 3D body joints at position ``n``, in world metres — one round trip.
+
+    The per-subject `/api/subject/{tid}/joints/{frame}` endpoint is for the joint editor, which
+    works on one player at a time. Scrubbing a whole pitch needs all of them at once or the view
+    spends its time in HTTP; this is the 3D twin of `/api/frame/{n}/skeletons`.
+    """
+    del user
+    st = get_state()
+    teams = {s.track_id: s.team_id for s in st.scene.subjects}
+    subjects = []
+    for tid, sub in sorted(st.subjects.items()):
+        if n < 0 or n >= sub.frames.shape[0]:
+            continue
+        subjects.append({
+            "track_id": tid,
+            "team": teams.get(tid),
+            # Already world z-up: scene_state adds the root translation when it bakes the cache.
+            "joints": np.round(sub.joints[n], 4).tolist(),
+        })
+    return {"frame": n, "subjects": subjects, "names": BODY_JOINT_NAMES}
 
 
 @app.get("/api/pitch/{frame}")

@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>poseannot — pitch view</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three":         "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin:0; height:100%; background:#14161a; color:#d7dae0;
+                 font:13px/1.4 system-ui, sans-serif; overflow:hidden; }
+    #view { position:absolute; inset:0 0 46px 0; }
+    #bar { position:absolute; left:0; right:0; bottom:0; height:46px; display:flex;
+           align-items:center; gap:10px; padding:0 12px; background:#1b1e23;
+           border-top:1px solid #2b2f36; box-sizing:border-box; }
+    #bar button { background:#262a31; color:#d7dae0; border:1px solid #363b44;
+                  border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
+    #bar button:hover { background:#2f343c; }
+    #scrub { flex:1; min-width:120px; }
+    .num { font-variant-numeric:tabular-nums; }
+    .muted { color:#8b929e; }
+    #hud { position:absolute; top:10px; left:12px; pointer-events:none;
+           text-shadow:0 1px 2px #000; }
+    #err { position:absolute; top:10px; right:12px; color:#ff8f8f; max-width:46%; }
+    a { color:#7fb2ff; }
+  </style>
+</head>
+<body>
+<div id="view"></div>
+<div id="hud">
+  <div><b>pitch view</b> <span class="muted">— drag to orbit, wheel to zoom, right-drag to pan</span></div>
+  <div class="muted"><span id="stat">loading…</span></div>
+</div>
+<div id="err"></div>
+<div id="bar">
+  <a href="/app" title="back to the annotation UI">← app</a>
+  <button id="prev" title="previous frame (←)">◀</button>
+  <button id="play" title="play / pause (space)">▶</button>
+  <button id="next" title="next frame (→)">▶|</button>
+  <input id="scrub" type="range" min="0" max="0" value="0" />
+  <span class="num" id="fnum">0</span>
+  <span class="muted">|</span>
+  <label><input type="checkbox" id="ids" /> ids</label>
+  <label><input type="checkbox" id="trails" /> trails</label>
+  <button id="reset" title="reset the camera">reset view</button>
+</div>
+
+<script type="module">
+// A whole-pitch 3D view: every player's skeleton at one frame, on the measured pitch, free to
+// orbit. It exists so pose and physics work can be judged by scrubbing frames instead of paying
+// ~30 min and GPU money for a full render just to see whether bodies move like bodies.
+//
+// Deliberately NOT part of index.html's Alpine app: that file is a 2400-line single-subject joint
+// editor whose 3D scene is pelvis-centred on one player. Two different questions, two views.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+// Same topology as the annotation UI (SMPL-X body, 22 joints).
+const BONES = [
+  [0,1],[0,2],[0,3], [1,4],[4,7],[7,10], [2,5],[5,8],[8,11],
+  [3,6],[6,9],[9,12],[12,15], [9,13],[13,16],[16,18],[18,20],
+  [9,14],[14,17],[17,19],[19,21],
+];
+const TEAM_COLOUR = { A: 0x4fc3f7, B: 0xffd54f };   // light blue / yellow, as the clip's kits
+const NO_TEAM = 0xbdbdbd;
+
+const view = document.getElementById("view");
+const err = (m) => { document.getElementById("err").textContent = m || ""; };
+const stat = (m) => { document.getElementById("stat").textContent = m; };
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#14161a");
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 600);
+camera.up.set(0, 0, 1);                       // world is Z-up, like the rest of the pipeline
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+view.appendChild(renderer.domElement);
+const orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  camera.aspect = w / Math.max(1, h);
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+}
+addEventListener("resize", resize);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const key = new THREE.DirectionalLight(0xffffff, 0.6);
+key.position.set(40, -60, 80);
+scene.add(key);
+
+const DEFAULT_VIEW = { pos: [0, -95, 55], target: [0, 0, 0] };
+function resetView() {
+  camera.position.set(...DEFAULT_VIEW.pos);
+  orbit.target.set(...DEFAULT_VIEW.target);
+  orbit.update();
+}
+
+const poseGroup = new THREE.Group(); scene.add(poseGroup);
+const trailGroup = new THREE.Group(); scene.add(trailGroup);
+const labelGroup = new THREE.Group(); scene.add(labelGroup);
+
+function polyline(points, colour, z = 0) {
+  const pts = points.map((p) => new THREE.Vector3(p[0], p[1], p.length > 2 ? p[2] : z));
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color: colour }));
+}
+
+async function buildPitch() {
+  const g = await fetch("/api/world/geometry").then((r) => r.json());
+  // The turf: a plain plane so the skeletons read as standing on something. Slightly below 0 so
+  // the markings, which ARE at z=0, do not z-fight with it.
+  const turf = new THREE.Mesh(
+    new THREE.PlaneGeometry(g.length + 12, g.width + 12),
+    new THREE.MeshLambertMaterial({ color: 0x2f5d33 }),
+  );
+  turf.position.z = -0.01;
+  scene.add(turf);
+  for (const line of g.markings) {
+    if (line.length < 2) {                       // a one-point polyline is a spot (centre/penalty)
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.15, 12),
+                                 new THREE.MeshBasicMaterial({ color: 0xffffff }));
+      dot.position.set(line[0][0], line[0][1], 0.005);
+      scene.add(dot);
+      continue;
+    }
+    scene.add(polyline(line, 0xffffff, 0.004));
+  }
+  for (const up of g.uprights) scene.add(polyline(up, 0x9fd8ff));
+  return g;
+}
+
+const jointGeo = new THREE.SphereGeometry(0.055, 8, 8);
+function drawSkeletons(subjects, showIds) {
+  poseGroup.clear(); labelGroup.clear();
+  for (const s of subjects) {
+    const colour = TEAM_COLOUR[s.team] ?? NO_TEAM;
+    const mat = new THREE.MeshLambertMaterial({ color: colour });
+    const lineMat = new THREE.LineBasicMaterial({ color: colour });
+    for (const j of s.joints) {
+      const m = new THREE.Mesh(jointGeo, mat);
+      m.position.set(j[0], j[1], j[2]);
+      poseGroup.add(m);
+    }
+    const segs = [];
+    for (const [a, b] of BONES) {
+      if (!s.joints[a] || !s.joints[b]) continue;
+      segs.push(new THREE.Vector3(...s.joints[a]), new THREE.Vector3(...s.joints[b]));
+    }
+    poseGroup.add(new THREE.LineSegments(
+      new THREE.BufferGeometry().setFromPoints(segs), lineMat));
+    if (showIds) labelGroup.add(makeLabel(s.track_id, s.joints[15] || s.joints[0], colour));
+  }
+}
+
+function makeLabel(text, at, colour) {
+  const c = document.createElement("canvas");
+  c.width = 128; c.height = 64;
+  const ctx = c.getContext("2d");
+  ctx.font = "bold 44px system-ui, sans-serif";
+  ctx.fillStyle = "#" + colour.toString(16).padStart(6, "0");
+  ctx.textAlign = "center";
+  ctx.fillText(String(text), 64, 46);
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(c), depthTest: false }));
+  spr.position.set(at[0], at[1], at[2] + 0.55);
+  spr.scale.set(1.6, 0.8, 1);
+  return spr;
+}
+
+// ── frame state ─────────────────────────────────────────────────────────────
+let nFrames = 0, frame = 0, playing = false, inflight = false;
+const cache = new Map();          // frame → subjects, so scrubbing back is instant
+const scrub = document.getElementById("scrub");
+const fnum = document.getElementById("fnum");
+const idsBox = document.getElementById("ids");
+const trailsBox = document.getElementById("trails");
+
+async function subjectsAt(n) {
+  if (cache.has(n)) return cache.get(n);
+  const r = await fetch(`/api/world/${n}/skeletons`);
+  if (!r.ok) throw new Error(`frame ${n}: HTTP ${r.status}`);
+  const d = await r.json();
+  cache.set(n, d.subjects);
+  return d.subjects;
+}
+
+async function show(n) {
+  if (inflight) return;
+  inflight = true;
+  try {
+    frame = Math.max(0, Math.min(nFrames - 1, n));
+    const subs = await subjectsAt(frame);
+    drawSkeletons(subs, idsBox.checked);
+    if (trailsBox.checked) await drawTrails(); else trailGroup.clear();
+    scrub.value = String(frame);
+    fnum.textContent = String(frame);
+    stat(`frame ${frame} / ${nFrames - 1} · ${subs.length} subject(s)`);
+    err("");
+  } catch (e) {
+    err(String(e.message || e));
+    playing = false;
+  } finally {
+    inflight = false;
+  }
+}
+
+// Trails answer "did this player walk there or teleport?" without leaving the frame you are on.
+async function drawTrails() {
+  trailGroup.clear();
+  const step = Math.max(1, Math.round(nFrames / 60));
+  const byTrack = new Map();
+  for (let n = 0; n <= frame; n += step) {
+    let subs;
+    try { subs = await subjectsAt(n); } catch { continue; }
+    for (const s of subs) {
+      if (!byTrack.has(s.track_id)) byTrack.set(s.track_id, { team: s.team, pts: [] });
+      byTrack.get(s.track_id).pts.push(s.joints[0]);        // pelvis
+    }
+  }
+  for (const [, t] of byTrack) {
+    if (t.pts.length < 2) continue;
+    trailGroup.add(polyline(t.pts, TEAM_COLOUR[t.team] ?? NO_TEAM));
+  }
+}
+
+document.getElementById("prev").onclick = () => { playing = false; show(frame - 1); };
+document.getElementById("next").onclick = () => { playing = false; show(frame + 1); };
+document.getElementById("reset").onclick = resetView;
+document.getElementById("play").onclick = (e) => {
+  playing = !playing;
+  e.target.textContent = playing ? "❚❚" : "▶";
+};
+scrub.oninput = () => { playing = false; show(Number(scrub.value)); };
+idsBox.onchange = () => show(frame);
+trailsBox.onchange = () => show(frame);
+addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft") { playing = false; show(frame - 1); }
+  else if (e.key === "ArrowRight") { playing = false; show(frame + 1); }
+  else if (e.key === " ") { e.preventDefault(); document.getElementById("play").click(); }
+});
+
+let last = 0;
+function tick(t) {
+  requestAnimationFrame(tick);
+  if (playing && t - last > 80 && !inflight) {     // ~12 fps: fast enough to read motion
+    last = t;
+    show(frame + 1 >= nFrames ? 0 : frame + 1);
+  }
+  orbit.update();
+  renderer.render(scene, camera);
+}
+
+(async function main() {
+  try {
+    resize();
+    resetView();
+    await buildPitch();
+    const meta = await fetch("/api/scene").then((r) => r.json());
+    nFrames = meta.n_frames;
+    scrub.max = String(Math.max(0, nFrames - 1));
+    await show(0);
+    requestAnimationFrame(tick);
+  } catch (e) {
+    err("failed to load: " + (e.message || e));
+    stat("");
+  }
+})();
+</script>
+</body>
+</html>
