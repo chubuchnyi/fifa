@@ -33,6 +33,8 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--clip', default='samples/video/Colombia-1-0-Congo-DR1080p.mp4')
 parser.add_argument('--tracks', default='out/phmr_ab/tracks_split.npz',
                     help='pass-1 tracks; their boxes seed the masks')
+parser.add_argument('--start', type=int, default=0,
+                    help='first frame; tracks already alive here are seeded from their box AT it')
 parser.add_argument('--frames', type=int, default=236)
 parser.add_argument('--out', default='out/phmr_ab/track_masks.npz')
 parser.add_argument('--sam', default='facebook/sam-vit-base')
@@ -55,12 +57,17 @@ def plausible(b):
 
 
 # track id -> its first frame and the box there; that is where its mask gets seeded.
+END = args.start + args.frames
 first: dict[int, tuple[int, np.ndarray]] = {}
 for tid, frames, boxes in zip(z['track_ids'], z['frames'], z['boxes'], strict=True):
     for f, b in zip(np.asarray(frames).tolist(), np.asarray(boxes), strict=True):
         b = np.asarray(b, float)[:4]
-        if f < args.frames and plausible(b) and (int(tid) not in first or f < first[int(tid)][0]):
-            first[int(tid)] = (int(f), b)
+        # A track already running at --start is seeded from its box THERE, not from a box in the
+        # past we are not going to decode: the window has to stand on its own.
+        f = max(int(f), args.start)
+        if args.start <= f < END and plausible(b) and (
+                int(tid) not in first or f < first[int(tid)][0]):
+            first[int(tid)] = (f, b)
 seeds: dict[int, list[tuple[int, np.ndarray]]] = {}
 for tid, (f, b) in first.items():
     seeds.setdefault(f, []).append((tid, b))
@@ -87,10 +94,12 @@ def sam_mask(rgb, box):
 
 
 cap = cv2.VideoCapture(str(REPO / args.clip))
+if args.start:
+    cap.set(cv2.CAP_PROP_POS_FRAMES, args.start)
 labels: dict[int, np.ndarray] = {}
 live: list[int] = []
 t0 = time.time()
-for n in range(args.frames):
+for n in range(args.start, END):
     ok, frame = cap.read()
     if not ok:
         break
@@ -106,15 +115,18 @@ for n in range(args.frames):
             m = sam_mask(rgb, box)
             lab[m] = tid                  # SAM's silhouette, not the box — Cutie refines it anyway
             live.append(tid)
-        out = prop.seed(frame, lab, sorted(set(live)))
+        # Cutie numbers objects in the order they are FIRST added and asserts those internal
+        # ids come in ascending order, so the list must stay in insertion order. Passing it
+        # sorted by track id worked on the first window by luck and asserted on the second.
+        out = prop.seed(frame, lab, list(dict.fromkeys(live)))
     else:
         out = prop.step(frame)
     labels[n] = out.astype(np.int32)
-    if n % 20 == 0 or n == args.frames - 1:
+    if n % 20 == 0 or n == END - 1:
         el = time.time() - t0
         ids = int(len(np.unique(out)) - 1)
-        print(f'  frame {n:4d}/{args.frames}  {ids:3d} live masks  '
-              f'{el:6.1f}s  {el / max(1, n + 1):.2f}s/frame', flush=True)
+        print(f'  frame {n:4d}/{END}  {ids:3d} live masks  '
+              f'{el:6.1f}s  {el / max(1, n - args.start + 1):.2f}s/frame', flush=True)
 cap.release()
 
 out_path = REPO / args.out
