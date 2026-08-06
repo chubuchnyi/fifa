@@ -390,6 +390,11 @@ def api_world_skeletons(
     if st is None:
         return {"frame": n, "subjects": [], "names": BODY_JOINT_NAMES, "arm": arm}
     teams = {s.track_id: s.team_id for s in st.scene.subjects}
+    prov = {}
+    for s in st.scene.subjects:
+        p = getattr(s.proposal.pose, "provenance", None)
+        if p is not None:
+            prov[s.track_id] = [str(x) for x in np.asarray(p).reshape(-1)]
     subjects = []
     for tid, sub in sorted(st.subjects.items()):
         if n < 0 or n >= sub.frames.shape[0]:
@@ -399,6 +404,11 @@ def api_world_skeletons(
             "team": teams.get(tid),
             # Already world z-up: scene_state adds the root translation when it bakes the cache.
             "joints": np.round(sub.joints[n], 4).tolist(),
+            # R-6 is "mark, never hide", and the mark exists: the pose track records whether each
+            # frame was measured or filled in. Drawing an imputed body identically to a measured
+            # one hides it, which is how a subject with 57 of 60 frames invented read as a player.
+            "provenance": prov.get(tid, [None] * (n + 1))[n]
+            if n < len(prov.get(tid, [])) else None,
         })
     # The MEASURED kit colour, not a palette: team ids are k-means cluster labels, so "A" is not
     # reliably one team or the other and hard-coding a colour per id gets the two sides swapped —
