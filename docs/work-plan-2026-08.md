@@ -150,6 +150,22 @@ indistinguishable from measurements in the output.
 6 tests, **mutation-checked**: 4 of them fail with the fix disabled and pass with it. Suite
 **1175 passed / 19 skipped**.
 
+**5. Verified end to end, on the clip and at the length that produced the defect.** Same
+`vert_crop.mp4`, same 355 frames, `--identity --coherence`, i.e. the exact configuration that gave
+the pod 23 unlabelled subjects out of 27:
+
+| | subjects | team split | unlabelled |
+|---|---|---|---|
+| pod, before | 27 | A 4 | **23** |
+| local, gate off | 68 | A 35 / B 33 | 0 |
+| **local, gate on, fixed** | **29** | **A 11 / B 18** | **0** |
+
+No `unmatched` line was printed either, which independently confirms the step-3 inference was
+wrong: no posed subject lacks a tracklet.
+
+*Closed 2026-08-07. The whole diagnosis and fix cost CPU time and no GPU at all — the pod log's
+own line 8 was the evidence.*
+
 Two things fell out on the way that are worth their own line:
 
 * **`out/vert_full/vert_crop.mp4` is 1920 × 1080, not 1080 × 608.** `broadcast_crop` measured the
