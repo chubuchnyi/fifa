@@ -246,6 +246,52 @@ own evidence is — post-pose, on the scene, which is also where W4 lives. W3 an
 
 *Closed 2026-08-07 as measured-and-refuted. CPU only, no GPU.*
 
+### W3 + W4 — the merge, where the criterion actually holds → **24 → 21 subjects, 183 mannequin frames gone**
+
+W3 and W4 turned out to be one change, so they landed as one: `core/orchestration/handover.py`,
+run from the controller straight after `add_temporal_coherence` (it needs `provenance`) and
+before the physics gates (so they see one body, not two). `--handover`, **off by default**.
+
+Measured on the scene the user judged track-by-track — not a fresh run, so every verdict in
+`track-labels-2026-08-07.json` maps onto the result directly:
+
+| | subjects | merges | mannequin frames | seam |
+|---|---|---|---|---|
+| `out/cue/scene_off.json` | 24 | — | 183 across the six halves | — |
+| **after the merge** | **21** | **(3,66) (10,77) (15,25)** | **0 in the survivors** | 31 interpolated |
+
+**The three merges are exactly the pairs the eye named** — with 15→25 rather than 15→71, which is
+the pair the geometry prefers (0.85 m over 4.96 m) and the one the user had already withdrawn
+certainty on. Each survivor comes out **49 measured / 11 interpolated / 0 imputed**, from two
+halves that were each about half frozen mannequin. Re-running the criteria on the merged scene:
+handover pairs remaining **none**, twin pairs **8 → 4**.
+
+**Off by default, and that is not timidity.** This is the only pass in the pipeline that *deletes*
+a subject. Every other correction marks; a wrong merge erases a real player, which is precisely
+what R-6 forbids. The rule says the eye decides, so it decides:
+`bash scripts/view_handover_ab.sh`.
+
+**It flags its own weakest merge.** `HandoverReport.suspect` reports any survivor that ends up
+inside another subject. On the reference scene it flags **t10, 0.05 m from t5 on 13 frames** — and
+the video pixels agree: **t77 reads yellow on all 3 of its measured frames while t10 reads blue on
+all 46.** The user's eye put 10+77 in the stitch list on 2026-08-07, and the label file's own note
+already recorded that t77's `team_id` disagrees with the pixels. So the measurement and the eye
+disagree here, and the honest thing at 2 a.m. is to say so rather than invent a gate that
+overrules the user. Flagged, not rejected — WorldPose says real players genuinely do get that
+close (39 pairs in 20 clips inside 0.5 m, one for **3.0 s** straight, `--clips 20`).
+
+9 tests, **mutation-checked**: all 7 injected regressions caught. One is worth recording because
+it did not fail at first — the fixture for "two humans measured at once are never merged" had an
+11-frame overlap but a −15 gap, so `max_gap` rejected it before `max_both` was ever consulted and
+deleting the simultaneity gate changed nothing. The fixture now sits at gap −10 and asserts the
+pair *does* merge once `max_both` alone is relaxed.
+
+Suite **1184 passed / 19 skipped**. Verified end to end through the CLI on the fakes path
+(`--coherence --handover --export gltf`), which is what proves the wiring; the merge decisions are
+verified on the real scene above.
+
+*Closed 2026-08-07 for the code. **Open for the eye** — the A/B is staged and t10 is the question.*
+
 ### W9 — WorldPose GT constants → **two of our four constants are wrong, in opposite directions**
 
 `scripts/worldpose_constants.py`, run over all **89 clips** of WorldPose (1080p 50 Hz World Cup
