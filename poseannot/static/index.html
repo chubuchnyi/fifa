@@ -654,7 +654,7 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 // The whole-pitch view, shared with /world. Absolute path with a cache-bust token: this file is
 // served from the route /app, so "./world_view.js" would resolve to /world_view.js and 404 —
 // and an un-versioned module gets cached exactly like style.css does.
-import { createWorldView } from "/static/world_view.js?v=1";
+import { createWorldView } from "/static/world_view.js?v=2";
 import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran

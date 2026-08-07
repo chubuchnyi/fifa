@@ -83,7 +83,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 // Absolute, not "./": this page is served from the route /world, so a relative specifier would
 // resolve to /world_view.js and 404. The ?v= token is the same cache-bust discipline style.css
 // needs — bump it on every edit to world_view.js or the browser verifies the old module.
-import { createWorldView } from "/static/world_view.js?v=1";
+import { createWorldView } from "/static/world_view.js?v=2";
 
 const $ = (id) => document.getElementById(id);
 const err = (m) => { $("err").textContent = m || ""; };

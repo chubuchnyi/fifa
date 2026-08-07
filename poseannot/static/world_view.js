@@ -323,7 +323,7 @@ export function createWorldView(cfg) {
   const held = new Set();
   function panStep() {
     if (!held.size) return;
-    const speed = held.has("shift") ? 4.0 : 1.2;
+    const speed = held.has("shift") ? 2.0 : 0.6;   // metres per frame; halved 2026-08-07 on use
     const fwd = new THREE.Vector3();
     camera.getWorldDirection(fwd);
     fwd.z = 0;
