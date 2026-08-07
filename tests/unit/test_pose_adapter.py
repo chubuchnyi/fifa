@@ -46,9 +46,16 @@ def _calibration(frames=(0, 1, 2)) -> FieldCalibration:
 
 
 def _boxes(offset: float) -> np.ndarray:
+    """Boxes whose bottom-centre lands ON the pitch once `_calibration`'s identity H is applied.
+
+    The homography here is the identity, so these pixel numbers are read as world metres — which
+    means they have to be plausible pitch positions or the estimator's off-pitch guard (added
+    2026-08-07 after six *high-confidence* frames put a foot 874 m out) drops them. Kept relative:
+    every assertion below is about values being preserved or offset, not about these coordinates.
+    """
     return np.array(
-        [[10 + offset, 20, 30 + offset, 60], [12 + offset, 22, 32 + offset, 62],
-         [14 + offset, 24, 34 + offset, 64]], dtype=float,
+        [[10 + offset, 8, 18 + offset, 12], [12 + offset, 9, 20 + offset, 13],
+         [14 + offset, 10, 22 + offset, 14]], dtype=float,
     )
 
 
@@ -57,7 +64,7 @@ def _tracks() -> Tracks:
     return Tracks(
         tracklets=[
             Tracklet(track_id=0, frames=(0, 1, 2), bboxes_xyxy=_boxes(0), cls="player"),
-            Tracklet(track_id=1, frames=(0, 1, 2), bboxes_xyxy=_boxes(100), cls="referee"),
+            Tracklet(track_id=1, frames=(0, 1, 2), bboxes_xyxy=_boxes(30), cls="referee"),
             Tracklet(track_id=2, frames=(0, 1, 2), bboxes_xyxy=_boxes(5), cls="ball"),
         ]
     )
@@ -127,7 +134,7 @@ def test_estimate_grounds_root_and_preserves_articulation():
     np.testing.assert_array_equal(out[0].pose.body_pose, _raw(0).body_pose)
     np.testing.assert_array_equal(out[1].shape.betas, np.full(10, 1.0))  # per-subject shape
     # Root is grounded: foot point (bbox x-mid, bottom y) → world via identity homography.
-    np.testing.assert_allclose(out[0].pose.transl[:, :2], [[20, 60], [22, 62], [24, 64]])
+    np.testing.assert_allclose(out[0].pose.transl[:, :2], [[14, 12], [16, 13], [18, 14]])
     np.testing.assert_allclose(out[0].pose.transl[:, 2], 0.92)  # nominal Z anchor — no FK (R-4)
 
 
@@ -145,7 +152,7 @@ def test_estimate_uses_per_frame_pelvis_height_when_backend_supplies_it():
     pse = GVHMRPoseEstimator(backend=_StubHMRBackend({0: raw0, 1: _raw(1)}))
     out = pse.estimate(_clip(), _tracks(), _calibration())
     np.testing.assert_allclose(out[0].pose.transl[:, 2], heights)  # per-frame, not 0.92
-    np.testing.assert_allclose(out[0].pose.transl[:, :2], [[20, 60], [22, 62], [24, 64]])
+    np.testing.assert_allclose(out[0].pose.transl[:, :2], [[14, 12], [16, 13], [18, 14]])
     np.testing.assert_allclose(out[1].pose.transl[:, 2], 0.92)     # absent → nominal fallback
 
 

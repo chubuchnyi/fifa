@@ -134,3 +134,62 @@ def test_subject_with_no_solved_frame_is_reported_not_hidden():
     out = est.estimate(_clip(), tracks, cal)
     assert out == {}, "no ground plane for any of his frames — inventing one is the bug"
     assert est.dropped_subjects == [9]
+
+
+# --- the second gate: a solved plane is not a sane un-projection ---------------------------
+#
+# Measured on the fan clip's real pod run (out/vert136, 2026-08-07), the frames that put a foot
+# off the pitch had the HIGHEST calibration confidence in the run:
+#
+#     t12 f145   873.6 m from the pitch centre   confidence 0.550
+#     t12 f144   594.8 m                          confidence 0.575
+#     t12 f143   314.5 m                          confidence 0.549
+#     t80 f288   197.2 m                          confidence 0.550
+#     t80 f289   141.3 m                          confidence 0.546
+#
+# and confidence was *anti*-predictive: 0 of the 1299 frames below 0.5 landed off-pitch, 6 of the
+# 1339 above it did. Confidence scores how well the homography fits the landmarks it can see; it
+# says nothing about a foot pixel sitting near that homography's vanishing line, where
+# un-projection diverges. Those 6 frames then seeded 248 interpolated ones — 2.6 % of the scene.
+
+
+def _far_calibration() -> FieldCalibration:
+    """Solved at high confidence, but its horizon runs through the frame."""
+    # w = 1 - v/600  ⇒ a foot at v≈600 un-projects towards infinity while the solve looks healthy.
+    h = np.array([[0.05, 0.0, 0.0], [0.0, 0.05, 0.0], [0.0, -1.0 / 600.0, 1.0]])
+    return FieldCalibration(homographies=np.stack([h] * N_FRAMES),
+                            frames=np.arange(N_FRAMES), confidence=np.full(N_FRAMES, 0.55))
+
+
+def test_a_confident_plane_can_still_throw_a_foot_off_the_pitch():
+    """The premise: high confidence does not mean the point landed anywhere real."""
+    cal = _far_calibration()
+    near = cal.image_to_world(0, np.array([[100.0, 100.0]]))[0]
+    far = cal.image_to_world(0, np.array([[100.0, 597.0]]))[0]
+    assert cal.solved_mask(np.array([0]))[0], "the plane IS solved — that is the point"
+    assert abs(near[1]) < 60, f"a foot mid-frame lands on the pitch: {near}"
+    assert abs(far[1]) > 500, f"a foot near the vanishing line diverges: {far}"
+
+
+def test_off_pitch_rows_are_dropped_even_at_high_confidence():
+    cal = _far_calibration()
+    u = _FOOT_UV[0]
+    boxes = np.stack([[u - 20.0, 100.0, u + 20.0, 100.0 + i * 12.0] for i in range(N_FRAMES)])
+    tracks = Tracks(tracklets=[
+        Tracklet(track_id=7, frames=np.arange(N_FRAMES), bboxes_xyxy=boxes, cls="player")
+    ])
+    est = GVHMRPoseEstimator(backend=_StubHMR())
+    motion = est.estimate(_clip(), tracks, cal)[7]
+
+    assert est.dropped_offpitch > 0, "the diverging tail must be refused"
+    assert est.dropped_offpitch == est.dropped_frames, "and refused by THIS gate, not the conf one"
+    xy = motion.pose.transl[:, :2]
+    assert est._on_pitch(xy).all(), "nothing that survives may be off the pitch"
+
+
+def test_the_margin_keeps_a_player_who_is_legitimately_off_the_paint():
+    """A keeper behind his line or a thrown-in taker is real; only arithmetic is refused."""
+    est = GVHMRPoseEstimator(backend=_StubHMR())
+    assert est._on_pitch(np.array([[54.0, 0.0]]))[0], "just behind the goal line"
+    assert est._on_pitch(np.array([[0.0, 36.0]]))[0], "just off the touchline"
+    assert not est._on_pitch(np.array([[0.0, 140.0]]))[0], "140 m sideways is not a footballer"

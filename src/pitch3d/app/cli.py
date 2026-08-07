@@ -295,10 +295,12 @@ def run_dry_run(
     # silent as the bad placement it replaces was (#131, and #135's rule: mark, never hide).
     _dropped = int(getattr(ports.pose, "dropped_frames", 0))
     _dropped_subj = list(getattr(ports.pose, "dropped_subjects", []))
+    _offpitch = int(getattr(ports.pose, "dropped_offpitch", 0))
     if _dropped or _dropped_subj:
-        print(f"== unplaced: {_dropped} subject-frame(s) sit on frames whose plane was CARRIED, "
-              f"not measured — left for coherence to mark imputed instead of grounded through a "
-              f"stale homography")
+        print(f"== unplaced: {_dropped} subject-frame(s) refused — {_dropped - _offpitch} whose "
+              f"plane was CARRIED not measured, {_offpitch} whose foot un-projected off the pitch "
+              f"through a plane that WAS solved. Left for coherence to mark rather than grounded "
+              f"on a stale or diverging homography")
         if _dropped_subj:
             print(f"   {len(_dropped_subj)} subject(s) had no solved frame at all and are absent "
                   f"from the scene: {_dropped_subj}")

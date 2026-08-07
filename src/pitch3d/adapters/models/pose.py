@@ -37,9 +37,17 @@ from ...core.ports.pose import PoseEstimator
 from ...core.scene.field import MIN_SOLVED_CONFIDENCE, FieldCalibration
 from ...core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
+from ...core.scene.units import FieldDimensions
 
 #: Nominal SMPL-X pelvis height above the ground plane (m) — the mono Z anchor (R-4).
 _DEFAULT_PELVIS_HEIGHT_M = 0.92
+
+#: How far outside the pitch rectangle a grounded root may still be a real person (m). Generous
+#: on purpose: a keeper behind his line, a thrown-in taker, a substitute on the touchline are all
+#: real. 25 m past the paint is already in the stands, so anything beyond it is arithmetic, not a
+#: player. This is the physical counterpart to `min_calib_confidence`: that one asks whether the
+#: PLANE was solved, this one asks whether THIS POINT landed anywhere a footballer can stand.
+_DEFAULT_OFF_PITCH_MARGIN_M = 25.0
 
 
 @dataclass
@@ -164,9 +172,19 @@ class GVHMRPoseEstimator(PoseEstimator):
     n_betas: int = 10
     device: str = "cuda"
     min_calib_confidence: float = MIN_SOLVED_CONFIDENCE
+    off_pitch_margin_m: float = _DEFAULT_OFF_PITCH_MARGIN_M
+    field_dimensions: FieldDimensions = field(default_factory=FieldDimensions)
     #: Filled by :meth:`estimate` so the caller can report the refusal instead of it being silent.
     dropped_frames: int = field(default=0, init=False)
+    dropped_offpitch: int = field(default=0, init=False)
     dropped_subjects: list[int] = field(default_factory=list, init=False)
+
+    def _on_pitch(self, world_xy: np.ndarray) -> np.ndarray:
+        """Mask of world XY that could be a player: on the pitch, plus a generous margin."""
+        half_x = self.field_dimensions.length / 2.0 + self.off_pitch_margin_m
+        half_y = self.field_dimensions.width / 2.0 + self.off_pitch_margin_m
+        xy = np.asarray(world_xy, dtype=float).reshape(-1, 2)
+        return (np.abs(xy[:, 0]) <= half_x) & (np.abs(xy[:, 1]) <= half_y)
 
     def info(self) -> ModelInfo:
         return ModelInfo(
@@ -181,7 +199,7 @@ class GVHMRPoseEstimator(PoseEstimator):
     ) -> dict[int, SubjectMotion]:
         bodies = self._backend().estimate_bodies(clip, tracks)
         out: dict[int, SubjectMotion] = {}
-        self.dropped_frames, self.dropped_subjects = 0, []
+        self.dropped_frames, self.dropped_offpitch, self.dropped_subjects = 0, 0, []
         for tl in tracks.tracklets:
             if tl.cls == "ball":
                 continue  # the ball has its own BallTracker; HMR is for people only
@@ -195,6 +213,21 @@ class GVHMRPoseEstimator(PoseEstimator):
             # there; `add_temporal_coherence` then marks them `imputed` (R-6) and the #135 criteria
             # read them as what they are. Placing them anyway is the one thing that must not happen.
             keep = calibration.solved_mask(tl.frames, self.min_calib_confidence)
+            # A solved plane is not the same as a sane un-projection. Measured on the fan clip
+            # 2026-08-07: six frames whose calibration confidence was 0.546-0.575 — the TOP band —
+            # put a foot 141-874 m from the pitch centre, while every frame below confidence 0.5
+            # landed on the pitch. Confidence scores how well the homography fits the landmarks it
+            # can see; it says nothing about a foot pixel that happens to sit near that
+            # homography's vanishing line, where un-projection diverges. So the second test is on
+            # the OUTPUT, and it is the physical one: a player is on a football pitch.
+            if keep.any():
+                world = self._ground_root(
+                    replace(tl, frames=tl.frames[keep], bboxes_xyxy=tl.bboxes_xyxy[keep]),
+                    calibration, None,
+                )[:, :2]
+                sane = self._on_pitch(world)
+                self.dropped_offpitch += int((~sane).sum())
+                keep[np.flatnonzero(keep)[~sane]] = False
             self.dropped_frames += int((~keep).sum())
             if not keep.any():
                 # Not "lost by the tracker" — we never had a ground plane for any frame of his
