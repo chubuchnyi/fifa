@@ -95,3 +95,43 @@ the resolution alone is not where their win came from. Retraining the detector i
 with a different cost, and it is not in this queue.
 
 *Closed 2026-08-07. Cost: ~4 min of a free box.*
+
+### W2 — #137, `team=None` on 23 of 27 → **narrowed to "assigned, then lost"**
+
+Three measurements, cheapest first.
+
+**1. Clustering is not the failure.** The same code on the same clips, locally:
+
+| | tracklets | team split | measured kit colours |
+|---|---|---|---|
+| Broadcast, 236 f | 56 | **A 27 / B 29** | yellow `(0.76, 0.69, 0.28)` · blue `(0.35, 0.54, 0.63)` |
+| Fan clip, 38 f | 20 | **A 11 / B 9** | white `(0.82, 0.89, 0.73)` · red `(0.76, 0.39, 0.26)` |
+
+Both correct against the frames. So this is not the 28 px wall, and not k-means.
+
+**2. The assembly path is not the failure either.** A full local CLI run on the fan clip
+(`--frames 38 --coherence --export gltf`) carries the labels all the way into `scene.json`:
+**A 11 / B 9**.
+
+**3. The labels are assigned and then lost.** In `out/vert137/scene.json` the `teams` block holds
+**both** teams with computed colours — `A (0.68, 0.75, 0.44)`, `B (0.71, 0.22, 0.52)` — and a team
+colour is the mean HSV of *its members*, so members existed at `_assign_teams` time. Yet **no
+subject carries `B`** and only 4 carry `A`.
+
+That points at one line. `assemble_scene` does `tl = meta.get(track_id)` over
+`result.tracks.tracklets` and falls back to `team_id=None` **and** `role=PLAYER` when the lookup
+misses — and the pod log's `role=player team=None` is both of those defaults together, not two
+measured values. So `result.motions` carries track ids that are not in `result.tracks.tracklets`.
+
+Two things fell out on the way that are worth their own line:
+
+* **`out/vert_full/vert_crop.mp4` is 1920 × 1080, not 1080 × 608.** `broadcast_crop` measured the
+  grass band correctly, and the ffmpeg step then **upscaled 1.78×**. So the pod pipeline saw players
+  at roughly **50 × 128 px**, not the 28 × 72 measured on the source. The occlusion review's §2
+  numbers describe the *source*; the pod chain works on an upscaled copy. That does not add
+  information, but it does mean the pod run is not the 28 px regime.
+* A silent `None` team is not cosmetic: `StitchConfig.require_same_team` treats `None` as a
+  **wildcard**, so every one of those 23 subjects is stitchable to anyone.
+
+*In flight: a 355-frame local run on the same `vert_crop.mp4` to catch the id divergence in a
+debuggable place.*
