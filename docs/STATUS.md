@@ -93,6 +93,10 @@ Lever-by-lever history: [`archive/status-log-2026-07.md`](archive/status-log-202
 One line per item. Reasoning, measurements and root causes live in
 [`findings/open-items-2026-08-01.md`](findings/open-items-2026-08-01.md).
 
+**The ordered work queue and its running report live in
+[`work-plan-2026-08.md`](work-plan-2026-08.md)** — W1…W12, each with the measured fact that put it
+there and the number that closes it. That file is the queue; this table is the board.
+
 **Cross-thread verdicts — what we validated, what came out, what is owed — are indexed in
 [`findings/research-ledger-2026-08-07.md`](findings/research-ledger-2026-08-07.md).** Read it before
 re-opening any question below: it lists 14 ideas already measured and refuted (do not re-try them),
