@@ -16,6 +16,8 @@ unit-testable with synthetic histograms.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import numpy as np
 
 #: A cut must be this many times the clip's own **median** consecutive-frame distance.
@@ -87,6 +89,7 @@ def find_shot_cuts(
     min_shot_frames: int = 8,
     floor: float = DEFAULT_CUT_FLOOR,
     threshold: float | None = None,
+    verify: Callable[[int], bool] | None = None,
 ) -> list[int]:
     """Frame indices (into ``hists``) where a new shot begins; ``[]`` for a single-shot clip.
 
@@ -100,6 +103,15 @@ def find_shot_cuts(
         floor: Absolute distance a cut must also exceed (:data:`DEFAULT_CUT_FLOOR`).
         threshold: Escape hatch — an absolute distance that replaces the adaptive rule entirely.
             Auto-detect plus manual override; leave ``None`` unless you have measured this clip.
+        verify: Optional second opinion on each candidate: ``verify(frame) -> True`` if it really
+            is a cut. A colour histogram cannot tell a cut from a **fast camera move**, and on
+            phone footage that is not a corner case — measured on a fan clip, one whip-pan at
+            frame 38 scored 0.334 against a clip median of 0.049 and was truncated as a shot
+            boundary, costing 22 of 60 frames, while the frames either side show the same goal,
+            the same players and the same stands. The discriminator is that a pan or a zoom is
+            explained by a homography and a cut is not; the estimate needs pixels, so it is
+            injected (see ``adapters.models.shot_detect.homography_cut_verifier``). ``None``
+            accepts every candidate, which is the pre-2026-08-07 behaviour.
 
     Returns:
         Sorted frame indices, each the first frame of a new shot. Index 0 is never returned —
@@ -114,6 +126,8 @@ def find_shot_cuts(
         frame = i + 1  # d[i] compares frame i and i+1, so the new shot starts at i+1
         if cuts and frame - cuts[-1] < min_shot_frames:
             continue
+        if verify is not None and not verify(frame):
+            continue  # a camera move, not a cut — truncating a healthy clip is the worse error
         cuts.append(frame)
     return cuts
 

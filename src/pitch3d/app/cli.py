@@ -55,7 +55,7 @@ def _truncate_to_first_shot(clip: ClipRef) -> ClipRef:
     ``--no-shot-guard`` turns this off for a caller who genuinely wants the whole file.
     """
     try:
-        from ..adapters.models.shot_detect import clip_histograms
+        from ..adapters.models.shot_detect import clip_histograms, homography_cut_verifier
         from ..core.orchestration.shots import find_shot_cuts, shot_bounds, shot_containing
     except ImportError:  # pragma: no cover - cv2 absent (fakes-only runs)
         return clip
@@ -67,7 +67,9 @@ def _truncate_to_first_shot(clip: ClipRef) -> ClipRef:
     except Exception as exc:  # pragma: no cover - unreadable/synthetic uri
         print(f"== shot guard: could not scan {clip.uri} ({exc}); continuing unchecked")
         return clip
-    cuts = find_shot_cuts(hists)
+    # Second opinion on every candidate: a histogram cannot tell a cut from a whip-pan, and
+    # truncating a healthy clip is the worse error of the two.
+    cuts = find_shot_cuts(hists, verify=homography_cut_verifier(clip.uri, int(frames[0])))
     if not cuts:
         return clip
     n = int(hists.shape[0])
