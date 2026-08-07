@@ -284,6 +284,49 @@ def twins(tracks: dict, radius: float, min_frames: int) -> list:
     return sorted(out, key=lambda t: -t['frames'])
 
 
+def classify_kit(patch_bgr) -> str:
+    """Which shirt is this BGR patch? ``Y`` yellow · ``B`` blue · ``?`` unclear · ``-`` no reading.
+
+    **This function exists because its predecessor was wrong, and the wrongness had already
+    reached a committed findings file.** The old test was `18 <= H <= 48 and S > 90` for yellow,
+    taken over the median of the *whole* patch. Measured on this clip on 2026-08-07: the floodlit
+    pitch sits at **H 39-40, S ~150**, squarely inside that band — so **64.9 % of every frame
+    classifies as "yellow kit"**, and any box carrying a normal amount of grass read `Y`.
+
+    That produced three false findings in one night (t3 "reads 19 yellow against 10 blue", t11 and
+    t17 "carry an un-cut kit flip", t77 "reads yellow on all 3 measured frames") plus the note in
+    `docs/findings/track-labels-2026-08-07.json` that `team_id` disagrees with the pixels on t3 and
+    t77. Looking at the actual crops settled it the other way: t3 is **blue** until its box walks
+    onto a yellow player at ~f32, and t11 and t17 are blue throughout.
+
+    The fix is the one the tracker's own sampler already used and this script did not: **reject
+    grass before taking the median**, with the same rule (`35 <= H <= 85, S >= 60, V >= 40`), and
+    keep yellow *below* the grass band. The kit centroid the tracker fits on this clip sits at
+    H ~25, so 15-34 is the honest window; 35-48 was never yellow, it was turf.
+
+    A patch that is almost all grass carries no information about a shirt, so it returns ``-``
+    rather than guessing from the handful of surviving pixels.
+    """
+    import cv2
+
+    px = np.asarray(patch_bgr).reshape(-1, 3)
+    if px.shape[0] == 0:
+        return '-'
+    hsv = cv2.cvtColor(px.reshape(-1, 1, 3).astype(np.uint8), cv2.COLOR_BGR2HSV).reshape(-1, 3)
+    grass = (
+        (hsv[:, 0] >= 35) & (hsv[:, 0] <= 85) & (hsv[:, 1] >= 60) & (hsv[:, 2] >= 40)
+    )
+    kept = hsv[~grass]
+    if kept.shape[0] < max(8, hsv.shape[0] // 10):
+        return '-'                       # a box that is essentially all pitch says nothing
+    med = np.median(kept, axis=0)
+    if 15 <= med[0] <= 34 and med[1] > 80:
+        return 'Y'
+    if 85 <= med[0] <= 135 and med[1] > 55:
+        return 'B'
+    return '?'
+
+
 def kit_scan(tracks: dict, project, clip: Path, boxes_npz: Path) -> None:
     """What colour shirt is each track actually wearing, read off the video pixels?
 
@@ -335,13 +378,7 @@ def kit_scan(tracks: dict, project, clip: Path, boxes_npz: Path) -> None:
         patch = img[a:b, c0:c1]
         if patch.size == 0:
             return '-'
-        med = np.uint8([[np.median(patch.reshape(-1, 3), axis=0)]])
-        hsv = cv2.cvtColor(med, cv2.COLOR_BGR2HSV)[0][0]
-        if 18 <= hsv[0] <= 48 and hsv[1] > 90:
-            return 'Y'
-        if 85 <= hsv[0] <= 135 and hsv[1] > 55:
-            return 'B'
-        return '?'
+        return classify_kit(patch)
 
     print('\n== kit measured from the video, at every MEASURED frame (Y yellow · B blue · ? '
           'unclear · - no box) ==')

@@ -36,6 +36,16 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / 'src'))
 
 from pitch3d.adapters.models.tracking import ByteTrackTracker  # noqa: E402
+
+# The kit classifier lives in `scripts/track_quality.py` and is imported rather than copied:
+# the copy in this file was wrong until 2026-08-07 (its yellow band included the floodlit pitch,
+# H 39-40, so 64.9 % of every frame read "yellow"), and one shared definition is how that stops
+# happening again.
+_tq_spec = importlib.util.spec_from_file_location('tq', REPO / 'scripts' / 'track_quality.py')
+_tq = importlib.util.module_from_spec(_tq_spec)
+_tq_spec.loader.exec_module(_tq)
+classify_kit = _tq.classify_kit
+
 from pitch3d.core.orchestration.continuity import (  # noqa: E402
     StitchConfig,
     _summarize,
@@ -160,16 +170,7 @@ def _kit_reader():
         im = img(f)
         if im is None or b <= a or c1 <= c0 or min(a, c0) < 0:
             return '?'
-        patch = im[a:b, c0:c1]
-        if patch.size == 0:
-            return '?'
-        med = np.uint8([[np.median(patch.reshape(-1, 3), axis=0)]])
-        hsv = cv2.cvtColor(med, cv2.COLOR_BGR2HSV)[0][0]
-        if 18 <= hsv[0] <= 48 and hsv[1] > 90:
-            return 'Y'
-        if 85 <= hsv[0] <= 135 and hsv[1] > 55:
-            return 'B'
-        return '?'
+        return classify_kit(im[a:b, c0:c1]).replace('-', '?')
 
     def kit_run(tid: int, at_end: bool, n: int = 6) -> str:
         """Modal shirt over the last / first `n` boxes — one occluded frame must not decide."""

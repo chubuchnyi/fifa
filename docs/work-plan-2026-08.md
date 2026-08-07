@@ -206,17 +206,21 @@ structurally unable to span long gaps**, and no threshold fixes that.
 that scores 20/21 against the eye post-pose. Pre-pose it accepts six merges, and the video pixels
 say **four of them join two different shirts**:
 
+> ⚠ **Re-measured 2026-08-07 after W13 found the kit reader broken.** The first version of this
+> table said *four* clashes, and listed t17 → t79 as one of them. That row was the reader's fault,
+> not the merge's. The corrected numbers are below; the verdict did not change.
+
 | merge | distance | frame gap | head kit | tail kit | |
 |---|---|---|---|---|---|
-| t15 → t78 | 0.15 m | +1 | `BBBB…BB` | `??YYYYYY` | **clash** |
+| t15 → t78 | 0.15 m | +1 | `B` | `Y` | **clash** |
 | t9 → t77 | 0.15 m | +1 | 46× `B` | 14× `Y` | **clash** |
-| t17 → t79 | 0.26 m | +1 | `…?YY?YYY` | `?BBBB???BB…` | **clash** |
-| t3 → t76 | 0.48 m | +1 | `…?BBBBBB` | 24× `Y` | **clash** |
-| t73 → t74 | 0.04 m | +1 | `?Y???` | `?????` | unclear |
-| t2 → t72 | 0.07 m | +1 | mostly `?` | `????` | unclear |
+| t3 → t76 | 0.48 m | +1 | `B` | 24× `Y` | **clash** |
+| t17 → t79 | 0.26 m | +1 | `B` | `B` | same kit ✓ |
+| t73 → t74 | 0.04 m | +1 | `?` | `B` | unclear |
+| t2 → t72 | 0.07 m | +1 | `?` | `B` | unclear |
 
-Not one same-kit merge among the six. These are **not** the occlusion artefact `track_quality.py`
-warns about — t78 reads yellow on 6 clean frames, t77 on all 14, t76 on all 24.
+**Three demonstrable clashes against one correct merge.** These are **not** the occlusion artefact
+`track_quality.py` warns about — t78, t77 and t76 read yellow on every clean frame they have.
 
 **Why it works after pose and not before.** Post-pose the scene holds 24 long subjects; pre-pose
 the tracker hands over **32** tracklets, eight of them 4–13-frame fragments produced by the #132
@@ -232,17 +236,13 @@ merges `[5, 77]` and is right.
 **Verdict: do not relax the 2D stitcher on the handover criterion.** The item moves to where its
 own evidence is — post-pose, on the scene, which is also where W4 lives. W3 and W4 are one change.
 
-**Two things this turned up that were on no board.**
-
-* **`team_id` is wrong on t3, and by a wide margin.** Its shirt reads
-  `YYYYYY?BBBB?YYYYYYY???YYYYYYY?BBBBBB` — **19 yellow against 10 blue** — and it is labelled
-  **B**. The user flagged exactly this doubt («я просто брал цвет игроков в реконструкции за
-  истину, но похоже, что там тоже ошибки»); this is a measured instance. `team_id` is a k-means
-  label over *one* colour sample per track, so a track that changes human mid-way gets a majority
-  vote it never took. Feeds W10.
-* **The #132 kit split cuts in the wrong place.** t17 reads blue for f0–22 and then **yellow from
-  f26 to f34** — the id has jumped to a yellow player — yet the split cut it at **f35**, leaving
-  9 contaminated frames inside a track labelled B. The split fires; it just fires late.
+**~~Two things this turned up that were on no board.~~ Both were wrong — see W13.** The original
+text claimed `team_id` was wrong on t3 (*"19 yellow against 10 blue"*) and that the #132 split cut
+t17 nine frames late. Neither survives: **t3 is blue** until its box walks onto a yellow player at
+~f32, where the split cuts it correctly, and **t17 is blue throughout and was never cut by the
+split at all** — ByteTrack itself ended that id at f34. Both claims came out of a kit reader whose
+yellow band contained the pitch. Left visible rather than deleted, because the wrong instrument
+had already reached a committed findings file and the correction is the finding.
 
 *Closed 2026-08-07 as measured-and-refuted. CPU only, no GPU.*
 
@@ -292,6 +292,63 @@ verified on the real scene above.
 
 *Closed 2026-08-07 for the code. **Open for the eye** — the A/B is staged and t10 is the question.*
 
+### W13 — **the kit reader called the grass yellow, and it had already reached a committed doc**
+
+Not a queued item. It came out of chasing a suspected #132 bug and is the most important thing
+measured tonight, because it invalidated three of my own findings from the same session and one
+that predates me.
+
+**The measurement.** `scripts/track_quality.py --kit` classified a shirt as yellow on
+`18 <= H <= 48 and S > 90`, over the median of the whole patch. The floodlit pitch on this clip
+sits at **H 39–40, S ≈ 150–170**. So:
+
+> **64.9 % of every pixel in the frame classified as "yellow kit"**, and 51.8 percentage points of
+> that sat in H 35–48 — the exact band the tracker's own appearance sampler has always rejected as
+> grass.
+
+Any box carrying a normal amount of turf read `Y`. That is most boxes.
+
+**How it was caught: by looking.** The centroid path inside the tracker and my pixel reader
+disagreed about t3, t11 and t17, so I dumped the crops and looked at them. t3 is a **light-blue**
+Congo DR player for f0–31 whose box then walks onto a **yellow** Colombia player at ~f32; t11 and
+t17 are blue for every frame they exist. **The tracker was right and the reader was wrong** — and
+the tracker was right precisely because it rejects grass before taking a median, which this script
+did not.
+
+**What that overturns**, all corrected in place above with the originals left visible:
+
+| claim | status |
+|---|---|
+| "t3 reads 19 yellow against 10 blue and is labelled B" (W3) | **false** — t3 is blue |
+| "the #132 split cuts t17 at f35 but the kit flips at f26" (W3) | **false twice** — t17 is blue throughout, and the split never cut it; ByteTrack ended that id |
+| "t11 and t13 carry an un-cut kit flip" (W10) | **false** |
+| "`team_id` disagrees with the pixels on 2 of 28" (W10) | **false** — one of 24 |
+| "П3-pre-pose: 4 of 6 merges join two shirts" (W3) | **3 of 6** — the verdict stands, one row was wrong |
+| `track-labels-2026-08-07.json`: "22 of 24 … t3 and t77 disagree, t3 FLIPS kit mid-track" | **false, and it predates this session** — 23 of 24, t77 only, no flip |
+
+**And one claim it strengthens.** t77 still reads yellow after the correction, so I looked at that
+crop too: at f55–57 the box holds an unmistakable **yellow Colombia player, white shorts, red
+socks**, while t10 is a **blue Congo DR player wearing number 8** and t5 is a **yellow Colombia
+player wearing number 25**.
+
+> **`team_id=B` on t77 is a genuine mislabel — the only one in 24 — and it is exactly what let the
+> wrong merge through.** The handover pass's team gate would have refused t10 → t77 had the label
+> been right, and its geometric `suspect` check flagged the merge anyway, independently, because
+> the rebuilt t10 lands **0.05 m from t5** — the yellow player t77 almost certainly belongs to.
+> Two unrelated signals, same conclusion.
+
+**The fix.** `classify_kit()` now lives in one place, rejects grass with the tracker's own rule
+before taking the median, keeps yellow *below* the grass band (H 15–34; the tracker's fitted
+yellow centroid is at **H ≈ 25**, so 35–48 was never yellow, it was turf), and returns `-` rather
+than guessing when a box is essentially all pitch. The three bench scripts import it instead of
+carrying a copy — the copy is how this spread.
+
+**The lesson, in one line:** a threshold nobody ever pointed at a *negative* control. Running that
+band over the whole frame — two lines — would have shown 64.9 % of a football pitch reading as a
+football shirt on day one.
+
+*Closed 2026-08-07. CPU only. Cost: it invalidated four claims and saved a fifth.*
+
 ### W10 — #103, kit colour under BT.709 → **the migration was right and it changes nothing we read**
 
 `ffprobe` answers half of it before a single pixel moves: the target clip declares
@@ -327,11 +384,11 @@ BT.709, so its thresholds were never tuned against the old matrix in the first p
 decode artefact — it survives both matrices unchanged. The open question about that merge is a
 question about the *tracker*, not about colour.
 
-**Two things the same table shows, for free.** `team_id` disagrees with the pixel-modal kit on
-**2 of 28** tracks whose shirt is readable at all — t3 (labelled B, reads yellow) and t75
-(labelled A, reads blue) — matching the 22-of-24 the user's own label file recorded. And two more
-tracks carry an un-cut kit flip: t11 reads `?YYYYYY???B?BBB…` and t13 reads `BBBB??YYY???BBB…`,
-both labelled B. Same defect as t17 in W3: the #132 split fires, but not at the flip.
+**~~Two things the same table shows, for free.~~ Also wrong — see W13.** The original text read
+`team_id` as disagreeing with the pixels on t3 and t75, and reported un-cut kit flips on t11 and
+t13. All four were the broken reader calling grass yellow. Re-measured with the grass-safe
+classifier, on the scene: **`team_id` disagrees on exactly one track of 24 — t77 — and that one is
+real** (see W13, where the crop is unambiguous).
 
 The OCR half of #103 is moot for now — #109 measured **0 of 23** usable jersey crops, so there is
 no OCR output for a colour matrix to have shifted.

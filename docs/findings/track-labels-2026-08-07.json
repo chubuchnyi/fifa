@@ -28,7 +28,7 @@
   "notes": {
     "17": "identity and placement fine; he jumps for the ball in the clip and 3D keeps him planar",
     "25": "initial position on the pitch is wrong - he should have moved from right against 14 to his final position",
-    "team_colours": "The user flagged that they had been taking the reconstruction's team colours as truth and that those may be wrong too. Measured from video pixels (--kit): team_id agrees with the shirt on 22 of 24 tracks; t3 and t77 disagree, and t3 FLIPS kit mid-track.",
+    "team_colours": "CORRECTED 2026-08-07 (W13). The original note read: 'Measured from video pixels (--kit): team_id agrees with the shirt on 22 of 24 tracks; t3 and t77 disagree, and t3 FLIPS kit mid-track.' It was measured with a kit reader whose yellow band (H 18-48, S>90) contained the floodlit pitch (H 39-40, S~150) - 64.9% of every frame classified as 'yellow kit', so any box carrying grass read yellow. Re-measured with the grass-safe classifier and confirmed by looking at the crops: t3 is BLUE until its box walks onto a yellow player at ~f32, and it does not flip. team_id agrees with the shirt on 23 of 24 tracks; only t77 disagrees, and that one is real - at f55-57 its box holds a yellow Colombia player (white shorts, red socks) while it is labelled team B. This is a note about MY measurement, not about the user's eye verdicts above, which are untouched.",
     "hard_case_ok": "the 17 / 20 / 15(71) tangle, with 5 joining it, reconstructed well by eye"
   }
 }
