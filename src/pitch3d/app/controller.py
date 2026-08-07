@@ -193,6 +193,21 @@ class Application:
         )
         result = pipeline.run(clip, on_ground=on_ground, params=params)
         scene_id = f"scene-{self._next('scene')}"
+        # R-6: `assemble_scene` falls back to `team_id=None` **and** `role=PLAYER` when a motion's
+        # track id is missing from `result.tracks.tracklets`, and those two defaults are
+        # indistinguishable from measured values in the output. That is how #137 stayed invisible
+        # for a whole pod run: 23 of 27 subjects came out `role=player team=None` while the scene's
+        # own `teams` block held both teams with member-averaged colours. A null team is not
+        # cosmetic either — `StitchConfig.require_same_team` treats `None` as a wildcard, so an
+        # unlabelled subject is stitchable to anyone. Say it out loud instead.
+        _posed = set(result.motions)
+        _tracked = {tl.track_id for tl in result.tracks.tracklets}
+        if orphan := sorted(_posed - _tracked):
+            print(
+                f"== unmatched: {len(orphan)} of {len(_posed)} posed subject(s) have no tracklet "
+                f"in the result — they take role=player and team=None by DEFAULT, not by "
+                f"measurement: {orphan[:12]}{' …' if len(orphan) > 12 else ''}"
+            )
         scene = assemble_scene(
             result, scene_id=scene_id, episode_id=ep.id, source_id=ep.source_id
         )

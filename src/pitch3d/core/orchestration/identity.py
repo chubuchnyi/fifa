@@ -70,6 +70,10 @@ class IdentityReport:
     tracks_split: int = 0
     tracks_merged: int = 0
     tracks_no_features: int = 0
+    #: Tracklets whose team this gate blanked and :func:`_restore_team_labels` gave back (#137).
+    #: Before that pass every split half and every merge reached the scene unlabelled, and a null
+    #: team is a **wildcard** to ``StitchConfig.require_same_team``.
+    teams_restored: int = 0
     splits: list[IdentitySplit] = field(default_factory=list)
     merges: list[IdentityMerge] = field(default_factory=list)
 
@@ -227,6 +231,54 @@ def _merge_tracklets(a: Tracklet, b: Tracklet) -> Tracklet:
         cls=a.cls,
         team_id=None,
     )
+
+
+def _restore_team_labels(
+    tracks: list[Tracklet], feats_by_id: dict[int, np.ndarray],
+) -> int:
+    """Re-label every tracklet this gate blanked, against the ones that kept their team (#137).
+
+    ``_split_tracklet``, ``_truncate_tracklet`` and ``_merge_tracklets`` each emit
+    ``team_id=None`` under the note *"let downstream re-assign on the clean identity"* — and for a
+    whole pod run nothing did. The team assignment lives in ``ByteTrackTracker._assign_teams``,
+    which runs **before** this gate, so there is no downstream. Measured on `out/vert137`
+    (355 frames, `--identity` on): **23 of 27 subjects reached `scene.json` with no team**, while
+    the scene's own ``teams`` block still held both teams with member-averaged colours.
+
+    That is not cosmetic. ``StitchConfig.require_same_team`` treats ``None`` as a **wildcard**, so
+    every unlabelled subject becomes stitchable to anyone — the gate meant to *clean* identities
+    was quietly removing the one appearance constraint that survives at our subject size.
+
+    Re-assign against the tracklets that **kept** a label rather than re-clustering from scratch,
+    so the result stays consistent with the ``teams`` block and with every id the tracker already
+    stamped. Same cosine metric the split stage uses. A split's two halves are re-derived
+    independently and may land on different teams — which is the point of splitting there.
+
+    Returns the number of tracklets relabelled. Leaves ``None`` in place when there is nothing to
+    anchor against (every track touched, or no features) — R-6: an unlabelled subject is better
+    than an invented team, and the caller now says so out loud.
+    """
+    anchors: list[tuple[str, np.ndarray]] = []
+    for t in tracks:
+        feats = feats_by_id.get(int(t.track_id))
+        if t.team_id is not None and feats is not None and np.size(feats):
+            anchors.append((t.team_id, np.asarray(feats, dtype=float).mean(axis=0)))
+    if not anchors:
+        return 0
+
+    centres = np.stack([c for _t, c in anchors])
+    restored = 0
+    for t in tracks:
+        if t.team_id is not None:
+            continue
+        feats = feats_by_id.get(int(t.track_id))
+        if feats is None or not np.size(feats):
+            continue
+        centre = np.asarray(feats, dtype=float).mean(axis=0)
+        d = _cosine_distance_matrix(np.vstack([centre[None, :], centres]))[0, 1:]
+        t.team_id = anchors[int(np.argmin(d))][0]
+        restored += 1
+    return restored
 
 
 def _cross_track_merge(
@@ -421,6 +473,9 @@ def identity_gate(
         )
         report.merges.extend(merges)
         report.tracks_merged = len(merges)
+
+    if not cfg.dry_run:
+        report.teams_restored = _restore_team_labels(out_tracks, output_feats)
 
     report.n_output_tracks = len(out_tracks)
     return Tracks(tracklets=out_tracks, teams=list(tracks.teams)), report
