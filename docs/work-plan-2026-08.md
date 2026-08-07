@@ -292,6 +292,52 @@ verified on the real scene above.
 
 *Closed 2026-08-07 for the code. **Open for the eye** — the A/B is staged and t10 is the question.*
 
+### W10 — #103, kit colour under BT.709 → **the migration was right and it changes nothing we read**
+
+`ffprobe` answers half of it before a single pixel moves: the target clip declares
+**`color_space=bt709`, `color_transfer=bt709`, `color_primaries=bt709`, `color_range=tv`.** So
+BT.709 is what the file asks for — OpenCV 5 is *correct*, OpenCV 4 was decoding it wrong, and it
+is the **pre-2026-07-29** kit numbers that were measured under the wrong matrix, not the current
+ones. R9's note has the polarity backwards.
+
+`scripts/bench_kit_colour_matrix.py` measures the rest. It pulls the raw `yuv420p` planes once
+with ffmpeg (no matrix applied), converts them **both** ways in numpy with the limited-range
+inverse, and reads every tracked shirt under each.
+
+**What cv2 actually gives us**, on frame 5 against the two references: mean |Δ| **0.65 / 255**
+versus BT.709 and **3.43** versus BT.601. So OpenCV 5.0.0 is on BT.709 and handles `tv` range —
+that is now measured, not assumed.
+
+| | |
+|---|---|
+| whole frame, BT.601 vs BT.709 | mean \|Δ\| **2.96 / 255**, max 26 |
+| pixels changed at all | **95.6 %** (R9 said 92 %) |
+| pixels changed by more than 4/255 | 54.0 % |
+| **shirt patch**, hue | \|Δ\| mean **1.62** of 180, p95 4, max 7 |
+| shirt patch, saturation | \|Δ\| mean 6.68, p95 10, max 13 |
+| **per-box kit classification flips** | **18 of 1055 = 1.71 %** |
+| **tracks whose modal kit changes** | **0 of 32** |
+
+**So the scare does not materialise.** The matrix moves almost every pixel, but by ~3/255, which
+is under 2° of hue — far inside the width of the yellow and blue bands the reader uses. Not one
+track's team reading changes. The #135 kit reader was written this month, i.e. already under
+BT.709, so its thresholds were never tuned against the old matrix in the first place.
+
+**And that is what makes the W3/W4 flag stand.** t77 reading yellow while t10 reads blue is not a
+decode artefact — it survives both matrices unchanged. The open question about that merge is a
+question about the *tracker*, not about colour.
+
+**Two things the same table shows, for free.** `team_id` disagrees with the pixel-modal kit on
+**2 of 28** tracks whose shirt is readable at all — t3 (labelled B, reads yellow) and t75
+(labelled A, reads blue) — matching the 22-of-24 the user's own label file recorded. And two more
+tracks carry an un-cut kit flip: t11 reads `?YYYYYY???B?BBB…` and t13 reads `BBBB??YYY???BBB…`,
+both labelled B. Same defect as t17 in W3: the #132 split fires, but not at the flip.
+
+The OCR half of #103 is moot for now — #109 measured **0 of 23** usable jersey crops, so there is
+no OCR output for a colour matrix to have shifted.
+
+*Closed 2026-08-07. CPU only, ~2 min.*
+
 ### W9 — WorldPose GT constants → **two of our four constants are wrong, in opposite directions**
 
 `scripts/worldpose_constants.py`, run over all **89 clips** of WorldPose (1080p 50 Hz World Cup
