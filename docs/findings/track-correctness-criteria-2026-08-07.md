@@ -460,6 +460,30 @@ The leverage is the striking part: the run refused **2** subject-frames on that 
 off-pitch placements disappeared**. Those two were the anchors — one seeds the interpolation across
 a gap, and `_smooth_path` drags its neighbours out with it.
 
+### 9.1 What the criteria say about the pod scene — and one criterion it qualifies
+
+Running `track_quality.py` on `out/vert137/scene.json` (27 tracks, 355 frames):
+
+| признак | reference clip | fan clip, pod |
+|---|---|---|
+| П3 handover pairs | 3 | **0** |
+| П4 twins (<0.5 m for 3+ frames) | every one a phantom parked in a measured player | **32 pairs, 19 of them with BOTH tracks measured** |
+| П5 largest root-Z excursion | 0.082 m | **0.234 m** — still far under the ~0.4 m a jump needs |
+| П7 kit vs `team_id` | agrees on 22/24 | **`team=None` on 23 of 27 subjects** — see #137 |
+
+**П4's reading is clip-dependent, and this is the correction.** On the reference clip the criterion
+could be stated as *"every interpenetration is a phantom parked inside a measured player"*. On the
+fan clip that is false: 19 of the 32 pairs are two **measured** bodies inside half a metre, some for
+59 consecutive frames at 0.07 m. Those are not phantoms — they are solid bodies passing through each
+other, which is exactly what #133's `collision` gate exists for and that gate is **off**. So П4
+detects *either* a duplicate *or* a missing collision constraint, and which one it is depends on
+whether both halves are measured. Read the `(both measured)` annotation, not just the pair count.
+
+The other three transfer intact: П3 finds no handover on this scene (its ids are not §8's — that was
+a fakes-backed run with a different tracker outcome), П5 confirms the missing vertical DOF on a
+second clip and a second stadium, and П7 fails loudly rather than silently because the kit reader has
+no `team_id` to disagree with.
+
 **What this does not claim.** 405 m/s and a Y spread of 86 m on a 68 m-wide pitch are still wrong;
 a footballer peaks near 10 m/s. The catastrophe is gone and what is left is ordinary monocular
 depth error on a zooming phone — a precision problem, judgeable by eye, not an arithmetic one. And
