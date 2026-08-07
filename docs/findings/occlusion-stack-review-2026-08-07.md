@@ -74,6 +74,12 @@ The survey's §4 merges two problems. For football they resolve differently:
   resolution. KPR's own table shows where its prompt pays: on **Market-1501, which has no
   multi-person ambiguity, 93.0 → 93.2**. The prompt buys disambiguation, not identity.
 
+**The wall stands before *identity*, not before *attribution*** — a distinction the first draft of
+this doc blurred, then contradicted itself on by recommending a mask method while saying the win
+lay "in appearance, where the wall is". A mask answers *"these pixels are mine, those are someone
+else's"*, which is solvable at 28 px and is what §8's item 2 buys. Only *"which of the eleven"*
+is unreachable. Everything below keeps the two apart.
+
 So the cue we need is **team + geometry + masks**, not an identity embedding. That is also what
 the SoccerNet-2025 Game-State winners do: ReID is used for *tracklet association*, and identity
 comes from jersey-number OCR (LLaMA-3.2-Vision, CLIP, PARSeq) — which needs digits we do not have.
@@ -119,14 +125,24 @@ Past 1.6 the wheels come off exactly as expected in a 22-player cluster: 1.8 giv
 zero merges, i.e. it has begun fusing distinct players (we measured **≥28 distinct humans** in this
 shot), and 2.0 collapses to 6.
 
-**This is the fifth cheap fix to hit the same plateau** — after NMS, stitch-gate widening, the
-match threshold both ways, and the detector threshold. The plateau is real, and the geometric half
-of the SOTA tracker does not break it.
+**Corrected 2026-08-07, same day, after review.** The first draft of this section read the flat
+column as *"the fifth cheap fix to hit the same plateau — the geometry does not break it"*. That
+is a stronger claim than the experiment carries, on two counts, and both corrections came from
+outside:
+
+* **The right reading is "redundant with the stitcher we already have", not "does not work"** —
+  and my own table already shows it. Without stitching, expansion removes **13 ids (56 → 43)**;
+  with stitching it removes none. The tracker is holding exactly the crossings the stitcher was
+  joining anyway. Those two readings make different predictions and only the second is supported.
+* **The measurement has almost no power.** The identity ceiling is **≥28** distinct humans and the
+  baseline is 36, so the entire measurable headroom is ~8 identities over 236 frames, against a
+  band that already wobbles 33–38 between runs. A change worth 3 identities is indistinguishable
+  from noise here. "No trend" is weak evidence of no effect, not evidence of no effect.
 
 **What this does not test.** A single fixed scale, both sides inflated, is *not* Deep-EIoU: the
 published method iterates the scale-up over rounds and pairs it with a sports-fine-tuned OSNet
-embedder. This isolates the geometry and says the geometry is not where the win is — which points
-at the appearance half, which is exactly where §2's wall stands.
+embedder. This isolates the geometry, and what it shows is that geometry and our existing stitcher
+are **substitutes** on this clip.
 
 ## 6. Licences — decisive for a repo with a commercial future
 
@@ -186,6 +202,33 @@ small-instance warning). Sapiens (11× scale gap plus licence). Multi-HMR 2 and 
 object count and its own release notes cap "near real-time" at ~5 concurrent objects; we have
 22–27. SAM 3.1's Object Multiplex tracks 16 per forward pass, so our scene is 2 passes instead of
 25.
+
+## 8a. The thing neither this doc nor the survey proposed: attack the pixel
+
+Every move above works *around* 28 px. None of them changes 28 px. Measured 2026-08-07:
+
+**`RFDETRBackend` never set `resolution`, and RF-DETR's default is 560.** It resizes the whole
+frame to a `560 x 560` **square**, so aspect ratio is not preserved and a portrait phone clip is
+squashed hardest:
+
+| clip | source | scale to 560² | measured player box → what the net sees |
+|---|---|---|---|
+| Fan (portrait) | 1080 × 1920 | 0.52× across, **0.29× down** | 28 × 72 → **14 × 21 px** |
+| Broadcast | 1920 × 1080 | 0.29× across, 0.52× down | 41 × 86 → **12 × 45 px** |
+
+So the subject is a third of its measured size before any of §1–§8 applies, and **every
+association cue downstream is capped by what survives this resize**. This is also the one place
+the challenge winners spent effort: GTATrack ran **1280 px on the long side plus small-target
+pseudo-labelling**, and that moved HOTA **0.380 → 0.491** (FN 40 046 → 16 186) — a larger jump
+than any association change in this document.
+
+Note this is *not* the same knob as the detector score threshold, which we measured null: that
+test kept boxes the net had already found at 560. Raising the resolution changes what the net can
+find at all.
+
+`RFDETRBackend.resolution` now exists (must be divisible by 56; `None` keeps the 560 default so
+nothing changes silently). **The default stays 560 until the A/B on `demorig` says otherwise** —
+picking it by argument rather than by measurement is exactly the mistake this document is about.
 
 ## 9. For social footage specifically — the honest part
 

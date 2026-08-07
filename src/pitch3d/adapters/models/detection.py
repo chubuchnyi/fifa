@@ -143,7 +143,22 @@ class RFDETRBackend:
     weights: str | None = None
     device: str = "cuda"
     predict_floor: float = 0.05  # permissive backend floor; the adapter does authoritative filtering
+    #: Network input square, in px. ``None`` keeps RF-DETR's own default, which is **560** — and
+    #: that default is the first thing that happens to our subjects. RF-DETR resizes the whole
+    #: frame to ``resolution x resolution``, so aspect ratio is not preserved and a portrait phone
+    #: clip is squashed hardest: 1080x1920 -> 560x560 is 0.52x across and **0.29x down**, turning a
+    #: measured 28 x 72 px player into **14 x 21 px** before the detector sees him. The broadcast
+    #: clip's 41 x 86 px becomes 12 x 45. Every association cue downstream is capped by what
+    #: survives this resize, so it is a knob worth having (#138). Must be divisible by 56.
+    resolution: int | None = None
     _model: object = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.resolution is not None and int(self.resolution) % 56 != 0:
+            raise ValueError(
+                f"RF-DETR resolution must be divisible by 56 (its patch stride), got "
+                f"{self.resolution}. Nearest valid: {round(int(self.resolution) / 56) * 56}."
+            )
 
     def detect_raw(self, clip: ClipRef) -> list[RawFrameDetections]:
         model = self._load()
@@ -170,6 +185,8 @@ class RFDETRBackend:
                     "`pip install 'pitch3d[cv]'` (Apache-2.0), or inject a DetectionBackend."
                 ) from exc
             kwargs = {} if self.weights is None else {"pretrain_weights": self.weights}
+            if self.resolution is not None:
+                kwargs["resolution"] = int(self.resolution)
             self._model = RFDETRBase(**kwargs)
         return self._model
 
