@@ -227,8 +227,19 @@ test kept boxes the net had already found at 560. Raising the resolution changes
 find at all.
 
 `RFDETRBackend.resolution` now exists (must be divisible by 56; `None` keeps the 560 default so
-nothing changes silently). **The default stays 560 until the A/B on `demorig` says otherwise** —
-picking it by argument rather than by measurement is exactly the mistake this document is about.
+nothing changes silently).
+
+**Measured the same day, and the payoff is not there.** RF-DETR at 560 / 728 / 896 / 1064 over 60
+frames of each clip on `demorig`: at the adapter's 0.3 floor, quadrupling the pixels buys **+0.9
+players/frame on both clips — about 5 % — for 1.5–2× the time** (broadcast 19.1 → 19.9, fan
+15.1 → 16.0). At the 0.1 floor it is +18 %, which is exactly the band we already measured as
+worthless downstream (doubling detections there moved churn 26 → 28). Median box height does not
+grow; the extra finds are smaller, more distant people, and there are few of them. **The default
+stays 560.** Full table and the honest retraction: [`../work-plan-2026-08.md`](../work-plan-2026-08.md) §W1.
+
+This also separates two things this section had conflated: GTATrack's 0.380 → 0.491 came from
+**pseudo-labelling the detector on small targets**, with 1280 px input as the carrier. The
+resolution alone is measured here, and the resolution alone is not it.
 
 ## 9. For social footage specifically — the honest part
 

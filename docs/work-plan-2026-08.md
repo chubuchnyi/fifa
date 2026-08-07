@@ -51,8 +51,47 @@ neither emits SMPL-X natively). Full reasoning: occlusion-stack review §6, §8.
 Appended as items land. Each entry states what was run, on what, and the number — including when
 the number says the idea was wrong.
 
-### W1 — detector input resolution
+### W1 — detector input resolution → **the premise was right, the payoff is not. Default stays 560.**
 
-*Running on `demorig` 2026-08-07: RF-DETR at 560 / 728 / 896 / 1064 over 60 frames of each clip,
-counting person detections at the adapter's 0.3 floor and at the 0.1 floor whose recall we measured
-as a 96 % association ceiling, plus box sizes and wall time. Result below when it lands.*
+Run on `demorig` 2026-08-07, RF-DETR at four input squares over 60 frames of each clip,
+`scripts/bench_detector_resolution.py`:
+
+| | | players/frame @0.3 | @0.1 | median box h | p05 h | s/frame |
+|---|---|---|---|---|---|---|
+| **Broadcast** 1920×1080 | 560 | **19.1** | 28.4 | 86.6 | 65.2 | 0.019 |
+| | 728 | 19.5 | 29.5 | 86.4 | 65.8 | 0.021 |
+| | 896 | **19.9** | 31.0 | 86.1 | 64.1 | 0.029 |
+| | 1064 | 19.8 | 33.4 | 86.2 | 65.0 | 0.044 |
+| **Fan clip** 1080×1920 | 560 | **15.1** | 29.4 | 76.5 | 59.5 | 0.020 |
+| | 728 | 15.4 | 32.1 | 74.9 | 59.9 | 0.021 |
+| | 896 | 15.7 | 33.8 | 73.3 | 58.0 | 0.030 |
+| | 1064 | **16.0** | 34.7 | 72.4 | 56.5 | 0.041 |
+
+**At the threshold the pipeline actually uses, quadrupling the pixel count buys ~5 %.** Broadcast
+19.1 → 19.9 (+0.9 players/frame) at **1.52×** the time, and 1064 is no better than 896. Fan clip
+15.1 → 16.0 (+0.9) at **2.06×**. That is not a lever; it is a rounding error with a compute bill.
+
+At the 0.1 floor the gain is real — **+18 %** on both clips (28.4 → 33.4 and 29.4 → 34.7) — and
+that is exactly the band we already measured as worthless downstream: doubling the detections at
+0.1 moved identity churn **26 → 28**. More low-confidence boxes is a thing we have tried.
+
+Two details worth keeping. **Median box height does not grow** (86.6 → 86.2; on the fan clip it
+*falls* 76.5 → 72.4, and p05 falls 59.5 → 56.5) — so the extra detections are *smaller, more
+distant* people, which is the mechanism working as advertised; there just are not many of them.
+And the portrait clip, which is squashed 0.29× vertically at 560 and should have gained most, gains
+the same +0.9 as the broadcast clip.
+
+**Verdict: hypothesis refuted at the working threshold.** I claimed last session that this was "the
+pixel-level attack neither of us proposed" and implied it was the large one. It is not. The
+mechanism is real and the knob is worth having — `RFDETRBackend.resolution` stays, `None` keeps 560
+so nothing changes silently, and a clip with genuinely distant subjects can raise it — but the
+default does not move on a 5 % detection gain that our own prior measurement says does not convert
+into identities.
+
+**And it separates two things I had conflated.** GTATrack's small-target jump (HOTA 0.380 → 0.491)
+came from **pseudo-labelling** — retraining the detector on small targets — with 1280 px input as
+the carrier, not from the resolution alone. This measurement is the resolution alone, and it says
+the resolution alone is not where their win came from. Retraining the detector is a different item
+with a different cost, and it is not in this queue.
+
+*Closed 2026-08-07. Cost: ~4 min of a free box.*
