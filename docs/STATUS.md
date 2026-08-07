@@ -162,6 +162,32 @@ Genuinely open, and *not* addressed by any of those steps:
   installs; it does not make the suite meaningful. The golden test proves the *camera* is real, not
   the export downstream of it — a green CI still largely means "the fakes agree with each other".
 
+### Local GPU box (added 2026-08-07)
+
+`demorig-pc` (172.16.10.203, `ssh demorig`) now runs the pipeline in Docker on an **RTX 4080
+(16 GB, sm_89)** — Win 11 → WSL2 Ubuntu 24.04 → docker-ce 29.7.2 + nvidia-container-toolkit.
+`docker/Dockerfile` mirrors `cloud_setup.sh`'s REUSE_SYSTEM_TORCH path on the
+`pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` base, which already ships the pinned
+torch 2.6.0+cu124 / torchvision 0.21.0 pair.
+
+Measured on the box, 2026-08-07:
+
+| Signal | Result |
+|--------|--------|
+| Suite in-container | **1123 passed / 46 skipped in 6.5 s** (vs 71 s locally) |
+| Real clip, `--device cuda` | 48 frames, decode → RF-DETR → ByteTrack → 16 gates → glTF, **61 s**, 21 subjects, 3.3 MB `scene.json` |
+| GPU actually used | yes, but **peak 592 MiB / 0–1 % util** — the detect path is CPU-bound, exactly as `m1-status-and-plan.md:439` says of the pod |
+| The extra 32 skips | **all** are `needs the SMPL-X model (.npz)` — the one license-gated asset, not yet staged |
+
+**Unproven:** nothing heavy has run there yet. `calibrate`/`pose`/`ball` are still on fakes
+because the ~14 GB of weights are not staged, so **16 GB VRAM is untested against SMPLest-X-H and
+SeedVR2** (3B fp16, `batch_size=33` @720p — the likeliest thing not to fit). Wan2.1-VACE is 1.3B
+with `enable_model_cpu_offload()`, so it is the safer half of the tail.
+
+**Transfer rule of thumb:** laptop→box is **0.11 MB/s**, box→internet is **3.74 MB/s** (34×).
+Never push weights from the laptop — have the box pull them. Code comes from GitHub (the repo is
+public; the tracked tree is 5.5 MB). Only `SMPLX_NEUTRAL.npz` (109 MB) has to be pushed by hand.
+
 ## 6. Key references
 
 - **How to work here (commands, rules, architecture):** [`../CLAUDE.md`](../CLAUDE.md)
