@@ -70,10 +70,13 @@ from ..core.correction.pose_motion_sync import (
     pose_motion_sync_gate,
 )
 from ..core.orchestration import (
+    HandoverConfig,
+    HandoverReport,
     ReconstructionPipeline,
     StitchConfig,
     StitchReport,
     assemble_scene,
+    merge_handovers,
     resolve_scene,
 )
 from ..core.orchestration.identity import AppearanceProvider
@@ -108,6 +111,7 @@ class Application:
     _scene_clip: dict[str, ClipRef] = field(default_factory=dict, repr=False)
     _scene_stitch: dict[str, StitchReport | None] = field(default_factory=dict, repr=False)
     _scene_coherence: dict[str, CoherenceReport | None] = field(default_factory=dict, repr=False)
+    _scene_handover: dict[str, HandoverReport | None] = field(default_factory=dict, repr=False)
     _scene_kinematics: dict[str, KinematicReport | None] = field(default_factory=dict, repr=False)
     _scene_camera_fit: dict[str, PlaneCameraFit] = field(default_factory=dict, repr=False)
     _scene_contact: dict[str, ContactProbeReport | None] = field(default_factory=dict, repr=False)
@@ -151,6 +155,7 @@ class Application:
         params: dict | None = None,
         stitch_cfg: StitchConfig | None = None,
         coherence_cfg: CoherenceConfig | None = None,
+        handover_cfg: HandoverConfig | None = None,
         kinematic_cfg: KinematicConfig | None = None,
         identity_cfg: IdentityConfig | None = None,
         appearance_provider: AppearanceProvider | None = None,
@@ -214,6 +219,19 @@ class Application:
         coherence_rep: CoherenceReport | None = None
         if coherence_cfg is not None:
             scene, coherence_rep = add_temporal_coherence(scene, coherence_cfg, fps=clip.fps)
+        # П3/П2: two ids on one human. This runs HERE and not in the stitcher because the
+        # criterion only survives on the post-pose population — pre-pose the same rule joins two
+        # different shirts 4 times in 6 (W3, `scripts/bench_handover_stitch.py`). It reads
+        # `provenance`, so it must follow coherence, and it runs before the physics gates so they
+        # see one body instead of two.
+        handover_rep: HandoverReport | None = None
+        if handover_cfg is not None and handover_cfg.enabled:
+            if coherence_cfg is None:
+                raise ValueError(
+                    "handover_cfg needs coherence: the criterion reads `provenance`, which only "
+                    "exists after add_temporal_coherence. Pass coherence_cfg too (--coherence)."
+                )
+            scene, handover_rep = merge_handovers(scene, handover_cfg)
         kinematic_rep: KinematicReport | None = None
         if kinematic_cfg is not None:
             scene, kinematic_rep = kinematic_gate(
@@ -308,6 +326,7 @@ class Application:
         self._scene_clip[scene_id] = clip
         self._scene_stitch[scene_id] = result.stitch
         self._scene_coherence[scene_id] = coherence_rep
+        self._scene_handover[scene_id] = handover_rep
         self._scene_kinematics[scene_id] = kinematic_rep
         return scene_id
 
@@ -318,6 +337,10 @@ class Application:
     def coherence_report(self, scene_id: str) -> CoherenceReport | None:
         """The temporal-coherence report for a scene, or ``None`` if coherence was off."""
         return self._scene_coherence.get(scene_id)
+
+    def handover_report(self, scene_id: str) -> HandoverReport | None:
+        """The handover-merge report for a scene, or ``None`` if the pass was off."""
+        return self._scene_handover.get(scene_id)
 
     def kinematic_report(self, scene_id: str) -> KinematicReport | None:
         """The M3-9 kinematic-gate report for a scene, or ``None`` if the gate was off."""

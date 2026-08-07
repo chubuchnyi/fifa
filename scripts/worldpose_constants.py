@@ -79,6 +79,8 @@ accels_s: list[np.ndarray] = []
 vert_range: list[float] = []          # per player-clip, total vertical excursion
 vert_burst: list[float] = []          # per player-clip, largest rise inside 0.5 s (a jump)
 near: list[np.ndarray] = []           # per frame, nearest-neighbour distance between players
+RADII = (0.3, 0.5, 0.75)
+sustained: list[list[int]] = [[] for _ in RADII]   # longest consecutive run inside each radius
 n_pairs_close = 0
 n_pairs_seen = 0
 frames_total = 0
@@ -135,6 +137,23 @@ for f in files:
         n_pairs_close += int((dd < args.twin_radius).sum())
         near.append(dd.min(axis=None, keepdims=True))
 
+    # A single close frame is a tackle; a *sustained* one is a duplicate. This is the number
+    # the handover merge's self-check needs: how long do two REAL players ever stay inside R?
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = tr[i], tr[j]
+            ok = np.isfinite(a).all(axis=1) & np.isfinite(b).all(axis=1)
+            if ok.sum() < 3:
+                continue
+            d = np.full(t, np.inf)
+            d[ok] = np.linalg.norm(a[ok][:, GROUND] - b[ok][:, GROUND], axis=1)
+            for r_i, r in enumerate(RADII):
+                run = best = 0
+                for val in d:
+                    run = run + 1 if val < r else 0
+                    best = max(best, run)
+                sustained[r_i].append(best)
+
 sp = np.concatenate(speeds)
 ac = np.concatenate(accels)
 nn = np.concatenate(near)
@@ -166,3 +185,18 @@ print(f'  pairs closer than {args.twin_radius} m: {n_pairs_close:,} of {n_pairs_
       f'= {frac:.3f} %')
 for r in (0.3, 0.4, 0.5, 0.75, 1.0):
     print(f'    < {r:.2f} m: {100.0 * (nn < r).mean():6.2f} % of frames have SOME pair that close')
+
+print('\n== how LONG do two real players stay that close? (longest consecutive run per pair) ==')
+print('   A single close frame is a tackle. A sustained one, in our output, is a duplicate —')
+print(f'   this is the ceiling the handover merge self-checks against. {FPS:.0f} Hz, so')
+print('   50 frames = 1 s.')
+for r_i, r in enumerate(RADII):
+    a = np.asarray(sustained[r_i], dtype=float)
+    a = a[a > 0]
+    if a.size == 0:
+        print(f'  < {r:.2f} m: never')
+        continue
+    print(f'  < {r:.2f} m: {a.size:,} pairs ever that close · run length '
+          f'p50 {np.percentile(a, 50):5.1f}  p99 {np.percentile(a, 99):6.1f}  '
+          f'p99.9 {np.percentile(a, 99.9):6.1f}  max {a.max():6.0f} frames '
+          f'({a.max() / FPS:.2f} s)')

@@ -10,11 +10,18 @@ from .continuity import (
     stitch_tracks,
     stitch_tracks_with_report,
 )
+from .handover import (
+    HandoverConfig,
+    HandoverReport,
+    merge_handovers,
+)
 from .pipeline import ReconstructionPipeline, ReconstructionResult, describe_calibration_solve
 from .stages import RECON_ORDER, Stage, StageRun, clip_hash, run_cached
 
 __all__ = [
     "RECON_ORDER",
+    "HandoverConfig",
+    "HandoverReport",
     "ReconstructionPipeline",
     "ReconstructionResult",
     "Stage",
@@ -22,6 +29,7 @@ __all__ = [
     "StitchConfig",
     "StitchReport",
     "assemble_scene",
+    "merge_handovers",
     "ballistic_z",
     "clip_hash",
     "describe_calibration_solve",

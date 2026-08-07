@@ -23,7 +23,11 @@ from ..adapters.io import FFmpegIngestor
 from ..core.agent import EditBudget, auto_correct
 from ..core.correction.anchor import validate_against_anchor
 from ..core.correction.engine import make_offset, make_smoothing
-from ..core.orchestration import StitchConfig, describe_calibration_solve
+from ..core.orchestration import (
+    HandoverConfig,
+    StitchConfig,
+    describe_calibration_solve,
+)
 from ..core.ports.io import ClipRef
 from ..core.ports.observation import Observation
 from ..core.scene.layers import CorrectionTarget, TargetKind
@@ -123,7 +127,8 @@ def run_dry_run(
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake", camera_carry: int = 8,
     min_calib_confidence: float | None = None,
-    stitch: bool = True, coherence: bool = False, physics: bool = False,
+    stitch: bool = True, coherence: bool = False, handover: bool = False,
+    physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
     auto_tune: bool = False, ball_id: str = "match_ball_1",
@@ -180,6 +185,7 @@ def run_dry_run(
         else None
     )
     coherence_cfg = _phys.coherence if (coherence and _phys is not None) else None
+    handover_cfg = HandoverConfig(enabled=True) if handover else None
     kinematic_cfg = _phys.kinematic if (physics and _phys is not None) else None
     if _phys is not None:
         print(f"== physics config: {_phys.summary()}  from {_phys.source_path}")
@@ -277,7 +283,8 @@ def run_dry_run(
 
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
-        stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, kinematic_cfg=kinematic_cfg,
+        stitch_cfg=stitch_cfg, coherence_cfg=coherence_cfg, handover_cfg=handover_cfg,
+        kinematic_cfg=kinematic_cfg,
         identity_cfg=identity_cfg, appearance_provider=appearance_provider,
         profile_provider=profile_provider, auto_tune_sink=auto_tune_sink,
         physics_cfg=_phys, pelvis_target_provider=pelvis_target_provider,
@@ -315,6 +322,15 @@ def run_dry_run(
               f"extended {cr.extended_frames} edge frame(s) across "
               f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
+    hr = app.handover_report(scene_id)
+    if hr is not None:
+        print(f"== handover: {hr.n_in}→{hr.n_out} subjects, {len(hr.merges)} merge(s) "
+              f"{hr.merges}, {hr.mannequin_frames_dropped} mannequin frame(s) dropped, "
+              f"{hr.seam_frames_filled} seam frame(s) interpolated")
+        for tid, other, dist, n_close, both in hr.suspect:
+            print(f"   !! t{tid} ends up within {dist:.2f} m of t{other} on {n_close} frame(s) "
+                  f"({both} measured on both) — flagged, NOT rejected: WorldPose says real "
+                  f"players do get that close. Judge it by eye.")
     kr = app.kinematic_report(scene_id)
     if kr is not None:
         print(f"== physics: speed viol {kr.speed_viol_before}→{kr.speed_viol_after}, "
@@ -654,6 +670,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="reconstruct across camera cuts (guard is ON by default): a "
                              "broadcast clip cuts between cameras, and tracking + calibrating "
                              "through one blends two views into a single 'episode'")
+    parser.add_argument("--handover", action="store_true",
+                        help="merge two ids that are one human: a subject whose measurements "
+                             "stop mid-clip and another whose measurements start there, within "
+                             "6 m and 14 frames, are rebuilt as one player and the duplicate "
+                             "mannequin is dropped (П3+П2, #135). Needs --coherence. OFF by "
+                             "default: this is the one pass that DELETES a subject, so a wrong "
+                             "merge erases a real player rather than marking him (R-6)")
     parser.add_argument("--coherence", action="store_true",
                         help="bridge short interior pose gaps (slerp/lerp) + add auto "
                              "temporal-smoothing corrections (off by default)")
@@ -731,6 +754,7 @@ def main(argv: list[str] | None = None) -> int:
         shot_guard=args.shot_guard,
         kit_split=args.kit_split,
         coherence=args.coherence,
+        handover=args.handover,
         physics=args.physics,
         physics_profile=args.physics_profile,
         physics_config=args.physics_config,
