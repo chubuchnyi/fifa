@@ -90,7 +90,15 @@ PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py        # R2: does t
 PYTHONPATH=src .venv/bin/python scripts/bench_calib_confidence.py   # #105: is calib confidence predictive?
 python scripts/motion_stats.py --scene <export/scene.json>          # #207: speed/accel plausibility
 .venv/bin/python scripts/check_layout_preview.py                    # #127: does the browser's drag preview match the commit? (needs the server + node)
+.venv/bin/python scripts/track_quality.py --camera calib/Colombia-1-0-Congo-DR1080p.npz \
+  --labels docs/findings/track-labels-2026-08-07.json               # #135: is each player correct? 19/20 vs the user's eye
 ```
+
+**#135's criteria are the fastest way to judge a scene without rendering it.** `track_quality.py`
+prints a provenance timeline per track; `imputed` means *frozen limbs, coasting root* — a
+mannequin, and the thing the eye calls a phantom. Always pass `--camera`: the stored scenes carry
+an invented 772 px fallback under which every subject is trivially inside the image, which turns
+the in-frame/off-frame test (the user's own display rule) into a constant.
 
 ## Architecture
 

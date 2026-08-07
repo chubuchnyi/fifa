@@ -1,0 +1,26 @@
+{
+  "_": "The user's eye verdict on every track of out/cue/scene_off.json, 2026-08-07. This is the",
+  "__": "ground truth scripts/track_quality.py is scored against - do NOT edit it to make the",
+  "___": "criteria look better. If a verdict is wrong, the user re-judges it and we record that.",
+  "scene": "out/cue/scene_off.json",
+  "judged_on": "2026-08-07",
+  "tracks": {
+    "1": "correct", "2": "correct", "4": "correct", "5": "correct", "6": "correct",
+    "7": "correct", "8": "correct", "9": "correct", "11": "correct", "12": "correct",
+    "13": "correct", "20": "correct",
+    "3": "stitch", "66": "stitch",
+    "10": "stitch", "77": "stitch",
+    "15": "stitch", "71": "stitch",
+    "17": "correct",
+    "25": "misplaced"
+  },
+  "stitch_pairs": [[3, 66], [10, 77], [15, 71]],
+  "not_judged": [14, 16, 18, 31],
+  "notes": {
+    "17": "identity and placement fine; he jumps for the ball in the clip and 3D keeps him planar",
+    "25": "initial position on the pitch is wrong - he should have moved from right against 14 to his final position",
+    "20": "judged correct even though 42/60 of its frames are imputed - the one disagreement with the criteria",
+    "32": "the user wrote '32' as the example of a correct off-frame player; no track 32 exists in this scene. Track 31 (off-frame f0-33) and track 16 (off-frame f43-59) are the only two off-frame tracks, so one of them is meant.",
+    "hard_case_ok": "the 17 / 20 / 15(71) tangle, with 5 joining it, reconstructed well by eye"
+  }
+}
