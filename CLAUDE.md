@@ -16,6 +16,7 @@ cold start; everything else is opened on demand.
 | Why an open item is open, what was measured | `docs/findings/` |
 | Which file owns a subsystem | `docs/code-map.md` |
 | What happened on some past date | `docs/archive/status-log-2026-07.md` (verbatim log, 3.3k lines — grep it, don't read it) |
+| What we validated / refuted / never judged, across every thread | `docs/findings/research-ledger-2026-08-07.md` |
 | What was tried and rejected, with numbers | `docs/adr/0012-rejected-approaches-log.md` |
 | Pipeline shape end to end | `docs/pipeline.md` |
 | How to run on the local RTX 4080 instead of the pod | `docs/local-gpu-box.md` |
