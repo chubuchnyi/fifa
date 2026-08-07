@@ -315,3 +315,73 @@ per-crop pose estimator did not fuse — which is the same conclusion #132 reach
 **The bottleneck is association, not pose.** Every defect in the user's list is an identity or
 placement failure — a track that died, was born, or was parked. None of them is a wrong pose on a
 correctly-associated crop.
+
+---
+
+## 8. Second clip, 2026-08-07 — do the criteria transfer?
+
+The user asked for the pipeline to be run on `samples/video/14604731_1080_1920_30fps.mp4` — a
+**fan phone video**, 1080×1920 portrait, 355 frames, red vs white kits, shot from the stand with
+the pitch occupying the bottom third. Nothing like the reference broadcast. Reconstructions:
+`out/vert60/` (38 frames, guard on) and `out/vert60_full/` (60 frames, `--no-shot-guard`).
+
+### What could and could not run locally
+
+| stage | local | note |
+|---|---|---|
+| detect (RF-DETR) | **real** | `rf-detr-base.pth` is in the repo |
+| track (ByteTrack) + stitch + kit split | **real** | |
+| coherence + physics gates | **real** | |
+| **pose (SMPLest-X-H)** | **no** | `backends/SMPLest-X/models/SMPLest_X.py:25` hardcodes `.cuda()` and this torch is CPU-only. Weights and checkout are both present; **the estimator itself needs the pod.** |
+| **calibrate (PnLCalib)** | **no** | weights are pod-only, so the fake calibrator ran (its signature: confidence a constant 0.950) |
+
+So this run tests **association**, which is where every defect in §1 lives — and not articulation
+or metric placement. 60 frames of detect+track+coherence on CPU is **~70 s**, so it is cheap enough
+to iterate on.
+
+### Three holes in the criteria, found by running them somewhere new
+
+1. **`--coherence` is off by default, and without it the criteria are blind.** The imputation the
+   whole method reads is written by `add_temporal_coherence`, which only runs under `--coherence`
+   or `--physics`. Without it a lost subject is *dropped at his last measured frame* — the R-6
+   blink-out — and every track then reads `OK · FULL` because it is measured over its own short
+   span. A 3-frame fragment scored `OK · FULL · measured 3/3`. `track_quality.py` now detects a
+   coherence-less scene and says it cannot see anything, instead of printing reassuring OKs.
+2. **The shape taxonomy was fragile.** Whether a mid-clip birth reads `TAIL` or `CORE` depends only
+   on whether it survives to the last frame. On this clip everything died before the end, so there
+   were no `TAIL`s, and a HEAD→TAIL handover test found **zero pairs** while П4 was reporting two
+   bodies 0.06 m apart for 30 frames. П3 now pairs on **measured-run endpoints**, with a guard that
+   two tracks measured simultaneously for more than 4 frames are two humans. The reference clip's
+   three pairs are unchanged by the rewrite.
+3. **The off-frame verdict needs `--camera`, always.** The old warning fired only on the 772 px
+   fallback. A fake-calibrator scene stores a *different* synthetic camera (here 314 px @
+   1080×1920) under which a badly placed root reads as "left the picture". Now warned on
+   unconditionally.
+
+### What the criteria then found: a camera whip breaks nine identities at once
+
+The shot guard reported *"2 shots, cut at [38]"* and truncated 60 frames to 38.
+**Frame 38 is not a cut** — same goal, same players, same stands; the phone was whipped right and
+zoomed in one frame. But the colour histogram cannot tell the difference: distance 0.334 against a
+clip median of 0.049 and a threshold of 0.250 (which is the **floor**, not the ratio — the ratio
+term lands at 0.247, so on this clip the two coincide). On the reference broadcast the largest step
+in 60 frames is 0.081, nowhere near. **A handheld whip-pan is indistinguishable from a cut by
+histogram alone**, and it costs 22 of 60 frames. `--no-shot-guard` is the documented escape hatch.
+
+Run with the guard off, the whip shows up as exactly what it is:
+
+* tracks **t1–t5, t9, t16, t17** all die at frames 31–34
+* tracks **t60, t63, t71, t72, t73, t75, t76** are all born at frames 36–38
+* the handover criterion pairs them: `t16→t60` `t4→t73` `t5→t76` `t9→t63` `t2→t71` `t3→t75`, every
+  gap +4…+8 frames, every distance 2.0–4.5 m — **six identities broken by one camera movement**,
+  plus `t15→t18` (0.20 m) and `t17→t72` (0.42 m) which are ordinary crossings
+
+29 subjects for ~20 players on screen. So on a phone clip the dominant failure is not occlusion at
+all — it is **one violent camera move**, and the criteria localise it to the frame.
+
+### Verdict
+
+The признаки transfer to a clip with a different camera, format, stadium and pair of kits, and on
+it they immediately name the dominant defect. What they cannot do without a pod run is judge
+**pose**: articulation on this clip is fake. If the eye needs to judge the poses on this clip, that
+is a ~25 min / ~$0.3 pod run, not a local one.

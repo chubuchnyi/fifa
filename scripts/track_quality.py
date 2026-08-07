@@ -223,23 +223,39 @@ def assign_verdicts(verdicts: dict, pairs: list, min_run: int) -> None:
 
 
 def stitch_candidates(tracks: dict, verdicts: dict, max_gap: int, max_dist: float,
-                      ignore_team: bool = False) -> list:
-    heads = [t for t, v in verdicts.items() if v['shape'] in ('HEAD', 'CORE')]
-    tails = [t for t, v in verdicts.items() if v['shape'] == 'TAIL']
+                      ignore_team: bool = False, max_both: int = 4) -> list:
+    """Pair on **measured-run endpoints**, not on the shape label.
+
+    The shape taxonomy turned out to be fragile the moment a second clip was run: whether a
+    mid-clip birth reads as ``TAIL`` or ``CORE`` depends only on whether that track happens to
+    survive to the last frame. On the vertical clip every track dies before the end, so there were
+    no ``TAIL``s at all and a HEAD→TAIL test found nothing — while П4 was reporting two bodies
+    0.06 m apart for 30 frames. So: any track that dies early may hand over to any track born late.
+
+    ``max_both`` is the guard that keeps this honest: two tracks measured *simultaneously* for
+    more than a few frames are two humans, however close their endpoints are.
+    """
+    dies = [t for t, v in verdicts.items()
+            if v['last_m'] is not None and v['last_m'] < v['n'] - 3]
+    born = [t for t, v in verdicts.items() if v['first_m'] is not None and v['first_m'] > 2]
     out = []
-    for h in heads:
-        for t in tails:
-            if not ignore_team and tracks[h]['team'] != tracks[t]['team']:
+    for h in dies:
+        for t in born:
+            if h == t or (not ignore_team and tracks[h]['team'] != tracks[t]['team']):
                 continue
-            die, born = verdicts[h]['last_m'], verdicts[t]['first_m']
-            gap = born - die
+            die, first = verdicts[h]['last_m'], verdicts[t]['first_m']
+            gap = first - die
             if abs(gap) > max_gap:
                 continue
-            here, there = tracks[h]['transl'][die][:2], tracks[t]['transl'][born][:2]
+            both = sum(1 for i in range(min(len(tracks[h]['prov']), len(tracks[t]['prov'])))
+                       if tracks[h]['prov'][i] == 'measured' and tracks[t]['prov'][i] == 'measured')
+            if both > max_both:
+                continue
+            here, there = tracks[h]['transl'][die][:2], tracks[t]['transl'][first][:2]
             dist = float(np.linalg.norm(here - there))
             if dist > max_dist:
                 continue
-            out.append({'head': h, 'tail': t, 'gap': gap, 'dist': dist})
+            out.append({'head': h, 'tail': t, 'gap': gap, 'dist': dist, 'both': both})
     return sorted(out, key=lambda c: c['dist'])
 
 
@@ -394,13 +410,30 @@ def main() -> None:
         project = projector_from_scene(scene['camera'])
         print(f'{args.scene}: {len(tracks)} tracks · camera from the scene '
               f'(focal {project.focal:.0f} px @ {project.width}x{project.height})')
-        if project.invented:
-            print('  !! that is the INVENTED fallback camera. Its field of view is so wide that '
-                  'every\n     subject lands inside the image, so the in-frame test below is a '
-                  'constant.\n     Pass --camera calib/<clip>.npz for a real answer.')
+        print('  !! no --camera, so the in-frame / off-frame verdict below is NOT trustworthy'
+              + (': that focal is\n     the INVENTED 772 px fallback, whose field of view is so '
+                 'wide that every subject lands\n     inside the image and the test becomes a '
+                 'constant.' if project.invented
+                 else '. A scene reconstructed\n     with the fake calibrator stores a synthetic '
+                      'camera, under which a badly-placed root\n     reads as "left the picture".')
+              + '\n     Pass --camera calib/<clip>.npz.')
 
     verdicts = {tid: classify(tid, tr, project, args.min_run, args.off_frac)
                 for tid, tr in sorted(tracks.items())}
+
+    # The criteria read `imputed`, and `imputed` only exists if the run had --coherence (or
+    # --physics). Without it a lost subject is simply dropped at his last measured frame — the
+    # R-6 blink-out — and every track then reads OK because it is measured over its own short
+    # span. Found on the vertical clip, where a 3-frame fragment scored "OK · FULL · 3/3".
+    if not any('imputed' in v['timeline'] or '.' in v['timeline'] for v in verdicts.values()):
+        spans = {len(tr['prov']) for tr in tracks.values()}
+        if len(spans) > 1:
+            print('\n  !! THIS SCENE HAS NO IMPUTED FRAMES AND PER-TRACK SPANS — it was '
+                  'reconstructed\n     WITHOUT --coherence, so a lost subject was dropped rather '
+                  'than held. Every track is\n     then trivially "measured over its own span" and '
+                  'the criteria below see nothing.\n     Re-run the pipeline with --coherence '
+                  '--physics.')
+
     cands = stitch_candidates(tracks, verdicts, args.max_gap, args.max_dist, args.ignore_team)
     pairs = greedy_match(cands)
     assign_verdicts(verdicts, pairs, args.min_run)
