@@ -176,18 +176,32 @@ Measured on the box, 2026-08-07:
 | Signal | Result |
 |--------|--------|
 | Suite in-container | **1123 passed / 46 skipped in 6.5 s** (vs 71 s locally) |
-| Real clip, `--device cuda` | 48 frames, decode → RF-DETR → ByteTrack → 16 gates → glTF, **61 s**, 21 subjects, 3.3 MB `scene.json` |
-| GPU actually used | yes, but **peak 592 MiB / 0–1 % util** — the detect path is CPU-bound, exactly as `m1-status-and-plan.md:439` says of the pod |
-| The extra 32 skips | **all** are `needs the SMPL-X model (.npz)` — the one license-gated asset, not yet staged |
+| `pod_real_e2e.sh`, all 5 real backends | **48 frames in 75 s, exit 0** — RF-DETR · ByteTrack · **PnLCalib** · **SMPLest-X-H** · **WASB** → 16 gates → `smplx_npz`. Fakes left: env, avatar, observe, viewsynth, motion_prior (fake on the pod too) |
+| **Peak VRAM, full chain** | **3930 MiB = 24 % of the 16 GB** (69 samples @1 s). 8-frame run peaked 3186 MiB. Reconstruction has ~12 GB of headroom |
+| Detect-only path | peak 592 MiB / 0–1 % util — CPU-bound, exactly as `m1-status-and-plan.md:439` says of the pod |
 
-**Unproven:** nothing heavy has run there yet. `calibrate`/`pose`/`ball` are still on fakes
-because the ~14 GB of weights are not staged, so **16 GB VRAM is untested against SMPLest-X-H and
-SeedVR2** (3B fp16, `batch_size=33` @720p — the likeliest thing not to fit). Wan2.1-VACE is 1.3B
-with `enable_model_cpu_offload()`, so it is the safer half of the tail.
+**So reconstruction is settled: 16 GB is not a constraint for it.** Still unproven is the
+**generative tail** — SeedVR2 (3B fp16, `batch_size=33` @720p) is the likeliest thing not to fit;
+Wan2.1-VACE is 1.3B with `enable_model_cpu_offload()` and should be the safer half.
 
-**Transfer rule of thumb:** laptop→box is **0.11 MB/s**, box→internet is **3.74 MB/s** (34×).
-Never push weights from the laptop — have the box pull them. Code comes from GitHub (the repo is
-public; the tracked tree is 5.5 MB). Only `SMPLX_NEUTRAL.npz` (109 MB) has to be pushed by hand.
+**Container invariant: mount the volume AT `/workspace`.** The repo's scripts and the three model
+backends carry baked-in `/workspace` defaults — `stage_wasb_weight.sh` ignores `PITCH3D_VOL`
+entirely and writes there, so under `--rm` its weight vanished with the container. Mounting to the
+name they already expect removes that whole class of failure.
+
+**SMPLest-X needs all three genders.** `human_models.py:20-32` builds neutral+male+female layers
+and reads `SMPLX_to_J14.pkl`, `MANO_SMPLX_vertex_ids.pkl`, `SMPL-X__FLAME_vertex_ids.npy` **from
+`smplx/`, not `aux/`**. A neutral-only stage fails at POSE, four stages in.
+
+**Transfer rule of thumb:** laptop→box is **0.11 MB/s**, box→internet is **3.74 MB/s** (34×) — and
+the box's link **resets about every 250 MB**, so any large fetch must be resumable.
+`huggingface_hub.snapshot_download` restarts from zero and never finished the 8.2 GB checkpoint;
+`curl -C - --speed-limit 20000 --speed-time 45` did, across 34 resets. Code comes from GitHub (the
+repo is public; the tracked tree is 5.5 MB). Only the SMPL-X `.npz` set (326 MB) must be pushed by
+hand — it is the one asset with no token download.
+
+Staging is reproduced by `docker/stage_weights.sh`; the `_slim` checkpoint it derives is 2.75 GB
+against the shipped 8.25 GB (the rest is optimizer state — `scripts/smplestx_occlusion.py:46`).
 
 ## 6. Key references
 
