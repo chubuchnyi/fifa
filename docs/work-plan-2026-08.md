@@ -176,5 +176,50 @@ Two things fell out on the way that are worth their own line:
 * A silent `None` team is not cosmetic: `StitchConfig.require_same_team` treats `None` as a
   **wildcard**, so every one of those 23 subjects is stitchable to anyone.
 
-*In flight: a 355-frame local run on the same `vert_crop.mp4` to catch the id divergence in a
-debuggable place.*
+### W9 — WorldPose GT constants → **two of our four constants are wrong, in opposite directions**
+
+`scripts/worldpose_constants.py`, run over all **89 clips** of WorldPose (1080p 50 Hz World Cup
+broadcast, up to 22 players each): **2.4 M frame-to-frame root samples over 152 392 frames**, and
+**3.8 M player-pairs**. Ground truth for our exact problem, on CPU, with no video — the FIFA gate
+covers the footage, not the poses. Extracted from the 7z that had been sitting on disk since
+2026-08-07.
+
+| | p50 | p99 | p99.9 | max | our constant | verdict |
+|---|---|---|---|---|---|---|
+| horizontal speed | 2.04 | 7.25 | 8.68 | **9.74 m/s** | 10.5 m/s | **never fires** |
+| horizontal accel, raw | 0.89 | 9.35 | 23.38 | 285.5 m/s² | 8 m/s² | — (jitter) |
+| horizontal accel, 100 ms | 0.92 | **8.35** | 15.21 | 49.7 m/s² | 8 m/s² | **clips real football** |
+| root range, whole clip | **0.23** | 0.97 | 1.13 | 1.52 m | our best scene: 0.234 m | **we are flat** |
+| root rise, 0.5 s window | 0.12 | **0.67** | 0.84 | 0.96 m | "a jump is ~0.4 m" | **we understate it** |
+| nearest neighbour | 1.80 | 10.73 | 23.15 | 36.7 m | twin radius 0.5 m | **validated** |
+
+**1. The speed ceiling is a sanity net, not a gate.** The fastest root in 2.4 M samples of World
+Cup football is **9.74 m/s**; p99.9 is 8.68. Our 10.5 m/s therefore never fires on real motion —
+which is not a bug, but it does mean the gate has never rejected anything and is not evidence of
+anything. A gate that could actually catch a reconstruction error sits near 9.8–10 m/s.
+
+**2. The acceleration ceiling is too tight, and this one costs us.** On a 100 ms average — the
+scale our own poses arrive at, so the fair comparison — real football reaches p99 **8.35 m/s²**.
+Our gate is **8**. It therefore fires on roughly the top 1.5 % of *genuine* accelerations: every
+hard cut, every sprint start. p99.9 is 15.2. Raw 50 Hz double differences peak at 285 m/s², and
+smoothing takes that to 49.7 — so the raw tail is GT jitter and must not be used to set a
+threshold, which is exactly why both rows are printed.
+
+**3. The vertical finding is the strongest one.** A single real player's root moves **0.23 m**
+vertically over a clip at the *median*, and 0.97 m at p99. The largest excursion in an entire
+reconstructed scene of ours is **0.234 m** — one median player. And inside any half-second, a real
+root rises p99 **0.67 m**, max 0.96 m, so the "~0.4 m for a jump" we have been citing is
+conservative by nearly half. W8 was already in the queue on our own numbers; this says how far
+short we are, in GT units.
+
+**4. П4's 0.5 m twin radius is validated as a defect detector.** Two real pelvises come within
+0.5 m in **0.018 %** of player-pairs — 703 of 3.8 M. It happens (2.19 % of frames contain some
+such pair), so the criterion must not be a hard error. But our fan scene reported **32 twin pairs,
+19 with both tracks measured**, which is orders of magnitude above the GT rate. Those are
+reconstruction artefacts, not football.
+
+*Caveat, so the numbers are not over-read:* `transl` is SMPL's root offset, so world pelvis is
+`transl + R·J₀(β)`; ranges and pair distances are therefore accurate to the few-cm spread of J₀
+across players, not exact. Nothing above turns on centimetres.
+
+*Closed 2026-08-07. CPU only, ~3 min, no GPU and no video.*
