@@ -118,10 +118,37 @@ Both correct against the frames. So this is not the 28 px wall, and not k-means.
 colour is the mean HSV of *its members*, so members existed at `_assign_teams` time. Yet **no
 subject carries `B`** and only 4 carry `A`.
 
-That points at one line. `assemble_scene` does `tl = meta.get(track_id)` over
-`result.tracks.tracklets` and falls back to `team_id=None` **and** `role=PLAYER` when the lookup
-misses — and the pod log's `role=player team=None` is both of those defaults together, not two
-measured values. So `result.motions` carries track ids that are not in `result.tracks.tracklets`.
+**4. Root cause, and my step-3 inference was wrong.** I read `role=player team=None` in the pod log
+as *both* defaults of `assemble_scene`'s missing-tracklet branch, and concluded `motions` carried
+ids absent from `tracks.tracklets`. It does not. `role=player` was simply the measured class.
+
+The pod log's own line 8 has it: **`== identity: --identity ON (GTA split + merge)`** — a flag none
+of my local runs passed. Three constructors in `core/orchestration/identity.py` —
+`_split_tracklet`, `_truncate_tracklet`, `_merge_tracklets` — each emit `team_id=None` under the
+comment *"let downstream re-assign on the clean identity"*, and **there is no downstream**:
+`ByteTrackTracker._assign_teams` runs inside the tracker, which is *before* the gate in
+`ReconstructionPipeline.run`. Every tracklet the gate touched lost its team permanently.
+
+Confirmed by exclusion on the same clip and the same 355 frames:
+
+| | subjects | teams |
+|---|---|---|
+| identity gate **off** | 68 | **A 35 / B 33** — every one labelled |
+| identity gate **on** (the pod run) | 27 | **23 with no team at all** |
+
+**Fixed** (`6f4c270`). `_restore_team_labels` re-assigns each blanked tracklet against the ones
+that *kept* a label — nearest centroid, the same cosine metric the split stage uses — rather than
+re-clustering, so the result stays consistent with the `teams` block and with every id the tracker
+already stamped. A split's two halves are re-derived **independently** and may land on different
+teams, which is the whole point of splitting there. With nothing to anchor against it leaves
+`None`: an unlabelled subject beats an invented team (R-6).
+
+And the thing that let this hide for a whole pod run is fixed too — the controller now prints any
+posed subject with no tracklet, because `team_id=None` + `role=PLAYER` were **defaults**
+indistinguishable from measurements in the output.
+
+6 tests, **mutation-checked**: 4 of them fail with the fix disabled and pass with it. Suite
+**1175 passed / 19 skipped**.
 
 Two things fell out on the way that are worth their own line:
 
