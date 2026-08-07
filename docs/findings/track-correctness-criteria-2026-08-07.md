@@ -420,3 +420,50 @@ The rest do not transfer *on this run*, because the stages they read were fake: 
 basis, П4's metric adjacency, П5's vertical test and П7's kit are all vacuous or image-space only.
 **Judging this clip's poses, placement or physics is a pod run** (~25 min, ~$0.3) — SMPLest-X
 hardcodes `.cuda()` and PnLCalib's weights are pod-only, so no amount of local CPU gets there.
+
+
+---
+
+## 9. The fan clip on the pod, for real (2026-08-07)
+
+Two runs on `tn2gfx13mxu5c6`, ~50 min of GPU total (~$0.6). **Real** RF-DETR, ByteTrack, PnLCalib
+and SMPLest-X-H (0.69 B) on `--device cuda`; only env/avatar/observe/viewsynth/motion_prior stayed
+fake. Same input file as the 2026-08-03 run (`/workspace/vert_crop.mp4`, 355 frames), so the only
+deliberate differences are the code and `COHERENCE=1` — without which no `imputed` is written and
+these criteria have nothing to read.
+
+Scenes: `out/vert136/scene.json` (fixes 1-3), `out/vert137/scene.json` (+ fix 4). Logs beside them.
+
+| | 2026-08-03 | fixes 1-3 | + fix 4 |
+|---|---|---|---|
+| root spread X | 3079.7 m | 1050.0 m | **58.4 m** |
+| root spread Y | 3079.7 m | 1002.4 m | **86.4 m** |
+| max speed | 100 416 m/s | 8 482 m/s | **405 m/s** |
+| p99 speed | 2011.7 m/s | 287.1 m/s | **55.3 m/s** |
+| roots > 80 m off centre | 344 (7.5 %) | 268 (2.8 %) | **0** |
+| physics max dev | 6393.35 m | 11.90 m | 11.90 m |
+| teleports marked | 393 | 80 | 79 |
+
+Calibration is identical in all three (202/355 measured, 153 carried) — same input, same solver.
+Every difference above is the code refusing to place what it could not measure.
+
+**Fix 4 was found by the run it was meant to validate, and it refuted the theory fix 1 rested on.**
+After fixes 1-3 the scene was still 1050 m across, and the cause was not carried calibration: 248
+of the 253 off-pitch frames were `interpolated` between just **six measured seeds**, and those six
+had the *highest* calibration confidence in the run (0.546-0.575). Confidence was anti-predictive —
+0 of 1299 frames below 0.5 landed off-pitch, 6 of 1339 above it did. Confidence scores how well the
+homography fits the landmarks it can see; it says nothing about a foot pixel sitting near that
+homography's vanishing line. So the second gate tests the **output**, physically: a footballer
+stands on a football pitch (±25 m, which keeps a keeper behind his line and a throw-in taker).
+
+The leverage is the striking part: the run refused **2** subject-frames on that test, and **268
+off-pitch placements disappeared**. Those two were the anchors — one seeds the interpolation across
+a gap, and `_smooth_path` drags its neighbours out with it.
+
+**What this does not claim.** 405 m/s and a Y spread of 86 m on a 68 m-wide pitch are still wrong;
+a footballer peaks near 10 m/s. The catastrophe is gone and what is left is ordinary monocular
+depth error on a zooming phone — a precision problem, judgeable by eye, not an arithmetic one. And
+the criteria's verdict on the result is honest rather than flattering: **5 tracks `OK`, 22
+`OK_UNMEASURED`** — nobody is a phantom, but 22 of 27 players are held through long stretches the
+pipeline never measured, because 153 of 355 frames have no plane at all. That is the clip's own
+ceiling, not a bug: see the two hard walls in §8.
