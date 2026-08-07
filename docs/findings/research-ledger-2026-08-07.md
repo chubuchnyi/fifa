@@ -117,6 +117,7 @@ The expensive half of the ledger. Each of these looked right on paper.
 | Raising it instead | fewer ids, less churn | the gain is entirely eaten by the kit-split: **26 vs 28** events post-stitch | physics doc |
 | Feeding ByteTrack more detections | the boxes exist, so use them | **26 → 28** events. No | physics doc |
 | Widening the stitch gates | recover merged ids | 36 → 34 ids across the whole sweep | occlusion doc |
+| **Expansion IoU** (Deep-EIoU's geometric core) | inflate boxes so the 6–23 px orphans clear the 0.8 threshold | raw ids 56 → 43, merges 14 → 8, worst seam **25.7 → 9.5 px/f** — but the post-stitch count **stays in a 33–38 band** around the baseline 36. Work moves, identities do not. Past 1.6 it fuses distinct players (1.8 → 21 ids) | `scripts/bench_expansion_iou.py`, [occlusion-stack review §5](occlusion-stack-review-2026-08-07.md) |
 | NMS / duplicate suppression | the structural blocker | duplicates are **~1 %** of detections; ids move at most one; merges go *down* | occlusion doc |
 | Camera→world rotation as the orientation defect | the missing rotation explains it | **68 %/36 % against a raw 63 %/35 %** — noise | open-items |
 | Grounding feet through the rigid fit instead of PnLCalib | better placement | both put **100 %** of 1053 real foot points on the pitch; median disagreement 0.31 m, **unadjudicable** | open-items |
