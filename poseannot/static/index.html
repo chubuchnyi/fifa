@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <title>poseannot</title>
-  <link rel="stylesheet" href="/static/style.css?v=layout6" />
+  <link rel="stylesheet" href="/static/style.css?v=layout8" />
   <script type="importmap">
   {
     "imports": {
@@ -94,6 +94,13 @@
             x-text="overlayMode === '3d' ? 'overlay: 3D' : 'overlay: 2D'"></button>
     <button @click="togglePitch()" :class="{ active: showPitch }"
             title="overlay the measured pitch markings (P)">pitch</button>
+    <!-- One switch for the whole drawn layer. Judging the reconstruction against the video means
+         seeing the video, and un-ticking six toggles one at a time to get there loses the state
+         you had. This restores it on the way back. -->
+    <button @click="overlaysOff = !overlaysOff" :class="{ active: overlaysOff }"
+            :title="overlaysOff ? 'overlays hidden — click or press H to bring them back'
+                                : 'hide every overlay and show the bare frame (H)'"
+            x-text="overlaysOff ? 'overlays: off' : 'overlays: on'"></button>
     <button @click="togglePitchSource()" x-show="showPitch"
             :class="{ active: pitchSource === 'calib' }"
             :title="pitchSource === 'calib'
@@ -245,6 +252,8 @@ badge keeps reading 'one camera'.">layout</button>
   </div>
 
   <!-- Main: video + 2D overlay (all players; active highlighted) -->
+  <div class="gutter gl" @pointerdown="startGutter($event, 'rail')"
+       title="drag to resize the track list"></div>
   <div class="main" :class="{ panning: _panning }"
        @wheel.prevent="onWheel($event)"
        @pointerdown="onPanStart($event)"
@@ -269,12 +278,13 @@ badge keeps reading 'one camera'.">layout</button>
              same explicit px size as the <img> then locks the overlay to it. -->
         <svg viewBox="0 0 1920 1080" x-ref="overlaySvg"
              x-effect="$el.setAttribute('viewBox', '0 0 ' + srcW + ' ' + srcH)"
-             x-show="overlaySvgStr"
+             x-show="overlaySvgStr && !overlaysOff"
              x-html="overlaySvgStr"
              preserveAspectRatio="none"
              :style="`width:${imgSize.w}px;height:${imgSize.h}px`"></svg>
       </div>
     </div>
+    <div class="ovl-off-badge" x-show="overlaysOff" x-cloak>overlays hidden — H to restore</div>
     <!-- Layout-drag HUD (#124). The gesture shipped in #112 works, but blind: the handle you
          grab springs back to its fixed screen spot on release (that is by design — the world
          moved under it, not the handle), so the ONLY evidence a drag did anything is the fit
@@ -533,9 +543,18 @@ white pixels, so it is the honest score of your drag."></span>
   </div>
 
   <!-- Right: 3D pose view (Three.js) -->
+  <div class="gutter gr" @pointerdown="startGutter($event, 'right')"
+       title="drag to resize the right panel"></div>
   <div class="right">
     <div class="hdr">
-      3D pose
+      <!-- Two 3D views answering two questions: this subject's joints, or every body on the
+           pitch. Same panel, because the frame beside it is the evidence for both. -->
+      <div class="seg">
+        <button :class="{ active: rightView === 'pose' }" @click="setRightView('pose')"
+                title="edit the selected subject's joints (pelvis-centred)">3D pose</button>
+        <button :class="{ active: rightView === 'world' }" @click="setRightView('world')"
+                title="every player on the measured pitch at this frame — orbit, pan, zoom">pitch</button>
+      </div>
       <span x-show="selectedTrackId !== null" style="color: var(--fg-dim)">
         · t<span x-text="selectedTrackId"></span> · frame <span x-text="frame+1"></span>
       </span>
@@ -550,7 +569,7 @@ white pixels, so it is the honest score of your drag."></span>
     <!-- Root override: whole-subject orientation / position nudges. Each click
          appends a CONSTANT_OFFSET correction (delta), FK re-runs for this
          subject, the 3D + 2D overlays refresh live. -->
-    <div class="root-ovr" x-show="selectedTrackId !== null" x-cloak>
+    <div class="root-ovr" x-show="rightView === 'pose' && selectedTrackId !== null" x-cloak>
       <span class="ro-lbl" title="rotate whole body — axis-angle offset (SMPL-X axes); watch the 3D view">orient ±15°</span>
       <button class="ro-btn" @click="nudgeRoot('root_orientation', [-0.2618,0,0])">X−</button>
       <button class="ro-btn" @click="nudgeRoot('root_orientation', [0.2618,0,0])">X+</button>
@@ -573,7 +592,25 @@ white pixels, so it is the honest score of your drag."></span>
       <button class="ro-btn" @click="undoRootEdit('root_translation')"
               title="undo last move nudge">↺</button>
     </div>
-    <div id="three-canvas" x-ref="threeCanvas"></div>
+    <div id="three-canvas" x-ref="threeCanvas" x-show="rightView === 'pose'"></div>
+    <div class="world-wrap" x-show="rightView === 'world'" x-cloak>
+      <div class="world-bar">
+        <label title="draw each track's id above its head"><input type="checkbox"
+               x-model="worldOpts.ids" @change="syncWorld()" /> ids</label>
+        <label title="pelvis path up to this frame — did he walk there or teleport?"><input
+               type="checkbox" x-model="worldOpts.trails" @change="syncWorld()" /> trails</label>
+        <label title="ghost bodies whose pose was filled in rather than measured (R-6)"><input
+               type="checkbox" x-model="worldOpts.prov" @change="syncWorld()" /> imputed</label>
+        <span class="spacer" style="flex:1"></span>
+        <button @click="worldFocus()" :disabled="selectedTrackId === null"
+                title="centre the orbit on the selected player, keeping the angle">follow</button>
+        <button @click="_worldView && _worldView.frameAll()" title="fit every body (F)">fit</button>
+        <button @click="_worldView && _worldView.resetView()" title="back to the default camera">reset</button>
+      </div>
+      <div id="world-canvas" x-ref="worldCanvas"></div>
+      <div class="world-stat" :class="{ bad: worldErr }"
+           x-text="worldErr || worldStat || 'loading…'"></div>
+    </div>
   </div>
 
   <!-- Diagnostics overlay — turns a single screenshot into ground-truth about
@@ -614,6 +651,10 @@ white pixels, so it is the honest score of your drag."></span>
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+// The whole-pitch view, shared with /world. Absolute path with a cache-bust token: this file is
+// served from the route /app, so "./world_view.js" would resolve to /world_view.js and 404 —
+// and an un-versioned module gets cached exactly like style.css does.
+import { createWorldView } from "/static/world_view.js?v=1";
 import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran
@@ -952,6 +993,12 @@ Alpine.data("poseAnnot", () => ({
     activeMesh2d: null,       // [[u,v,depth]|null,...] projected mesh of active subj
     meshColor: "#6bb5ff",     // matches the Three.js mesh colour (0x6bb5ff)
     showAll: false,           // 3D: show all players vs active only
+    overlaysOff: false,       // hide every drawn layer and show the bare frame (H)
+    rightView: "pose",        // right panel: "pose" (this subject) | "world" (whole pitch)
+    worldStat: "",
+    worldErr: "",             // shown in the pitch panel's status line, not swallowed
+    worldOpts: { ids: false, trails: false, prov: true },
+    _worldView: null,
     // Overlay pitch reference + manual camera nudge (calibration is approximate).
     showPitch: true,          // draw the measured pitch markings under the poses
     pitch2d: [],              // [[u,v],...] projected pitch points (current cam)
@@ -1133,6 +1180,7 @@ Alpine.data("poseAnnot", () => ({
       if (this._inited) return;   // idempotency guard against any double-invoke
       this._inited = true;
       this.beginBusy("loading clip — building poses…");
+      this.restorePanes();
       initThree(this);
       this.diag.three = threeState ? "inited" : "FAILED";
       // Clear `busy` too: a long op that died on a 401 would otherwise leave its spinner up
@@ -1250,6 +1298,7 @@ Alpine.data("poseAnnot", () => ({
         if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
         if (e.key === "m" || e.key === "M") { this.toggleOverlayMode(); return; }
         if (e.key === "p" || e.key === "P") { this.togglePitch(); return; }
+        if (e.key === "h" || e.key === "H") { this.overlaysOff = !this.overlaysOff; return; }
         if (e.key === "c" || e.key === "C") { this.showCamAdjust = !this.showCamAdjust; return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
@@ -1264,6 +1313,7 @@ Alpine.data("poseAnnot", () => ({
       await this.refreshThree();       // active subj 3D joints+mesh (also feeds mesh overlay)
       await this.refreshOverlay3d();   // fetch pitch + all skeletons 3D once → project in JS
       if (this.activeStageLayer() === "ball") await this.refreshStageBall();  // ball marker follows the frame
+      if (this._worldView && this.rightView === "world") await this._worldView.show(n);
     },
 
     // An <img> reports only "it failed", never the status, so re-request the same URL through the
@@ -2140,6 +2190,100 @@ Alpine.data("poseAnnot", () => ({
       this.selectedJoint = null;
       await this.refreshThree();   // new subject's 3D joints + mesh (feeds mesh overlay)
       this.projectOverlay();       // re-project: active highlight + mesh follow the new subject
+      if (this._worldView) { this.syncWorld(); }   // the pitch view highlights the same player
+    },
+
+    // ── right panel: the two 3D views ──────────────────────────────────────
+    async setRightView(v) {
+      this.rightView = v;
+      if (v !== "world") return;
+      await this.ensureWorldView();
+    },
+
+    // Built on first use, not at init: the panel is display:none until then, so the WebGL canvas
+    // would size itself 0x0 and the pitch would come up unframed.
+    async ensureWorldView() {
+      if (this._worldView) {
+        this._worldView.resize();
+        await this._worldView.show(this.frame);
+        return;
+      }
+      try {
+        this._worldView = createWorldView({
+          mount: this.$refs.worldCanvas,
+          THREE, OrbitControls,
+          onStatus: (m) => { this.worldStat = m; },
+          onError: (m) => { this.worldErr = m || ""; },
+          // Clicking a body here selects it everywhere: the 2D overlay highlights it, the joint
+          // editor loads it. That is the whole reason for putting this view in the app window.
+          onPick: (tid) => { if (tid !== this.selectedTrackId) this.selectTrack(tid); },
+        });
+        this.syncWorld();
+        await this._worldView.init();
+        await this._worldView.show(this.frame);
+        // Frame the players, not the pitch. The component's default camera is set for the wide
+        // standalone page; in a ~300px panel it puts the whole 105 m pitch on screen and the
+        // bodies come out as specks against the far touchline.
+        this._worldView.frameAll();
+      } catch (e) {
+        this.worldErr = "pitch view failed: " + (e.message || e);
+        this._worldView = null;
+      }
+    },
+
+    syncWorld() {
+      if (!this._worldView) return;
+      this._worldView.setOpts({ ...this.worldOpts, highlight: this.selectedTrackId });
+      this._worldView.show(this.frame);
+    },
+
+    worldFocus() {
+      if (this._worldView && this.selectedTrackId !== null) {
+        this._worldView.focusTrack(this.selectedTrackId);
+      }
+    },
+
+    // ── draggable column widths ────────────────────────────────────────────
+    // Written straight onto the shell's CSS vars: the grid re-flows, and the two 3D panels each
+    // already carry a ResizeObserver, so their canvases re-fit without being told.
+    startGutter(ev, which) {
+      ev.preventDefault();
+      const shell = ev.target.closest(".app-shell");
+      const g = ev.target;
+      g.classList.add("drag");
+      g.setPointerCapture?.(ev.pointerId);
+      const move = (e) => {
+        const box = shell.getBoundingClientRect();
+        if (which === "rail") {
+          const w = Math.min(Math.max(44, e.clientX - box.left), box.width * 0.4);
+          shell.style.setProperty("--rail-w", w + "px");
+        } else {
+          const w = Math.min(Math.max(240, box.right - e.clientX), box.width * 0.75);
+          shell.style.setProperty("--right-w", w + "px");
+        }
+      };
+      const up = () => {
+        g.classList.remove("drag");
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", up);
+        try {
+          localStorage.setItem("poseannot.panes", JSON.stringify({
+            rail: shell.style.getPropertyValue("--rail-w"),
+            right: shell.style.getPropertyValue("--right-w"),
+          }));
+        } catch { /* private mode — the layout just will not persist */ }
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+    },
+
+    restorePanes() {
+      try {
+        const s = JSON.parse(localStorage.getItem("poseannot.panes") || "{}");
+        const shell = document.querySelector(".app-shell");
+        if (s.rail) shell.style.setProperty("--rail-w", s.rail);
+        if (s.right) shell.style.setProperty("--right-w", s.right);
+      } catch { /* nothing stored, or unreadable — the CSS defaults stand */ }
     },
 
     selectJoint(jointIdx) {

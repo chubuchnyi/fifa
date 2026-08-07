@@ -39,15 +39,27 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .app-shell {
   display: grid;
   grid-template-rows: auto 46px 1fr 60px;
-  grid-template-columns: 68px minmax(0, 1fr) minmax(280px, 29vw);
+  /* Two 6px drag gutters carry the column widths. They are real grid tracks rather than absolutely
+     positioned handles because .main owns a pan gesture on pointerdown — a handle living inside it
+     would start a pan on every resize drag. The widths are CSS vars so the drag is one style
+     write, and they survive a reload through localStorage. */
+  grid-template-columns:
+    var(--rail-w, 68px) 6px minmax(0, 1fr) 6px var(--right-w, 29vw);
   grid-template-areas:
-    "toolbar   toolbar   toolbar"
-    "stagerail stagerail stagerail"
-    "sidebar   main      right"
-    "timeline  timeline  timeline";
+    "toolbar   toolbar   toolbar   toolbar   toolbar"
+    "stagerail stagerail stagerail stagerail stagerail"
+    "sidebar   gutter-l  main      gutter-r  right"
+    "timeline  timeline  timeline  timeline  timeline";
   height: 100vh;
   overflow: hidden;   /* lock controls to the viewport; panels scroll internally */
 }
+
+.gutter { background: var(--border); cursor: col-resize; position: relative; }
+.gutter:hover, .gutter.drag { background: var(--accent); }
+.gutter.gl { grid-area: gutter-l; }
+.gutter.gr { grid-area: gutter-r; }
+/* A 6px target is thin for the wrist; widen the hit area without widening the paint. */
+.gutter::after { content: ""; position: absolute; inset: 0 -4px; }
 
 .toolbar {
   grid-area: toolbar; background: var(--bg-toolbar); border-bottom: 1px solid var(--border);
@@ -266,7 +278,7 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .upload-panel .upl-hint { color: var(--fg-dim); font-size: 0.8em; line-height: 1.35; }
 
 /* Column is 68 px; a default scrollbar eats 15 of them and pushes the frame count out of the row. */
-.sidebar { grid-area: sidebar; background: var(--bg-panel); border-right: 1px solid var(--border); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; min-height: 0; min-width: 0; }
+.sidebar { grid-area: sidebar; background: var(--bg-panel); overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; min-height: 0; min-width: 0; }
 .sidebar .section-hdr { padding: 0.6rem 0.4rem; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0; color: var(--fg-dim); }
 .sidebar .track { padding: 0.4rem 0.25rem; cursor: pointer; display: flex; align-items: center; gap: 0.2rem; font-size: 0.85em; }
 .sidebar .track:hover { background: rgba(107, 181, 255, 0.08); }
@@ -359,8 +371,8 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .cam-panel.layout-panel .cam-hd { color: #f472b6; }
 .cam-panel.layout-panel .cam-row { grid-template-columns: 52px 1fr 56px; }
 
-.right { grid-area: right; background: var(--bg-panel); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.right .hdr { padding: 0.5rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem; }
+.right { grid-area: right; background: var(--bg-panel); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.right .hdr { padding: 0.5rem 0.8rem; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--fg-dim); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .right .hdr .spacer { margin-left: auto; }
 .right .hdr button {
   background: none; border: 1px solid var(--border); color: var(--fg);
@@ -375,6 +387,47 @@ body.login { display: flex; align-items: center; justify-content: center; }
 .right .root-ovr .ro-btn { background: var(--bg); border: 1px solid var(--border); color: var(--fg); font-size: 0.72rem; padding: 0.12rem 0.4rem; border-radius: 3px; cursor: pointer; font-variant-numeric: tabular-nums; }
 .right .root-ovr .ro-btn:hover { border-color: var(--accent); color: var(--accent); }
 .right #three-canvas { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+
+/* ── right-panel view switch: single-subject joint editor ⇄ whole-pitch scrubber ── */
+/* flex:0 0 auto — the header is a flex row that already carries undo/export/show, and at a 300px
+   panel width the switch was the thing that lost, crushed to a 6px sliver. */
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 4px;
+       overflow: hidden; flex: 0 0 auto; }
+.seg button {
+  background: transparent; color: var(--fg-dim); border: 0; padding: 2px 9px;
+  font: inherit; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;
+  cursor: pointer; white-space: nowrap;
+}
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button:hover { color: var(--fg); }
+.seg button.active { background: var(--accent); color: #10141a; }
+
+.world-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.world-bar {
+  display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap;
+  padding: 0.3rem 0.7rem; border-bottom: 1px solid var(--border);
+  background: var(--bg-toolbar); font-size: 0.74rem; color: var(--fg-dim);
+}
+.world-bar label { display: flex; align-items: center; gap: 0.2rem; cursor: pointer; }
+.world-bar button {
+  background: #2f333a; color: var(--fg); border: 1px solid var(--border);
+  border-radius: 3px; padding: 1px 7px; font: inherit; font-size: 0.72rem; cursor: pointer;
+}
+.world-bar button:hover { background: #383d45; }
+#world-canvas { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+.world-stat {
+  padding: 0.28rem 0.7rem; font-size: 0.72rem; color: var(--fg-dim);
+  border-top: 1px solid var(--border); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.world-stat.bad { color: #ff8f8f; }
+/* Overlays off is a state you can forget you are in, and then misread a clean frame as a
+   reconstruction that draws nothing. Say so, on the frame, in the colour of a warning. */
+.ovl-off-badge {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+  background: rgba(255, 177, 79, 0.15); border: 1px solid var(--edited); color: var(--edited);
+  padding: 2px 10px; border-radius: 3px; font-size: 0.75rem; pointer-events: none; z-index: 4;
+}
 
 .timeline {
   grid-area: timeline; background: var(--bg-toolbar); border-top: 1px solid var(--border);
