@@ -51,7 +51,7 @@
   <div id="view">
     <div id="hud">
       <div><b>pitch view</b> <span class="muted">— drag: orbit · right/middle-drag or WASD: pan ·
-        wheel: zoom · click a player: orbit around him · F: frame all</span></div>
+        wheel: zoom · double-click a player: orbit around him · F: frame all</span></div>
       <div class="muted"><span id="stat">loading…</span></div>
       <div style="color:#ff3ea5"><span id="stat2"></span></div>
     </div>
@@ -83,7 +83,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 // Absolute, not "./": this page is served from the route /world, so a relative specifier would
 // resolve to /world_view.js and 404. The ?v= token is the same cache-bust discipline style.css
 // needs — bump it on every edit to world_view.js or the browser verifies the old module.
-import { createWorldView } from "/static/world_view.js?v=2";
+import { createWorldView } from "/static/world_view.js?v=3";
 
 const $ = (id) => document.getElementById(id);
 const err = (m) => { $("err").textContent = m || ""; };

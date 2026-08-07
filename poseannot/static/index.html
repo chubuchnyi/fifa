@@ -553,7 +553,7 @@ white pixels, so it is the honest score of your drag."></span>
         <button :class="{ active: rightView === 'pose' }" @click="setRightView('pose')"
                 title="edit the selected subject's joints (pelvis-centred)">3D pose</button>
         <button :class="{ active: rightView === 'world' }" @click="setRightView('world')"
-                title="every player on the measured pitch at this frame — orbit, pan, zoom">pitch</button>
+                title="every player on the measured pitch at this frame — drag orbits, right-drag or WASD pans, click selects, double-click re-centres">pitch</button>
       </div>
       <span x-show="selectedTrackId !== null" style="color: var(--fg-dim)">
         · t<span x-text="selectedTrackId"></span> · frame <span x-text="frame+1"></span>
@@ -654,7 +654,7 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 // The whole-pitch view, shared with /world. Absolute path with a cache-bust token: this file is
 // served from the route /app, so "./world_view.js" would resolve to /world_view.js and 404 —
 // and an un-versioned module gets cached exactly like style.css does.
-import { createWorldView } from "/static/world_view.js?v=2";
+import { createWorldView } from "/static/world_view.js?v=3";
 import Alpine from "alpinejs";
 
 // Bump on every UI change so a screenshot proves which code the browser ran

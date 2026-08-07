@@ -364,12 +364,11 @@ export function createWorldView(cfg) {
   mount.addEventListener("blur", clearHeld);
   addEventListener("blur", clearHeld);
 
-  // Click a skeleton to orbit around HIM. Rotating about the pitch centre is useless when the
-  // thing under examination is one player in the box.
+  // Picking a player and moving the camera are separate gestures on purpose: selecting a body is
+  // something you do constantly, and re-centring on every one of those clicks throws away the
+  // angle you just spent seconds finding. Single click selects, double click re-centres.
   const ray = new THREE.Raycaster();
-  function onPointerDown(ev) {
-    mount.focus({ preventScroll: true });
-    if (ev.button !== 0) return;
+  function hitAt(ev) {
     const r = renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((ev.clientX - r.left) / r.width) * 2 - 1,
@@ -377,13 +376,31 @@ export function createWorldView(cfg) {
     );
     ray.setFromCamera(ndc, camera);
     const hit = ray.intersectObjects([poseGroup, poseGroupB], true)[0];
-    if (!hit) return;
+    if (!hit) return null;
     let o = hit.object, tid;
     while (o && tid === undefined) { tid = o.userData?.track_id; o = o.parent; }
-    centreOn(hit.point.toArray());
-    if (tid !== undefined && onPick) onPick(tid);
+    return { point: hit.point.toArray(), track_id: tid };
   }
+
+  function onPointerDown(ev) {
+    mount.focus({ preventScroll: true });
+    if (ev.button !== 0) return;
+    const h = hitAt(ev);
+    if (h && h.track_id !== undefined && onPick) onPick(h.track_id);
+  }
+
+  // Centre on the body, not on the exact triangle the ray struck: double-clicking a hand should
+  // pivot around the player, not around his fingertips.
+  function onDoubleClick(ev) {
+    ev.preventDefault();
+    const h = hitAt(ev);
+    if (!h) return;
+    if (h.track_id !== undefined && focusTrack(h.track_id)) return;
+    centreOn(h.point);
+  }
+
   renderer.domElement.addEventListener("pointerdown", onPointerDown);
+  renderer.domElement.addEventListener("dblclick", onDoubleClick);
 
   const ro = new ResizeObserver(resize);
   ro.observe(mount);
@@ -425,6 +442,7 @@ export function createWorldView(cfg) {
       ro.disconnect();
       removeEventListener("blur", clearHeld);
       renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      renderer.domElement.removeEventListener("dblclick", onDoubleClick);
       for (const g of [pitchGroup, poseGroup, poseGroupB, trailGroup, labelGroup]) clearGroup(g);
       jointGeo.dispose(); jointGeoB.dispose(); jointGeoHi.dispose();
       renderer.dispose();
