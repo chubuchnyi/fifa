@@ -176,6 +176,76 @@ Two things fell out on the way that are worth their own line:
 * A silent `None` team is not cosmetic: `StitchConfig.require_same_team` treats `None` as a
   **wildcard**, so every one of those 23 subjects is stitchable to anyone.
 
+### W3 — stitch on the handover criterion → **refuted where the plan put it; the criterion does not survive being moved pre-pose**
+
+The plan said П3 "needs no new model: the signal is already in `provenance` plus the roots". That
+is true *after* pose and false *before* it, and the difference is measurable.
+
+`scripts/bench_handover_stitch.py` replays the pipeline's own tracker over cached detections
+(60 frames of the broadcast clip, `kit_split` ON as the wiring ships it), un-projects every
+tracklet endpoint through the **measured** camera so the endpoint distance is in metres rather
+than extrapolated pixels, and then reads each fragment's shirt off the video. No GPU, no pose.
+
+**1. Why the shipped stitcher misses the pairs the eye named.** Three different reasons, and only
+one of them is a threshold:
+
+| pair | gap | extrapolated px | on the pitch | rejected by |
+|---|---|---|---|---|
+| t3 → t66 | +16 | 70.1 (budget 63.6) | — | gap **and** size 1.65 **and** centre — all three by <10 % |
+| t10 → t77 | −14 | 329 (budget 74) | — | 14 overlapping measured frames |
+| t15 → t71 | +28 | 240.8 (budget 71) | **1.65 m** | gap 28 > 12, centre 241 px > 71 px |
+
+The last row is the mechanism. t15 and t71 stand **1.65 m apart on the grass**, which is a
+handover — but the stitcher does not compare positions, it compares *a constant-velocity
+extrapolation* of the head against the tail. Over a 28-frame gap a footballer does not keep his
+velocity, so the prediction lands 240 px away and the gate fires. **The 2D stitcher is
+structurally unable to span long gaps**, and no threshold fixes that.
+
+**2. So run П3 pre-pose instead — and it is wrong 4 times in 6.** Endpoint distance in metres,
+|gap| ≤ 14, ≤ 4 simultaneous measured frames, greedy nearest-first assignment: exactly the rule
+that scores 20/21 against the eye post-pose. Pre-pose it accepts six merges, and the video pixels
+say **four of them join two different shirts**:
+
+| merge | distance | frame gap | head kit | tail kit | |
+|---|---|---|---|---|---|
+| t15 → t78 | 0.15 m | +1 | `BBBB…BB` | `??YYYYYY` | **clash** |
+| t9 → t77 | 0.15 m | +1 | 46× `B` | 14× `Y` | **clash** |
+| t17 → t79 | 0.26 m | +1 | `…?YY?YYY` | `?BBBB???BB…` | **clash** |
+| t3 → t76 | 0.48 m | +1 | `…?BBBBBB` | 24× `Y` | **clash** |
+| t73 → t74 | 0.04 m | +1 | `?Y???` | `?????` | unclear |
+| t2 → t72 | 0.07 m | +1 | mostly `?` | `????` | unclear |
+
+Not one same-kit merge among the six. These are **not** the occlusion artefact `track_quality.py`
+warns about — t78 reads yellow on 6 clean frames, t77 on all 14, t76 on all 24.
+
+**Why it works after pose and not before.** Post-pose the scene holds 24 long subjects; pre-pose
+the tracker hands over **32** tracklets, eight of them 4–13-frame fragments produced by the #132
+kit split. Nearest-endpoint in a crowd of fragments picks whoever is closest, and at 0.15 m the
+closest fragment is usually the man the id *jumped to*, not the man it left. The shipped
+stitcher's extrapolation gate — the thing that makes it miss long gaps — is also what stops it
+making these four mistakes. It is more accurate than П3-pre-pose, not less.
+
+The clearest single case: **t77 (yellow, f46–59) is claimed by t9 (blue) at 0.15 m and by t5
+(yellow) at 0.42 m.** The nearest-first assignment takes t9 and is wrong; the shipped stitcher
+merges `[5, 77]` and is right.
+
+**Verdict: do not relax the 2D stitcher on the handover criterion.** The item moves to where its
+own evidence is — post-pose, on the scene, which is also where W4 lives. W3 and W4 are one change.
+
+**Two things this turned up that were on no board.**
+
+* **`team_id` is wrong on t3, and by a wide margin.** Its shirt reads
+  `YYYYYY?BBBB?YYYYYYY???YYYYYYY?BBBBBB` — **19 yellow against 10 blue** — and it is labelled
+  **B**. The user flagged exactly this doubt («я просто брал цвет игроков в реконструкции за
+  истину, но похоже, что там тоже ошибки»); this is a measured instance. `team_id` is a k-means
+  label over *one* colour sample per track, so a track that changes human mid-way gets a majority
+  vote it never took. Feeds W10.
+* **The #132 kit split cuts in the wrong place.** t17 reads blue for f0–22 and then **yellow from
+  f26 to f34** — the id has jumped to a yellow player — yet the split cut it at **f35**, leaving
+  9 contaminated frames inside a track labelled B. The split fires; it just fires late.
+
+*Closed 2026-08-07 as measured-and-refuted. CPU only, no GPU.*
+
 ### W9 — WorldPose GT constants → **two of our four constants are wrong, in opposite directions**
 
 `scripts/worldpose_constants.py`, run over all **89 clips** of WorldPose (1080p 50 Hz World Cup
