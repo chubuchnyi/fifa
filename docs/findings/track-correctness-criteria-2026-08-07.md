@@ -335,9 +335,36 @@ the pitch occupying the bottom third. Nothing like the reference broadcast. Reco
 | **pose (SMPLest-X-H)** | **no** | `backends/SMPLest-X/models/SMPLest_X.py:25` hardcodes `.cuda()` and this torch is CPU-only. Weights and checkout are both present; **the estimator itself needs the pod.** |
 | **calibrate (PnLCalib)** | **no** | weights are pod-only, so the fake calibrator ran (its signature: confidence a constant 0.950) |
 
-So this run tests **association**, which is where every defect in §1 lives — and not articulation
-or metric placement. 60 frames of detect+track+coherence on CPU is **~70 s**, so it is cheap enough
-to iterate on.
+**CORRECTED 2026-08-07, after the user asked "это трушный прогон? без оговорок?"** — the honest
+answer is **no**, and the first version of this section was not explicit enough about what that
+costs. Read the fake adapters, do not infer from the scene's shape:
+
+* `FakePoseEstimator` writes `body_pose = np.zeros((T, 21, 3))` — **a T-pose on every frame of
+  every subject**. Verified on the export: max |joint angle| = **0.0000 rad**. So on this clip
+  measured and imputed frames are indistinguishable by limb motion, which is П2's entire basis,
+  and the "frozen mannequin" result is *vacuous here* (it remains measured on the reference clip,
+  where max |angle| = 1.96 rad over 303 distinct root heights).
+* `FakeFieldCalibrator` is a **plain affine scale of the image** — `world = (pixel − centre) ×
+  30 m / width`, one static homography, **no perspective at all**. It takes the root from the real
+  detection box, so relative image position survives; depth does not exist.
+* Root Z is the constant `_PELVIS_HEIGHT_M = 0.92`. The whole scene has **2 distinct Z values**.
+
+What that means for the numbers below, item by item:
+
+| claim | survives? |
+|---|---|
+| track lifetimes, births, deaths, the id churn at f31–38 | **yes** — RF-DETR + ByteTrack on real pixels |
+| the shot-guard histogram numbers | **yes** — computed from the video directly |
+| frame 38 being a whip-pan, not a cut | **yes** — judged on the frames |
+| the three holes in the criteria | **yes** — properties of the tooling and the defaults |
+| **"handover 2.0–4.5 m"** | **no** — that is 72–162 **pixels** × 0.0278. Image-space adjacency, not pitch metres |
+| **П5, "no vertical DOF on this clip"** | **no** — Z is a hardcoded constant in the adapter |
+| **П2's frozen-mannequin basis on this clip** | **no** — every frame is a T-pose |
+| **П4 twins on this clip** | image-space adjacency only |
+
+`track_quality.py` now prints all of this as a banner when it detects an all-zero `body_pose`, so
+the next reader does not have to go and read the fake adapters to find out. 60 frames of
+detect+track+coherence on CPU is **~70 s**, so the association half is cheap to iterate on.
 
 ### Three holes in the criteria, found by running them somewhere new
 
@@ -373,15 +400,23 @@ Run with the guard off, the whip shows up as exactly what it is:
 * tracks **t1–t5, t9, t16, t17** all die at frames 31–34
 * tracks **t60, t63, t71, t72, t73, t75, t76** are all born at frames 36–38
 * the handover criterion pairs them: `t16→t60` `t4→t73` `t5→t76` `t9→t63` `t2→t71` `t3→t75`, every
-  gap +4…+8 frames, every distance 2.0–4.5 m — **six identities broken by one camera movement**,
-  plus `t15→t18` (0.20 m) and `t17→t72` (0.42 m) which are ordinary crossings
+  gap **+4…+8 frames** and every handover within **72–162 px** of image-space adjacency (printed as
+  "2.0–4.5 m", which on a fake calibration it is not) — **six identities broken by one camera
+  movement**, plus `t15→t18` and `t17→t72` which are ordinary crossings
+
+The frame numbers are the load-bearing part and they are real. The distances only say the two
+boxes were adjacent on screen.
 
 29 subjects for ~20 players on screen. So on a phone clip the dominant failure is not occlusion at
 all — it is **one violent camera move**, and the criteria localise it to the frame.
 
 ### Verdict
 
-The признаки transfer to a clip with a different camera, format, stadium and pair of kits, and on
-it they immediately name the dominant defect. What they cannot do without a pod run is judge
-**pose**: articulation on this clip is fake. If the eye needs to judge the poses on this clip, that
-is a ~25 min / ~$0.3 pod run, not a local one.
+The **association** признаки — П1 shape, П3 handover, П6 prefix — transfer to a clip with a
+different camera, format, stadium and pair of kits, and on it they immediately name the dominant
+defect. They do so from track lifetimes, which are real here.
+
+The rest do not transfer *on this run*, because the stages they read were fake: П2's articulation
+basis, П4's metric adjacency, П5's vertical test and П7's kit are all vacuous or image-space only.
+**Judging this clip's poses, placement or physics is a pod run** (~25 min, ~$0.3) — SMPLest-X
+hardcodes `.cuda()` and PnLCalib's weights are pod-only, so no amount of local CPU gets there.

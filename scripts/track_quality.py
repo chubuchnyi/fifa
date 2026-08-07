@@ -421,6 +421,31 @@ def main() -> None:
     verdicts = {tid: classify(tid, tr, project, args.min_run, args.off_frac)
                 for tid, tr in sorted(tracks.items())}
 
+    # Which stages were REAL in the run that produced this scene? A fakes-backed run exports a
+    # scene of exactly the same shape as a real one, and every number below then looks like a
+    # measurement. Asked "is this a truthful run?" on 2026-08-07 I had to go and read the fake
+    # adapters to answer — so the script answers it now, unprompted.
+    #   FakePoseEstimator  : body_pose = zeros((T, 21, 3)) — a T-pose on every frame
+    #   FakeFieldCalibrator: world = (pixel - centre) x 30 m / width — affine, NO perspective
+    body_max = max(float(np.abs(tr['body']).max()) for tr in tracks.values())
+    z_vals = len({round(float(z), 6) for tr in tracks.values() for z in tr['transl'][:, 2]})
+    if body_max < 1e-9:
+        print('\n  !! FAKE POSE. body_pose is exactly zero on every joint of every frame: this run '
+              'used\n     FakePoseEstimator (a T-pose), so ANY articulation number below is '
+              'vacuous — measured\n     and imputed frames are indistinguishable by limb motion, '
+              'which is П2\'s whole basis.')
+    if z_vals <= 2:
+        print('  !! NO VERTICAL DOF BY CONSTRUCTION. Root Z takes '
+              f'{z_vals} value(s) in the whole scene — it is\n     a constant in the adapter, not '
+              'a measurement. The vertical section below proves nothing.')
+    if body_max < 1e-9:
+        print('  !! DISTANCES BELOW ARE NOT METRES. FakePoseEstimator takes its root from the real '
+              'detection\n     box but un-projects it through FakeFieldCalibrator, which is a '
+              'plain affine scale of the\n     image (30 m across the frame width, no perspective '
+              'at all). Read them as image-space\n     adjacency: on a 1080-wide clip 1 m here is '
+              '36 px. Track lifetimes, births and deaths\n     are still real — they come from the '
+              'real detector and tracker.')
+
     # The criteria read `imputed`, and `imputed` only exists if the run had --coherence (or
     # --physics). Without it a lost subject is simply dropped at his last measured frame — the
     # R-6 blink-out — and every track then reads OK because it is measured over its own short
