@@ -1,0 +1,36 @@
+# pitch3d — generative-tail container (Wan2.1-VACE v2v + SeedVR2 upscale).
+#
+# Separate from docker/Dockerfile on purpose: on the pod these live in their own venvs
+# because the torch pins conflict (scripts/pod_v2v.sh, scripts/pod_seedvr2.sh). Here they
+# get their own image instead, which is the same separation with less rope.
+#
+# The pod's seedvr2 venv installs a cu128 torch because its GPU is Blackwell (sm_120).
+# An RTX 4080 is Ada (sm_89), so the cu124 pair the base image already ships is correct
+# and we hold it — SeedVR2's requirements.txt lists bare `torch`/`torchvision`, which
+# would otherwise resolve to whatever is newest and replace a working CUDA build.
+FROM pitch3d:cu124
+
+# This box's link resets often enough that pip's default single-shot download fails on
+# wheels as small as 5 MB ("not enough bytes were received (3.4 MB/5.6 MB)"). Same root
+# cause as the curl resume logic in docker/stage_weights.sh, so give pip the same treatment.
+ENV PIP_RETRIES=10 \
+    PIP_TIMEOUT=60 \
+    PIP_RESUME_RETRIES=10
+
+RUN printf 'torch==2.6.0\ntorchvision==0.21.0\n' > /tmp/gen-constraints.txt
+
+# SeedVR2 (numz/ComfyUI-SeedVR2_VideoUpscaler/requirements.txt) + the Wan v2v side
+# (diffusers/transformers/accelerate). ftfy is transformers' text-cleanup optional dep
+# that the Wan prompt path expects.
+RUN python -m pip install -c /tmp/gen-constraints.txt \
+        "diffusers>=0.33.1" "peft>=0.17.0" "omegaconf>=2.3.0" \
+        "rotary_embedding_torch>=0.5.3" \
+        safetensors einops psutil tqdm gguf matplotlib \
+        accelerate ftfy imageio imageio-ffmpeg
+
+# Sanity: the CUDA pair must have survived the install above.
+RUN python -c "import torch, diffusers; \
+print('torch', torch.__version__, 'diffusers', diffusers.__version__); \
+assert torch.__version__.startswith('2.6.0'), torch.__version__"
+
+CMD ["bash"]

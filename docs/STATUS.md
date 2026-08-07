@@ -173,8 +173,12 @@ backends (RF-DETR · ByteTrack · **PnLCalib** · **SMPLest-X-H** · **WASB**) �
 16 GB is not a constraint for it. Suite in-container: 1123 passed / 46 skipped in 6.5 s (vs 71 s
 on the laptop).
 
-**Still pod-only:** the generative tail (SeedVR2 at 3B fp16 / `batch_size=33` @720p is the
-likeliest thing not to fit; Wan2.1-VACE is 1.3B with cpu-offload and safer) and Blender rendering.
+**The generative tail stays on the pod.** Measured the same day: SeedVR2 3B fp16 @720p
+`batch_size=33` *does* complete here — at **97.5 % of the card**, and it OOMs the moment you cap it
+at 95 %. `expandable_segments` does not help and `batch_size` is not the lever (the OOM is in the
+VAE phase, which spans the whole sequence). ~400 MiB of margin on a workstation that also drives a
+display is not a margin. The fp8 variant (3.39 GB vs 6.78) is the lever, untested — and a
+by-eye quality change, so it is the operator's call. Blender rendering is also still pod-only.
 
 **How to use it, and the WSL traps that each cost a run — [`local-gpu-box.md`](local-gpu-box.md).**
 Staging is reproduced by [`../docker/stage_weights.sh`](../docker/stage_weights.sh).

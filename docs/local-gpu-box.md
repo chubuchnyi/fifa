@@ -101,10 +101,41 @@ Code syncs from GitHub — the repo is public and the tracked tree is 5.5 MB, so
 | Suite in-container | 1123 passed / 46 skipped in 6.5 s |
 | Transfer | laptop→box **0.11 MB/s**; box→internet **3.74 MB/s** (34×). Never push weights from the laptop — have the box pull them |
 
-## 6. What it cannot do (yet)
+## 6. The generative tail — measured 2026-08-07, and it does not have room
 
-- **The generative tail is unproven here.** `SeedVR2` (3B fp16, `batch_size=33` @720p) is the
-  likeliest thing not to fit in 16 GB; `Wan2.1-VACE` is 1.3B with `enable_model_cpu_offload()` and
-  should be the safer half. `scripts/pod_finish_batch.sh` has not been staged or run on this box.
+Built as a separate image, `docker/Dockerfile.gen` (the pod keeps these stages in their own venvs
+for the same reason: conflicting torch pins).
+
+**SeedVR2 3B fp16 @720p, `batch_size=33` runs — with under 5% of the card to spare.**
+
+| Run | Result |
+|-----|--------|
+| Full card | **completes**, 41 frames 1248×720 in 167 s, peak **15972 MiB = 97.5%** |
+| `set_per_process_memory_fraction(0.95)` | **OOM** in Phase 3 (VAE decode), needed another 878 MiB |
+| 0.75 / 0.60 | OOM in Phase 3 / Phase 1 |
+| `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | **does not help** — still OOM at 0.75 |
+
+Two traps in reading those numbers:
+
+- **`nvidia-smi` measures what the caching allocator RESERVED, not what the run needs.** Peak read
+  an identical 15972 MiB at `batch_size` 33, 17 **and** 9 — that constancy is the tell. The real
+  figure comes from `torch.cuda.max_memory_allocated()` inside the process, or from capping with
+  `set_per_process_memory_fraction` and seeing whether it still finishes.
+- **`batch_size` is not the lever it looks like.** The OOM is in the VAE encode/decode phase, which
+  works over the whole sequence; dropping 33→9 changed runtime (167→66 s) and nothing else.
+
+**So the generative tail stays on the pod.** It "works" here only on an idle, headless box: the
+margin is ~400 MiB, and this is a workstation — a login session with a browser open would take
+that. The obvious lever if you want it local is the **fp8 variant**
+(`seedvr2_ema_3b_fp8_e4m3fn.safetensors`, 3.39 GB against fp16's 6.78 GB), untested, and a quality
+change to a deliverable that is judged by eye — so it is the operator's call, not an optimisation
+to apply quietly.
+
+Wan2.1-VACE is the safer half and is **not yet measured here**: 1.3B with
+`enable_model_cpu_offload()` at the script's default 832×480 (not 720p — that was the OOM case on a
+32 GB card). Its download is 19 GB, of which 11.4 GB is the T5 text encoder.
+
+## 7. Also not available here
+
 - **Blender is not installed** in the image, so `anim_export` → Cycles render is pod-only for now.
 - The box mirrors `origin/main`. Unpushed local commits are invisible to it.
