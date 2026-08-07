@@ -29,7 +29,7 @@ Each doc has one job. If two docs seem to say the same thing, the table below sa
 |---|---|
 | [`pipeline.md`](pipeline.md) | **The current clip→final pipeline with diagrams:** reconstruction (perception → export → Cycles) + the structure-locked generative finishing chain, why each step exists, where each piece lives. |
 | [`scene-schema.md`](scene-schema.md) | Field-by-field spec of the canonical scene model (the data types). |
-| [`adr/`](adr/) | Architecture Decision Records (0001–0010) — each decision, its context, and why. Index: [`adr/README.md`](adr/README.md). |
+| [`adr/`](adr/) | Architecture Decision Records (0001–0012) — each decision, its context, and why. Index: [`adr/README.md`](adr/README.md). |
 
 ## Visualize the output
 

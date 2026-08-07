@@ -145,10 +145,10 @@ Honest baseline, so the next session does not mistake green for safe.
 | Signal | Measured | Note |
 |--------|----------|------|
 | Test suite | **1168 passed / 19 skipped / 0 failed in 20.2 s** (re-measured 2026-08-07) | fakes-backed (`conftest.py` says so). The old ">5 min" here was wrong — no reason to avoid the full run |
-| Real-measurement coverage | **1 file, 8 assertions** | `tests/e2e/test_golden_real_camera.py` over the committed 7 kB camera fit — the only non-fake evidence in the suite, and mutation-checked. Everything downstream of the camera (detection, pose, export) is still fakes-only |
-| Untested user-facing paths | ~6000 lines | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
-| Lint | **130 ruff errors** (was 152 on 08-01, 311 before that) | 74 E501 · 42 E702 · tail, re-measured 2026-08-07. UP042 switched off (its fix changes enum serialisation) |
-| CI | **pre-commit + GH Actions** | gate = `scripts/lint_changed.py`: a changed file may not *gain* violations. The 152 are reported, not gated — the backlog can shrink, not grow |
+| Real-measurement coverage | **1 file, 8 tests / 20 assertions** | `tests/e2e/test_golden_real_camera.py` over the committed 7 kB camera fit — the only non-fake evidence in the suite, and mutation-checked. Everything downstream of the camera (detection, pose, export) is still fakes-only |
+| Untested user-facing paths | **4629 lines** | `app/controller.py`, `app/cli.py`, `app/anim_export.py`, `poseannot/app.py`, `poseannot/camera.py`, `scripts/blender_animate.py` |
+| Lint | **153 ruff errors** (was 311) | 87 E501 · 45 E702 · 5 E402 · tail, measured 2026-08-07 under the CI pin. The earlier 130/152 were read off a stale local ruff 0.15.18 — see CLAUDE.md's four-places note. UP042 switched off (its fix changes enum serialisation) |
+| CI | **pre-commit + GH Actions** | gate = `scripts/lint_changed.py`: a changed file may not *gain* violations. The 153 are reported, not gated — the backlog can shrink, not grow |
 | Type checking | **mypy checks nothing** | numpy's stubs use 3.12 `type` syntax, rejected under `python_version = "3.11"`; mypy stops at error 1. Declared but dead |
 | Declared deps | **fixed 2026-08-01** | `pyyaml`/`scipy` were imported by `core/` but undeclared — a clean `pip install -e ".[dev]"` could not collect a single test. CI now guards this |
 | Pipeline entry points | **1, not 6** | re-measured 2026-08-02: `cli.py` and `mcp/server.py` both go through `controller.Application`. `anim_export.py` + `blender_animate.py` consume an exported `scene.json` and never reconstruct. The "6" was a miscount |
@@ -165,7 +165,7 @@ Genuinely open, and *not* addressed by any of those steps:
 
 - **9 exported stubs raise `NotImplementedError`** — see CLAUDE.md. Construct fine, fail on call.
 - **`BOWL_*` stadium geometry** in `core/scene/cameras.py` has no config override path.
-- **`anim_export.py` (845 lines) has no direct test** of its export logic, only a manifest
+- **`anim_export.py` (882 lines) has no direct test** of its export logic, only a manifest
   contract check. It is the widest untested surface left in the user-facing path.
 - **CI is a mechanical fence, not evidence.** It stops new lint debt and proves a clean checkout
   installs; it does not make the suite meaningful. The golden test proves the *camera* is real, not
@@ -178,8 +178,8 @@ Genuinely open, and *not* addressed by any of those steps:
 Measured 2026-08-07: `pod_real_e2e.sh` over 48 frames in **75 s, exit 0**, with all five real
 backends (RF-DETR · ByteTrack · **PnLCalib** · **SMPLest-X-H** · **WASB**) → 16 gates →
 `smplx_npz`; **peak VRAM 3930 MiB = 24 % of the 16 GB**, so reconstruction has ~12 GB spare and
-16 GB is not a constraint for it. Suite in-container: 1123 passed / 46 skipped in 6.5 s (vs 71 s
-on the laptop).
+16 GB is not a constraint for it. Suite in-container: 6.5 s against ~21 s on the laptop (~3×; the
+in-container count was 1123/46 because it ran `origin/main` without SMPL-X mounted).
 
 **The generative tail stays on the pod.** Measured the same day: SeedVR2 3B fp16 @720p
 `batch_size=33` *does* complete here — at **97.5 % of the card**, and it OOMs the moment you cap it

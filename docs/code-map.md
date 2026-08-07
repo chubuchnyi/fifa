@@ -11,7 +11,7 @@ drove the work, so entries read as "#203 world scale → these files".
   `min_track_frames`, `ByteTrackBackend.associate`), `src/pitch3d/core/orchestration/pipeline.py`
   (`stitch_cfg` gate), `src/pitch3d/core/orchestration/continuity.py` (`StitchConfig`,
   `stitch_tracks_with_report`), `src/pitch3d/core/orchestration/assemble.py` (one Subject per track_id),
-  `src/pitch3d/app/cli.py` (`--stitch`, `run_dry_run`).
+  `src/pitch3d/app/cli.py` (`--no-stitch`, `run_dry_run`).
 - **Calibration / world scale (#203):** `src/pitch3d/core/scene/field.py` (`image_to_world`),
   `src/pitch3d/adapters/models/pose.py` (`_ground_root`, foot=bbox bottom),
   `src/pitch3d/adapters/models/calibration.py` (identity fallback; `CameraModuleFieldCalibrator`),

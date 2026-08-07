@@ -51,8 +51,8 @@ Run everything from the repo root. Local env is `.venv` — CPU/core work needs 
 
 ```bash
 # tests / lint / types
-.venv/bin/python -m pytest                 # full suite: 1117 passed / 14 skipped in 77 s (2026-08-01)
-.venv/bin/python -m pytest tests/<path>    # focused, for a tight edit loop — but 77 s is cheap,
+.venv/bin/python -m pytest                 # full suite: 1168 passed / 19 skipped in 21 s (2026-08-07)
+.venv/bin/python -m pytest tests/<path>    # focused, for a tight edit loop — but 21 s is cheap,
                                            # so run the full suite before you call anything done
 # NB: pyproject already sets `-q`. Adding another `-q` makes it `-qq`, which silently swallows
 # the "N passed" summary line — that is how the ">5 min" claim here survived unchallenged.
@@ -128,8 +128,8 @@ duplication that does not exist, so what follows is only what was verified in th
   `"keypoints"` only. `CameraModuleFieldCalibrator`, `_PnLCalibBackend` and
   `scripts/{fit,apply,bench}_rigid_camera.py` exist alongside. Check `wiring.py` before assuming
   which one ran.
-- **9 exported stubs raise `NotImplementedError`.** Of the 47 names in
-  `adapters/models/__init__.py`: `AvatarBuilder`, `EnvReconstructor`, `GVHMRBackend`,
+- **9 exported stubs raise `NotImplementedError`.** Of the 24 names in
+  `adapters/models/__init__.py.__all__`: `ApiAvatarBuilder`, `SplatEnvReconstructor`, `GVHMRBackend`,
   `GVHMRPoseEstimator`, `LearnedMotionPrior`, `PitchKeypointBackend`, `TrackNetBackend`,
   `DiffusionVasOcclusionBackend`, `FeedForwardGaussianRefiner`. All import and construct fine and
   fail only when called. A surprise `NotImplementedError` is this, not a missing dependency.
@@ -179,12 +179,16 @@ pre-commit install                       # once per clone, before your first com
 .venv/bin/python scripts/lint_changed.py # the exact verdict the hook and CI will give
 ```
 
-ruff is pinned to **0.16.1** in three places — `[dev]`, `.pre-commit-config.yaml`,
-`.github/workflows/ci.yml`. Bump them together or the hook and CI disagree.
+ruff is pinned to **0.16.1** in FOUR places — `[dev]`, `.pre-commit-config.yaml`,
+`.github/workflows/ci.yml` and `requirements-dev.txt`. Bump them together or the hook and CI
+disagree. The fourth was missed once: `requirements-dev.txt` sat on 0.15.18 while the other three
+said 0.16.1, so `.venv/bin/ruff` — installed from it — checked a different rule set than CI and
+under-reported the backlog by one (UP034). Fixed 2026-08-07; the comment in
+`.pre-commit-config.yaml:10` still says "three", treat this list as the count.
 
 Two deliberate gaps, so you do not mistake them for working:
 
-- **`ruff format` is not wired up.** It would rewrite 269 of 358 files (~10 300 lines) in one
+- **`ruff format` is not wired up.** It would rewrite 302 of 388 files (~13 600 lines) in one
   commit and destroy `git blame` on code whose history is the main record of why it looks the
   way it does.
 - **`UP042` is switched off.** It wants `(str, Enum)` → `StrEnum` on 23 core domain types, which
@@ -198,7 +202,7 @@ Two deliberate gaps, so you do not mistake them for working:
 
 **Reconstruction now runs locally — try `demorig-pc` before starting a pod.** An RTX 4080 (16 GB)
 box reachable as `ssh demorig`, running the chain in Docker: all five real backends, 48 frames in
-75 s, peak 24% of VRAM. Free, and the suite is 11× faster there than on the laptop. Full runbook,
+75 s, peak 24% of VRAM. Free, and the suite runs ~3× faster there. Full runbook,
 including the WSL traps that will otherwise cost you an afternoon: **`docs/local-gpu-box.md`**.
 
 It does **not** yet do the generative tail (Wan/SeedVR2 unstaged, 16 GB unproven for them) or
