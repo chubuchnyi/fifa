@@ -1,5 +1,10 @@
 # RunPod GPU box — provisioning runbook
 
+> **Check [`local-gpu-box.md`](local-gpu-box.md) before provisioning anything.** As of 2026-08-07
+> the local RTX 4080 runs the entire reconstruction chain in Docker — all five real backends, 48
+> frames in 75 s at 24 % VRAM, at no cost. A pod is now only needed for the **generative tail**
+> (SeedVR2 needs 97.5 % of the 4080 — no margin) and for **Blender rendering** (not in the image).
+
 Reproducible steps to spin up a GPU box on RunPod for pitch3d (`--device cuda`), driven from
 **Claude Code** via the RunPod **MCP server** and/or the **`runpodctl`** CLI. This is the
 operational "do-it-again" checklist; [`cloud-dev.md`](cloud-dev.md) is the conceptual side (what a

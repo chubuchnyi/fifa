@@ -40,10 +40,11 @@ The *metre-accurate WorldPose eval* below is still the way to PICK a backbone. S
 
 | gate | status | note |
 |---|---|---|
-| **GPU / box up** | ⏳ transient | host `r1zrm95x23ql` had no free RTX 4090 (2026-06-22); `scripts/_poll_start_pod.sh` auto-starts the pod the moment it frees. |
-| **WorldPose FRAMES (RGB)** | ❌ **MISSING** | **blocking.** WorldPose-**Light** on the box is **annotations only** (boxes / `K_t` cameras / 3D skel / pitch landmarks) — **no video.** A per-crop HMR net (SMPLest-X, SAM 3D Body) needs the **pixels**. No frames → no predictions → no bake-off. |
+| **GPU / box up** | ✅ **cleared 2026-08-07** | no longer pod-gated: the local RTX 4080 runs the reconstruction chain in Docker, free — [`local-gpu-box.md`](local-gpu-box.md). |
+| **WorldPose FRAMES (RGB)** | ✅ **cleared** | **the block is gone (re-checked 2026-08-07).** The frames are on disk: `models/worldpose/` holds 24 G — `WorldPose Dataset/{raw,compressed}` (22 G) plus `FIFA Challenge 2026 Video Data/Videos/` (1.8 G: ARG_FRA, CRO_MOR, ENG_FRA, BRA_KOR, NET_ARG, FRA_MOR, MOR_POR…). §0a below still argues the block is real — it is stale, keep it only as provenance. |
 
-> **The single most leveraged asset right now is the WorldPose video/frames.** It unblocks **both**
+> ~~**The single most leveraged asset right now is the WorldPose video/frames.**~~ **Obsolete — the
+> frames arrived.** Kept because the reasoning still explains why they mattered. It unblocked **both**
 > this bake-off **and** B1 (honest calibration eval) — same data, two payoffs. The frames are the
 > full **WorldPose** release (ETH AIT, `eth-ait.github.io/WorldPoseDataset`), *not* the Light
 > annotations package. Pull them aligned to the Light `clip_id`/frame indices, onto `$WS/datasets/`,
@@ -68,7 +69,12 @@ ls "$WS"/SMPLest-X/human_models/human_model_files/smplx/SMPLX_to_J14.pkl   # joi
 
 ---
 
-## 0a. Alternative eval data — verified 2026-06-22 (WorldPose video is gated)
+## 0a. Alternative eval data — **STALE**, kept as provenance
+
+> Written 2026-06-22, when the WorldPose video really was gated. It is no longer: the footage is on
+> disk under `models/worldpose/` (see the gate table above). Nothing below this line should be used
+> to plan work — the whole "assemble partial coverage instead" premise is void.
+
 
 WorldPose's **video is gated behind a FIFA content-licence form** (`worldpose.ait.ethz.ch`) —
 registering for the challenge (Codabench comp. 11681 val / 11682 test) does **not** grant frames,
@@ -269,7 +275,7 @@ correspondence or root choice is wrong** — fix that before trusting any headli
 
 ## 6. Record the result
 
-Write the grid into [`m1-status-and-plan.md`](m1-status-and-plan.md) (B2 row) as a small table:
+Write the grid into [`archive/m1-status-and-plan.md`](archive/m1-status-and-plan.md) (B2 row) as a small table:
 `candidate × {A,B} × {Global, Local} MPJPE (m)`. That table — not the published claim — is what
 finalizes B2 and picks the backbone we wire in B3.
 

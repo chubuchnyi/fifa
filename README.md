@@ -265,6 +265,6 @@ Then, on demand:
 | [`docs/cloud-dev.md`](docs/cloud-dev.md) · [`docs/runpod-runbook.md`](docs/runpod-runbook.md) | Provisioning a GPU box, and cost control. |
 | [`TZ_3D_football_reconstruction.md`](TZ_3D_football_reconstruction.md) | The requirements spec this is built against (v0.3). |
 
-[`docs/roadmap.md`](docs/roadmap.md) and [`docs/m1-status-and-plan.md`](docs/m1-status-and-plan.md)
+[`docs/roadmap.md`](docs/roadmap.md) and [`docs/archive/m1-status-and-plan.md`](docs/archive/m1-status-and-plan.md)
 are **historical build logs about platform plumbing** — useful for archaeology, misleading as
 current state. Use `docs/STATUS.md` instead.

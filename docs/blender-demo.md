@@ -23,11 +23,16 @@ through the camera, so you can orbit the reconstructed crowd. It needs a display
 A matplotlib-only variant, [`scripts/render_smplx_mesh.py`](../scripts/render_smplx_mesh.py), renders
 the same mesh **without Blender** (quick look / pod sanity check).
 
-## Prerequisites (verified present locally, 2026-06-23)
+## Prerequisites
+
+> **The Blender path below is DEAD (re-checked 2026-08-07)** — there is no Blender binary anywhere
+> on this box, and `.env`/`.env.example` point at the same missing path. Every command in §Run and
+> §"Live, interactive GUI" fails until you install one and repoint `BLENDER_BIN`. The pod uses
+> **4.5.11 LTS** (`scripts/pod_ensure_blender.sh:19`); match that rather than guessing a 5.x.
 
 | Need | Local path |
 |---|---|
-| Blender binary | `/home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender` (5.1.2) |
+| Blender binary | ~~`/home/chubuchnyi/Downloads/blender-5.1.2-linux-x64/blender`~~ — **missing**, see above |
 | SMPL-X body model (gated) | `/home/chubuchnyi/AVATAR/models/smplx/` (`smplx/SMPLX_NEUTRAL.npz`) |
 | `smplx` python pkg | repo venv `/home/chubuchnyi/AVATAR/.venv` |
 | A `smplx_npz` export | e.g. `out/cuda/export/scene.smplx_npz/subject_*.npz` |

@@ -21,7 +21,7 @@ cold start; everything else is opened on demand.
 | Pipeline shape end to end | `docs/pipeline.md` |
 | How to run on the local RTX 4080 instead of the pod | `docs/local-gpu-box.md` |
 
-Do not read `docs/roadmap.md` or `docs/m1-status-and-plan.md` for current state — they are
+Do not read `docs/roadmap.md` or `docs/archive/m1-status-and-plan.md` for current state — they are
 historical build logs about platform plumbing, not result quality.
 
 ## Working rules

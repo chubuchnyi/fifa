@@ -16,13 +16,16 @@ lesson, SSH-key wiring, and stop-to-save-cost), follow the [RunPod runbook](runp
 - The *ability to wire* the GPU-bound backends — GVHMR (pose), TrackNet (ball) — against a
   real CUDA torch, which the local CPU box can't host comfortably.
 
-**Does NOT, on its own, make these work** — they are still **unwired stubs**, because their
-upstreams aren't pip-installable; the extras ship only the substrate (`torch`/`smplx`/`chumpy`):
-- `--pose gvhmr` · `--ball tracknet` · `--calibrator keypoints` still raise until wired.
+**Does NOT, on its own, install their upstreams** — those aren't pip-installable, so the extras
+ship only the substrate (`torch`/`smplx`/`chumpy`), and the *default* `--pose gvhmr` ·
+`--ball tracknet` · `--calibrator keypoints` still raise.
 
-So the *runnable* real pipeline on a fresh GPU box today is **real detection/tracking +
-the dependency-free reals** (overlay render, top-down radar, SMPL-X/glTF export) — none of
-which need a GPU, but all of which run end-to-end on the GPU box on a real clip.
+**But all three are wired now** (updated 2026-08-07) via in-repo dotted-path factories —
+`pitch3d.adapters.models.{smplestx,wasb,pnlcalib}_backend:make` — which `pod_real_e2e.sh:150-155`
+injects by default once the checkouts and weights are staged. So the runnable real pipeline on a
+staged box is **detect · track · calibrate (PnLCalib) · pose (SMPLest-X-H) · ball (WASB)** →
+gates → export. Measured green end to end in 75 s for 48 frames:
+[`local-gpu-box.md`](local-gpu-box.md) §5.
 
 ### Wiring a GPU-bound backend on the box (config, not fork)
 
@@ -96,7 +99,9 @@ dotted path, ADR-0006) — use the committed runner once SMPLest-X is vendored o
 gate with the dynamic-pose checker:
 
 ```bash
-OUT=out/run_8f FRAMES=8 bash scripts/pod_real_e2e.sh         # see header for the env knobs
+PITCH3D_CLIP=$VOL/clip.mp4 OUT=out/run_8f FRAMES=8 bash scripts/pod_real_e2e.sh   # see header
+# PITCH3D_CLIP is REQUIRED — the script exits 2 without it, on purpose: the old default twice
+# reconstructed a stale stock video that happened to sit at that path (pod_real_e2e.sh:40-51).
 python scripts/check_export_dynamic.py out/run_8f/export/scene.smplx_npz
 # checker asserts, per subject: betas != 0, body_pose varies across frames, transl travels the pitch
 ```

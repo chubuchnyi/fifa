@@ -210,7 +210,7 @@ remains blocked — but the poses alone settle constants we currently guess: the
 - **Where code lives:** [`code-map.md`](code-map.md)
 - **Open-item detail:** [`findings/open-items-2026-08-01.md`](findings/open-items-2026-08-01.md)
 - **History (verbatim log, … 2026-08-01):** [`archive/status-log-2026-07.md`](archive/status-log-2026-07.md)
-- **v0 defects + code root-causes:** [`v0-geometry-defects.md`](v0-geometry-defects.md)
+- **v0 defects + code root-causes:** [`archive/v0-geometry-defects.md`](archive/v0-geometry-defects.md)
 - **Pipeline overview:** [`pipeline.md`](pipeline.md) · **Rejected approaches:** [`adr/0012-rejected-approaches-log.md`](adr/0012-rejected-approaches-log.md)
 - **Historical build log (M0–M4 = plumbing, not result quality):** [`roadmap.md`](roadmap.md) ·
-  **M1 live state:** [`m1-status-and-plan.md`](m1-status-and-plan.md)
+  **M1 live state:** [`archive/m1-status-and-plan.md`](archive/m1-status-and-plan.md)

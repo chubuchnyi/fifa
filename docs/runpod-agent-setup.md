@@ -161,7 +161,7 @@ exact commands the repo documents.
   pitch3d.adapters.models.pnlcalib_backend:make --device cuda`; the zero-arg `make()` reads
   `PNLCALIB_REPO` / `PNLCALIB_WEIGHTS_KP` / `PNLCALIB_WEIGHTS_LINES` / `PNLCALIB_DEVICE` (defaults match
   the paths above). B1 number (SoccerNet calibration-2023 `test`): run `scripts/get_soccernet_calibration.py`
-  then `scripts/run_calib_eval.py --dataset soccernet` — see [`m1-status-and-plan.md`](m1-status-and-plan.md).
+  then `scripts/run_calib_eval.py --dataset soccernet` — see [`archive/m1-status-and-plan.md`](archive/m1-status-and-plan.md).
 - **WASB** — soccer weights are in the repo's Google-Drive **model zoo** (linked from its README).
   `scripts/stage_wasb_weight.sh` does this end-to-end (idempotent): clones nttcom/WASB-SBDT into
   `$WS/repos`, installs gdown, pulls the soccer checkpoint (`wasb_soccer_best.pth.tar`) into
@@ -216,13 +216,19 @@ scp -P <mappedPort> -i ~/.ssh/id_ed25519_runpod \
   ~/AVATAR/models/smplx/models_smplx_v1_1.zip  root@<publicIp>:/workspace/weights/
 ```
 
-Then, **on the box**, verify + extract the NEUTRAL model (what we use for soccer):
+Then, **on the box**, verify + extract. Extract **all three genders and the three aux files** —
+not just NEUTRAL. SMPLest-X's `human_models.py:20-32` builds the neutral, male *and* female layers
+eagerly and then reads `SMPLX_to_J14.pkl`, `MANO_SMPLX_vertex_ids.pkl` and
+`SMPL-X__FLAME_vertex_ids.npy` **from `smplx/`, not `aux/`** — so a neutral-only stage does not
+fail here, it fails four stages later at POSE (measured 2026-08-07,
+[`local-gpu-box.md`](local-gpu-box.md) §4):
 
 ```bash
 cd "$WS/weights"
 test "$(stat -c%s models_smplx_v1_1.zip)" = "870108517" && echo "size OK"
-mkdir -p smplx && unzip -o models_smplx_v1_1.zip 'models/smplx/SMPLX_NEUTRAL.npz' -d smplx/
-ls -la smplx/models/smplx/SMPLX_NEUTRAL.npz       # ~108 MB
+mkdir -p smplx && unzip -o models_smplx_v1_1.zip 'models/smplx/*' -d smplx/
+# the three aux files must sit alongside the .npz files, in smplx/
+ls -la smplx/models/smplx/                        # SMPLX_{NEUTRAL,MALE,FEMALE}.npz, ~108 MB each
 ```
 
 > This file is MPI-licensed and **gitignored** (`/SMPL-X/`, `*.npz`, `*.pkl`) — it must never enter

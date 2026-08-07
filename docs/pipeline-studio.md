@@ -139,7 +139,7 @@ Every edit is a row (the `Correction` pattern, widened). Targets now address any
   run the stage, then `stage_output = resolve(raw_output ⊕ output_overrides)`.
 - **Provenance + confidence** are mandatory (`source: manual:<user>` | `ai:<model>` | `stage`), so an
   AI's guess never masquerades as a measurement — the same R-6 discipline the pipeline already stamps
-  (`docs/pipeline-en.md §12`). Undo = pop the last row. Audit = read the file.
+  (`docs/archive/pipeline-en.md §12`). Undo = pop the last row. Audit = read the file.
 
 ### 3.4 Action API — one set of operations, two drivers (human + LLM)
 The heart of the "edit via AI" requirement and ADR-0008. There is **one** verb set; the UI buttons and
@@ -190,7 +190,7 @@ This table *is* the spec for the layer renderers and the action set.
 | **10 Coherence** (`per_track`) | poses | gap-filled/extended poses + `TEMPORAL_SMOOTHING` correction → **confidence ribbon** (1.0/0.3/0.2) + per-row `Provenance` (`interpolated` for bridged, `imputed` for coasted edges) | `max_fill_gap=12`, `smooth_window=5`, `decay=0.9`, `coast_max=10.5` (`coherence.py`) | toggle fill / extend / smooth per subject; edit a filled span | — | instant |
 | **11 Physics** (`per_track`) | poses | corrected poses + `Correction`s → **per-gate ribbon + teleport marks** | **profile** + 16 gate thresholds (`config/physics.yaml`) | toggle any gate, edit any threshold live, mark/interpolate teleport | auto-tune ceilings from p95 (`ProfileUpdateProposal`, T4.b) | instant |
 
-Notes that matter for the UI, straight from `docs/pipeline-en.md`:
+Notes that matter for the UI, straight from `docs/archive/pipeline-en.md`:
 - **Pose output is in the camera frame** (`pose.py:188`): `global_orient` is *not* rotated to world.
   The POSE inspector must show this honestly — a "camera-frame / world-frame" badge — because ~35% of
   bodies read inverted and that is *expected*, not a UI bug. The `orient_verticality` fix exists but is
@@ -199,7 +199,7 @@ Notes that matter for the UI, straight from `docs/pipeline-en.md`:
   auto-re-run. **Pose is gpu-minutes** → explicit "re-run" button, per-subject scope, async job +
   progress. The `rerun_cost` field drives this difference.
 - **Corrections resolve at export** (`controller.export → resolved`), which is why `scene.json` shows 0
-  corrections (`pipeline-en.md §13`). The Studio inspects the **layered** (pre-resolve) scene, so it can
+  corrections (`archive/pipeline-en.md §13`). The Studio inspects the **layered** (pre-resolve) scene, so it can
   show the correction ribbons the exported file hides.
 
 ### 5.2 Export/render tail (summarised — `whole_clip`)
@@ -254,7 +254,7 @@ The current app is a CSS grid (`poseannot/static/style.css`): `rows 44px 1fr 60p
   detections for detect, etc.), with ⚠ flags (e.g. "flipped", "teleport", "low-conf span").
 - **Timeline** (re-role): **scoped to the selected stage** — colours mean measured / filled(0.3) /
   extrapolated(0.2) / edited(orange) / teleport(red), reusing the `editedFrames` colouring machinery
-  and the confidence map (`pipeline-en.md §12`).
+  and the confidence map (`archive/pipeline-en.md §12`).
 
 Per **temporal shape** the panes retune: `per_frame` → IN/OUT are the same frame, different layer;
 `per_track` → sidebar drives track selection, timeline is the track span; `whole_clip` → canvas shows
@@ -266,7 +266,7 @@ the aggregate/rendered result, timeline is preview-only.
 Select **POSE** → pick #12 → frame 30. Input pane: the crop RF-DETR/tracker fed the net. Output: the
 3D body, flat, with a **`camera-frame`** badge. Rail shows POSE clean but the body wrong → the badge
 says the tilt lives in camera coords (`pose.py:188`). Jump to **PHYSICS** → toggle `orient_verticality`
-on (it's off in `default`, `pipeline-en.md §11.2`) → instant re-run (pure) → DIFF wipe shows the body
+on (it's off in `default`, `archive/pipeline-en.md §11.2`) → instant re-run (pure) → DIFF wipe shows the body
 snap upright. You just localised a "bug" to a disabled gate, not a broken net — in two clicks.
 
 **Experiment — "does WASB beat TrackNet here?"**
@@ -385,7 +385,7 @@ re-pose; drag calib points → re-homography → re-pose).
 
 ### Phase 6 — Branching + compare (any-stage A/B)
 **Deliver:** `branch(from_stage)`; side-by-side/wipe compare of two branches on identical pixels —
-the pose bake-off, generalised. Backlog item in `docs/poseannot-roadmap.md` ("Backend A/B compare")
+the pose bake-off, generalised. Backlog item in `docs/archive/poseannot-roadmap.md` ("Backend A/B compare")
 falls out here for free.
 - Backend: branch = new `overrides` file + shared content cache; compare reads two run_ids.
 - Frontend: compare view (reuse the DIFF wipe; add split view + a branch switcher on the rail).
@@ -403,7 +403,7 @@ falls out here for free.
   status vs the GOAL" and "overlay: user is ground truth" disciplines.
 - **Auth/deploy unchanged** — same uvicorn-on-pod, JWT, clip bundle model (`docs/poseannot-architecture.md`).
 - **Supersedes** roadmap item `#45` ("raw-video → frame-range → auto scene.json — pipeline behind GUI")
-  and folds in the two `poseannot-roadmap.md` bake-off backlog items.
+  and folds in the two `archive/poseannot-roadmap.md` bake-off backlog items.
 
 ### Suggested build order recap
 `Phase 0 (see everything)` → `1 (rail + inspect)` → `2 (tune the free stages live)` →

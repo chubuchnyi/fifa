@@ -49,7 +49,7 @@ the overlay through the solved calibration.
 
 ### 3.2 v0 punch-list (#2xx — all CLOSED, kept for the root causes)
 
-Detail + exact code root-causes: [`v0-geometry-defects.md`](v0-geometry-defects.md).
+Detail + exact code root-causes: [`v0-geometry-defects.md`](../archive/v0-geometry-defects.md).
 Found by eye in the 300-frame render of the real clip (`out/anim/video/*`, real CUDA models, 4 virtual
 cameras, 25 fps / 12 s / 1280×720). That run saved **no `scene.json`** → body count is visual-only.
 

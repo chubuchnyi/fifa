@@ -34,7 +34,7 @@ mitigation lands with the milestone · 🔴 inherent limit, bounded by UX/scope,
 
 | # | Risk | Architectural hook | Status |
 |---|---|---|---|
-| **R-6** | **Homography drift** across frames | `FieldCalibration` carries **per-frame confidence**; a temporal-smoothing slot is reserved; drift surfaces via `field_homography_conf` | 🟢 |
+| **R-6** ⚠️ | **Homography drift** across frames — *see the naming clash note below* | `FieldCalibration` carries **per-frame confidence**; a temporal-smoothing slot is reserved; drift surfaces via `field_homography_conf` | 🟢 |
 | **R-10** | **Non-blocking UI** under heavy stages | Everything heavy is a queued **job** (ADR-0004, UX-8); the fake queue runs in-process, a real worker is an adapter swap | 🟢 |
 | **R-13** | **Content rights / licensing** (models, footage) | `ModelInfo.license` + `est_cost_usd` recorded per artifact and summed in the `RunLog` (ADR-0006, UX-7, NFR-8); license visible before use | 🟢 |
 
@@ -51,3 +51,18 @@ mitigation lands with the milestone · 🔴 inherent limit, bounded by UX/scope,
 **Cross-cutting invariant.** Every risk above is contained *without* the heavy stack: the seams are
 ports, fields and layers in pure `core` (ADR-0001), so the mitigations are exercised by the fakes,
 the dry-run, and the test suite with **no GPU, no Blender, no models, no LLM**.
+
+---
+
+## Naming clash: two things are called "R-6"
+
+**R-6 in THIS table** is the risk-register entry above — homography drift, numbered from TZ §8.
+
+**"R-6" in `CLAUDE.md`, `docs/STATUS.md` and `adr/0011`** means something else entirely: the
+honesty rule *"mark, never hide"* — a subject the tracker lost but that is certainly present is
+interpolated at low confidence and flagged, never blinked out. That usage is the load-bearing
+one in day-to-day work and is not going to be renumbered; this note exists so a reader who
+arrives from either direction is not quietly misled. Noted 2026-08-07.
+
+The statuses in the table above were scored against the 2026-06-19 scaffold and have **not**
+been re-scored since — a 🟢 here means "a seam exists", not "judged good by eye".

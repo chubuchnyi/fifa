@@ -1,5 +1,7 @@
 # pitch3d pipeline — from broadcast video to 3D animation (detailed)
 
+> **ARCHIVED 2026-08-07.** Superseded by [`../pipeline.md`](../pipeline.md), which is the canonical end-to-end doc and the only one that covers the generative finishing chain. This file is reconstruction-only, self-dated "verified as of 2026-07-09", and its §17/§18 are a frozen A/B run. It also calls itself the counterpart of a `pipeline-ru.md` that never existed. Two known errors: it cites `scripts/anim_export.py` (a 12-line shim — the real one is `src/pitch3d/app/anim_export.py`) and presents the Cycles mp4 as the deliverable, which `pipeline.md` supersedes with the post-SeedVR2 pinned mp4.
+
 > End-to-end walkthrough of the reconstruction: **one broadcast camera → world-space SMPL-X
 > humans → multi-angle rendered video**. Expanded, concrete, English counterpart of
 > `docs/pipeline-ru.md`, with extra depth on **player physics, pose estimation, and filtering**.

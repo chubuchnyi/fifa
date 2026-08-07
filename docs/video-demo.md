@@ -50,8 +50,10 @@ The local driver ([`demo_video.sh`](../scripts/demo_video.sh)) is thin — it or
 The pod venv is **Python 3.12**, and the `bpy` PyPI module ships wheels only for specific CPython
 versions (e.g. 3.11) — **there is no `bpy` wheel for 3.12**. So
 [`pod_ensure_blender.sh`](../scripts/pod_ensure_blender.sh) falls back to a **standalone Blender
-binary**, downloaded **once** to the persistent volume (`/workspace/blender`, default Blender 4.2
-LTS) and reused thereafter. It also `apt-get`s `ffmpeg` plus the X/GL shared libs Blender links even
+binary**, downloaded **once** to the persistent volume (`/workspace/blender`, default Blender
+**4.5.11 LTS**) and reused thereafter. Do not "fix" this back to 4.2: the script's own comment
+(`pod_ensure_blender.sh:17-18`) records that 4.2 predates Blackwell sm_120, so on an RTX PRO 4500
+pod both the OptiX *and* the CUDA kernel load hang indefinitely. It also `apt-get`s `ffmpeg` plus the X/GL shared libs Blender links even
 under `--background` (`libxrender1`, `libxxf86vm1`, `libxfixes3`, `libxi6`, `libxkbcommon0`,
 `libsm6`, `libgl1`). The script emits exactly one line — `BLENDER_MODE=module` or
 `BLENDER_MODE=binary:/path/blender` — which the orchestrator turns into the right invocation. On a

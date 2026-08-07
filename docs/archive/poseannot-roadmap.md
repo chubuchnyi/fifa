@@ -1,5 +1,7 @@
 # poseannot — roadmap
 
+> **ARCHIVED 2026-08-07.** Its v1 ("body_pose editing ← next") has shipped, and v2–v4 were explicitly folded into [`../pipeline-studio.md`](../pipeline-studio.md), which is the live plan. Its "no multi-clip switching" scope note is also obsolete — `poseannot/clips.py` ships it.
+
 Ordered by dependency + eye-value delivered.  Each version is one
 merge-able chunk; nothing here is decorative.
 

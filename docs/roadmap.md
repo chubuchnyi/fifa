@@ -1,5 +1,11 @@
 # pitch3d — Roadmap (M0 → M4)
 
+> **Not current state** — `CLAUDE.md` says so too. M0→M4 is platform plumbing, and the live
+> staged bar is v0/v1/v2 in [`STATUS.md`](STATUS.md) §2. **Keep reading only to look a ticket up:**
+> this is the per-ticket evidence registry (#94, #105, …) that ADR-0012 and
+> [`findings/research-ledger-2026-08-07.md`](findings/research-ledger-2026-08-07.md) cite by number,
+> which is why it is not archived.
+
 Maps the TZ milestones (§10) to concrete packages/tickets. **Mono through every milestone.**
 Each milestone ends with a **working end-to-end artifact on one real clip**. Real multi-camera
 (M4) is out of scope — only the data-model seam exists.
@@ -39,7 +45,7 @@ Approximations are acceptable for exact numbers / exact stadium, backstopped by 
 editing** and **generative prompt-editing** (ADR-0008 LLM-over-MCP).
 
 **The first 300-frame render of the real clip exposed concrete geometry defects** — see
-[`v0-geometry-defects.md`](v0-geometry-defects.md). Tracked as **#202–#205**, root causes now located
+[`archive/v0-geometry-defects.md`](archive/v0-geometry-defects.md). Tracked as **#202–#205**, root causes now located
 in code:
 - **#202 too many bodies** — ByteTrack fragments; `min_track_frames` defaults to 1 and the
   fragment-stitch pass (`core/orchestration/continuity.py`) is wired but **off by default**.
@@ -212,7 +218,7 @@ propagate → render(fake) → export, and `pytest` is green. The LLM-feedback l
 Proxy only — no photoreal yet. This is the first milestone that replaces fakes with real models.
 
 **Status — GOAL MET, closed 2026-06-27** (live state, blockers and next steps live in
-[`m1-status-and-plan.md`](m1-status-and-plan.md)). The editable loop runs end to end on a real clip:
+[`archive/m1-status-and-plan.md`](archive/m1-status-and-plan.md)). The editable loop runs end to end on a real clip:
 every perception/render/export port has a real adapter behind the same split (pure half unit-tested
 via an injected stub; heavy half lazy-imported behind its extra), selectable per-port via
 `default_ports(...)` and the `--detector/--tracker/--calibrator/--pose/--ball/--render/--export`

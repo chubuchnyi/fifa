@@ -1,5 +1,7 @@
 # v0 geometry defects — real-clip novel-view reconstruction
 
+> **ARCHIVED 2026-08-07.** All five defects are CLOSED ("v0 GEOMETRY ACHIEVED 2026-06-27"), so this is a post-mortem, not guidance. Its "full suite green (557 passed)" is long superseded. Open items live in [`../findings/open-items-2026-08-01.md`](../findings/open-items-2026-08-01.md).
+
 **Goal context:** the deliverable is a faithful *novel-view* video of a real broadcast episode; the
 agreed first bar is **v0 = correct geometry** (stable ~22 players, right placement/scale/poses, framed
 cameras, pitch lines). See `feedback_results_over_process` / `project_goal_definition` in memory.
