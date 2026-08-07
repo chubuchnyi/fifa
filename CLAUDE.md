@@ -18,6 +18,7 @@ cold start; everything else is opened on demand.
 | What happened on some past date | `docs/archive/status-log-2026-07.md` (verbatim log, 3.3k lines — grep it, don't read it) |
 | What was tried and rejected, with numbers | `docs/adr/0012-rejected-approaches-log.md` |
 | Pipeline shape end to end | `docs/pipeline.md` |
+| How to run on the local RTX 4080 instead of the pod | `docs/local-gpu-box.md` |
 
 Do not read `docs/roadmap.md` or `docs/m1-status-and-plan.md` for current state — they are
 historical build logs about platform plumbing, not result quality.
@@ -191,6 +192,16 @@ Two deliberate gaps, so you do not mistake them for working:
 - **`mypy` currently checks nothing.** Modern numpy stubs use 3.12 `type` statements, which mypy
   rejects under our `python_version = "3.11"` and then stops at the first error. It is in `[dev]`
   and out of CI. Treat a clean `mypy` run as meaningless until this is fixed.
+
+## Where to run GPU work
+
+**Reconstruction now runs locally — try `demorig-pc` before starting a pod.** An RTX 4080 (16 GB)
+box reachable as `ssh demorig`, running the chain in Docker: all five real backends, 48 frames in
+75 s, peak 24% of VRAM. Free, and the suite is 11× faster there than on the laptop. Full runbook,
+including the WSL traps that will otherwise cost you an afternoon: **`docs/local-gpu-box.md`**.
+
+It does **not** yet do the generative tail (Wan/SeedVR2 unstaged, 16 GB unproven for them) or
+Blender rendering. Those are still the pod.
 
 ## GPU pod (RunPod)
 

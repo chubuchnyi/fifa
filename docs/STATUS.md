@@ -167,41 +167,17 @@ Genuinely open, and *not* addressed by any of those steps:
 
 `demorig-pc` (172.16.10.203, `ssh demorig`) now runs the pipeline in Docker on an **RTX 4080
 (16 GB, sm_89)** — Win 11 → WSL2 Ubuntu 24.04 → docker-ce 29.7.2 + nvidia-container-toolkit.
-`docker/Dockerfile` mirrors `cloud_setup.sh`'s REUSE_SYSTEM_TORCH path on the
-`pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` base, which already ships the pinned
-torch 2.6.0+cu124 / torchvision 0.21.0 pair.
+Measured 2026-08-07: `pod_real_e2e.sh` over 48 frames in **75 s, exit 0**, with all five real
+backends (RF-DETR · ByteTrack · **PnLCalib** · **SMPLest-X-H** · **WASB**) → 16 gates →
+`smplx_npz`; **peak VRAM 3930 MiB = 24 % of the 16 GB**, so reconstruction has ~12 GB spare and
+16 GB is not a constraint for it. Suite in-container: 1123 passed / 46 skipped in 6.5 s (vs 71 s
+on the laptop).
 
-Measured on the box, 2026-08-07:
+**Still pod-only:** the generative tail (SeedVR2 at 3B fp16 / `batch_size=33` @720p is the
+likeliest thing not to fit; Wan2.1-VACE is 1.3B with cpu-offload and safer) and Blender rendering.
 
-| Signal | Result |
-|--------|--------|
-| Suite in-container | **1123 passed / 46 skipped in 6.5 s** (vs 71 s locally) |
-| `pod_real_e2e.sh`, all 5 real backends | **48 frames in 75 s, exit 0** — RF-DETR · ByteTrack · **PnLCalib** · **SMPLest-X-H** · **WASB** → 16 gates → `smplx_npz`. Fakes left: env, avatar, observe, viewsynth, motion_prior (fake on the pod too) |
-| **Peak VRAM, full chain** | **3930 MiB = 24 % of the 16 GB** (69 samples @1 s). 8-frame run peaked 3186 MiB. Reconstruction has ~12 GB of headroom |
-| Detect-only path | peak 592 MiB / 0–1 % util — CPU-bound, exactly as `m1-status-and-plan.md:439` says of the pod |
-
-**So reconstruction is settled: 16 GB is not a constraint for it.** Still unproven is the
-**generative tail** — SeedVR2 (3B fp16, `batch_size=33` @720p) is the likeliest thing not to fit;
-Wan2.1-VACE is 1.3B with `enable_model_cpu_offload()` and should be the safer half.
-
-**Container invariant: mount the volume AT `/workspace`.** The repo's scripts and the three model
-backends carry baked-in `/workspace` defaults — `stage_wasb_weight.sh` ignores `PITCH3D_VOL`
-entirely and writes there, so under `--rm` its weight vanished with the container. Mounting to the
-name they already expect removes that whole class of failure.
-
-**SMPLest-X needs all three genders.** `human_models.py:20-32` builds neutral+male+female layers
-and reads `SMPLX_to_J14.pkl`, `MANO_SMPLX_vertex_ids.pkl`, `SMPL-X__FLAME_vertex_ids.npy` **from
-`smplx/`, not `aux/`**. A neutral-only stage fails at POSE, four stages in.
-
-**Transfer rule of thumb:** laptop→box is **0.11 MB/s**, box→internet is **3.74 MB/s** (34×) — and
-the box's link **resets about every 250 MB**, so any large fetch must be resumable.
-`huggingface_hub.snapshot_download` restarts from zero and never finished the 8.2 GB checkpoint;
-`curl -C - --speed-limit 20000 --speed-time 45` did, across 34 resets. Code comes from GitHub (the
-repo is public; the tracked tree is 5.5 MB). Only the SMPL-X `.npz` set (326 MB) must be pushed by
-hand — it is the one asset with no token download.
-
-Staging is reproduced by `docker/stage_weights.sh`; the `_slim` checkpoint it derives is 2.75 GB
-against the shipped 8.25 GB (the rest is optimizer state — `scripts/smplestx_occlusion.py:46`).
+**How to use it, and the WSL traps that each cost a run — [`local-gpu-box.md`](local-gpu-box.md).**
+Staging is reproduced by [`../docker/stage_weights.sh`](../docker/stage_weights.sh).
 
 ## 6. Key references
 
