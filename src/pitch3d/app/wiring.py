@@ -111,6 +111,7 @@ def default_ports(
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake", camera_carry: int = 8, kit_split: bool = True,
+    min_calib_confidence: float | None = None,
 ) -> AppPorts:
     """Default wiring: deterministic, dependency-free fakes, writing artifacts under ``out_dir``.
 
@@ -276,6 +277,8 @@ def default_ports(
                 _resolve_backend(occlusion_backend, OcclusionBackend)
                 if occlusion_backend else None
             ),
+            **({} if min_calib_confidence is None
+               else {"min_calib_confidence": float(min_calib_confidence)}),
         )
     else:
         raise ValueError(f"unknown pose {pose!r}; expected 'fake' or 'gvhmr'")

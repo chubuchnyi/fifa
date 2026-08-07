@@ -120,6 +120,7 @@ def run_dry_run(
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
     motion_prior: str = "fake", camera_carry: int = 8,
+    min_calib_confidence: float | None = None,
     stitch: bool = True, coherence: bool = False, physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
@@ -148,6 +149,7 @@ def run_dry_run(
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
         motion_prior=motion_prior, camera_carry=camera_carry, kit_split=kit_split,
+        min_calib_confidence=min_calib_confidence,
     )
     app: Application = build_app(out_dir=out_dir, ports=ports)
 
@@ -287,6 +289,17 @@ def run_dry_run(
     print(f"== reconstructed {scene_id}: {len(scene.subjects)} subject(s), "
           f"ball={'yes' if scene.ball is not None else 'no'}")
     print(f"== calibration: {describe_calibration_solve(scene.field.calibration)}")
+    # A carried homography is not a placement. Say what refusing it cost, or the refusal is as
+    # silent as the bad placement it replaces was (#131, and #135's rule: mark, never hide).
+    _dropped = int(getattr(ports.pose, "dropped_frames", 0))
+    _dropped_subj = list(getattr(ports.pose, "dropped_subjects", []))
+    if _dropped or _dropped_subj:
+        print(f"== unplaced: {_dropped} subject-frame(s) sit on frames whose plane was CARRIED, "
+              f"not measured — left for coherence to mark imputed instead of grounded through a "
+              f"stale homography")
+        if _dropped_subj:
+            print(f"   {len(_dropped_subj)} subject(s) had no solved frame at all and are absent "
+                  f"from the scene: {_dropped_subj}")
     sr = app.stitch_report(scene_id)
     if sr is not None:
         print(f"== continuity: {sr.n_in}→{sr.n_out} tracklets "
@@ -600,6 +613,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--calibrator-backend", default=None, metavar="pkg.module:Factory",
                         help="inject a bring-your-own KeypointBackend; "
                              "requires --calibrator keypoints")
+    parser.add_argument("--min-calib-confidence", type=float, default=None, metavar="C",
+                        help="calibration confidence a frame must carry before a foot is "
+                             "un-projected through its homography (default 0.02 = 'the plane was "
+                             "solved at all'). 0 restores the pre-2026-08-07 behaviour of "
+                             "grounding through CARRIED homographies, which is how a zooming "
+                             "phone clip produced roots 3 km apart")
     parser.add_argument("--camera-carry", type=int, default=8, metavar="N",
                         help="R2 camera propagation: re-estimate each frame's homography from its "
                              "+-N neighbours carried on Lucas-Kanade inter-frame motion (CPU, no "
@@ -703,6 +722,7 @@ def main(argv: list[str] | None = None) -> int:
         occlusion_backend=args.occlusion_backend,
         motion_prior=args.motion_prior,
         camera_carry=args.camera_carry,
+        min_calib_confidence=args.min_calib_confidence,
         stitch=args.stitch,
         shot_guard=args.shot_guard,
         kit_split=args.kit_split,

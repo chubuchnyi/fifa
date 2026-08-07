@@ -25,7 +25,7 @@ satisfying the very same ``PoseEstimator`` port test the fake passes (roadmap M1
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -34,7 +34,7 @@ from ...core.correction.anchor import blend_to_anchor
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import Tracklet, Tracks
 from ...core.ports.pose import PoseEstimator
-from ...core.scene.field import FieldCalibration
+from ...core.scene.field import MIN_SOLVED_CONFIDENCE, FieldCalibration
 from ...core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
 
@@ -148,6 +148,11 @@ class GVHMRPoseEstimator(PoseEstimator):
         pelvis_height_m: World Z assigned to the grounded root (mono height anchor, R-4).
         smooth_window: Centred window (frames) for smoothing the grounded root path
             (anti-foot-sliding from box jitter); 1 disables it.
+        min_calib_confidence: Calibration confidence a frame must carry before its foot is
+            un-projected. Both calibrators write ``0.0`` on a frame they could not solve, so the
+            default is a "was the plane measured at all" test, not a quality bar. ``0.0`` restores
+            the pre-2026-08-07 behaviour of grounding through carried homographies — which is how
+            a zooming phone clip produced roots 3 km apart. Auto default, manual override.
         n_betas: Shape-coefficient count expected from the backend (provenance only).
         device: Inference device for the default backend.
     """
@@ -158,6 +163,10 @@ class GVHMRPoseEstimator(PoseEstimator):
     smooth_window: int = 1
     n_betas: int = 10
     device: str = "cuda"
+    min_calib_confidence: float = MIN_SOLVED_CONFIDENCE
+    #: Filled by :meth:`estimate` so the caller can report the refusal instead of it being silent.
+    dropped_frames: int = field(default=0, init=False)
+    dropped_subjects: list[int] = field(default_factory=list, init=False)
 
     def info(self) -> ModelInfo:
         return ModelInfo(
@@ -172,19 +181,36 @@ class GVHMRPoseEstimator(PoseEstimator):
     ) -> dict[int, SubjectMotion]:
         bodies = self._backend().estimate_bodies(clip, tracks)
         out: dict[int, SubjectMotion] = {}
+        self.dropped_frames, self.dropped_subjects = 0, []
         for tl in tracks.tracklets:
             if tl.cls == "ball":
                 continue  # the ball has its own BallTracker; HMR is for people only
             raw = bodies.get(tl.track_id)
             if raw is None:
                 continue
-            rows = _align_rows(raw.frames, tl.frames)
+            # Ground ONLY where the plane was measured. A carried homography is stale by however
+            # many frames the calibrator failed for, and a foot un-projected through it lands near
+            # the wrong horizon, where a pixel is metres — kilometres once a phone zooms in. Rows
+            # without a solved plane are dropped here so the subject simply has no measurement
+            # there; `add_temporal_coherence` then marks them `imputed` (R-6) and the #135 criteria
+            # read them as what they are. Placing them anyway is the one thing that must not happen.
+            keep = calibration.solved_mask(tl.frames, self.min_calib_confidence)
+            self.dropped_frames += int((~keep).sum())
+            if not keep.any():
+                # Not "lost by the tracker" — we never had a ground plane for any frame of his
+                # life, so there is no position to infer from. Reported, not silently skipped.
+                self.dropped_subjects.append(int(tl.track_id))
+                continue
+            kept_tl = tl if keep.all() else replace(
+                tl, frames=tl.frames[keep], bboxes_xyxy=tl.bboxes_xyxy[keep]
+            )
+            rows = _align_rows(raw.frames, kept_tl.frames)
             height = raw.pelvis_above_foot[rows] if raw.pelvis_above_foot is not None else None
             transl = _smooth_path(
-                self._ground_root(tl, calibration, height), self.smooth_window
+                self._ground_root(kept_tl, calibration, height), self.smooth_window
             )
             pose = PoseSequence(
-                frames=tl.frames,
+                frames=kept_tl.frames,
                 global_orient=raw.global_orient[rows],
                 body_pose=raw.body_pose[rows],
                 transl=transl,
