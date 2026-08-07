@@ -1,7 +1,8 @@
 {
   "_": "The user's eye verdict on every track of out/cue/scene_off.json, 2026-08-07. This is the",
   "__": "ground truth scripts/track_quality.py is scored against - do NOT edit it to make the",
-  "___": "criteria look better. If a verdict is wrong, the user re-judges it and we record that.",
+  "___": "criteria look better. If a verdict is wrong, the user re-judges it and we record THAT,",
+  "____": "with the original left visible under `revised` / `disputed`.",
   "scene": "out/cue/scene_off.json",
   "judged_on": "2026-08-07",
   "tracks": {
@@ -12,15 +13,22 @@
     "10": "stitch", "77": "stitch",
     "15": "stitch", "71": "stitch",
     "17": "correct",
-    "25": "misplaced"
+    "25": "misplaced",
+    "31": "off_frame_ok"
   },
   "stitch_pairs": [[3, 66], [10, 77], [15, 71]],
-  "not_judged": [14, 16, 18, 31],
+  "not_judged": [14, 16, 18],
+  "disputed": {
+    "71": "The user withdrew certainty the same day: 'сложно сказать, выглядит вообще как 15 стал 20-м, а 20 стал 71, но цвет поменял'. Left as 'stitch' so the score keeps reporting the disagreement; the user is re-checking frames 24-30. Geometry prefers 15->25 (0.85 m, 2-frame gap) over 15->71 (29-frame blind gap). Measured kit: t20 is YELLOW, t71 is BLUE, so 20->71 would join two kits."
+  },
+  "revised": {
+    "20": "First read by the criteria as a phantom; the user corrected it 2026-08-07: 'моя ошибка, большую часть клипа закрыт игроками 15 и 17. Его таз появляется на мгновение в середине и в конце клипа. Положение его как раз всегда должно быть.' This is what moved the criterion from 'in-frame imputed = phantom' to 'imputed is a phantom only when ANOTHER track is measuring the same human'.",
+    "31": "Confirmed by the user 2026-08-07 as the off-frame example they meant by '32': '31 уходит за кадр, это он.' Measured: off-frame frames 0-33, enters the picture at f34, measured from f37."
+  },
   "notes": {
     "17": "identity and placement fine; he jumps for the ball in the clip and 3D keeps him planar",
     "25": "initial position on the pitch is wrong - he should have moved from right against 14 to his final position",
-    "20": "judged correct even though 42/60 of its frames are imputed - the one disagreement with the criteria",
-    "32": "the user wrote '32' as the example of a correct off-frame player; no track 32 exists in this scene. Track 31 (off-frame f0-33) and track 16 (off-frame f43-59) are the only two off-frame tracks, so one of them is meant.",
+    "team_colours": "The user flagged that they had been taking the reconstruction's team colours as truth and that those may be wrong too. Measured from video pixels (--kit): team_id agrees with the shirt on 22 of 24 tracks; t3 and t77 disagree, and t3 FLIPS kit mid-track.",
     "hard_case_ok": "the 17 / 20 / 15(71) tangle, with 5 joining it, reconstructed well by eye"
   }
 }

@@ -11,7 +11,13 @@ Runnable half: `scripts/track_quality.py`. Labels: `docs/findings/track-labels-2
 .venv/bin/python scripts/track_quality.py --scene out/cue/scene_off.json \
     --camera calib/Colombia-1-0-Congo-DR1080p.npz \
     --labels docs/findings/track-labels-2026-08-07.json
+.venv/bin/python scripts/track_quality.py --camera calib/... --kit          # shirt colour from the video
+.venv/bin/python scripts/track_quality.py --explain-imputed                 # the frozen-mannequin proof
 ```
+
+**Revised the same day.** The first draft called an in-frame imputed run a phantom; the user's
+correction on t20 replaced that with *"a phantom is a duplicate"*. §П2 keeps both versions visible,
+because the correction is the most useful thing in this file.
 
 ---
 
@@ -73,31 +79,43 @@ Classify each track by the extent of its `measured` frames:
 9, 11, 12, 13, 17) are in the user's correct list. Precision 12/12. Two more `FULL` tracks (14, 18)
 were not judged — the criterion predicts they are fine.
 
-### П2 — an in-frame imputed run is a phantom; an off-frame one is not
+### П2 — an imputed run is a phantom only when *another track is measuring the same human*
 
-The user's own rule, made computable. Project the root through the **measured** camera
-(`calib/Colombia-1-0-Congo-DR1080p.npz`) and ask, for each imputed run ≥ 6 frames, whether it lies
-inside the 1920×1080 image.
+**This criterion was wrong on its first draft, and the user's correction is what fixed it.** The
+first version said "imputed **in frame** = phantom, **off frame** = keep". It convicted t20, and
+the user overruled it:
 
-* inside → nothing hid this player; he was simply not detected, so the mannequin is fiction →
-  **PHANTOM**
-* outside → he left the picture; holding him is correct behaviour and R-6 *mark, never hide* →
-  **OK_OFF_FRAME**
+> t20, моя ошибка, большую часть клипа закрыт игроками 15 и 17. Его таз появляется на мгновение в
+> середине и в конце клипа. Положение его как раз всегда должно быть.
 
-| verdict | tracks |
-|---|---|
-| PHANTOM (in-frame imputed) | 3, 10, 15, **20**, 25, 66, 71, 77 |
-| OK_OFF_FRAME | **16** (leaves at f43), **31** (enters at f34) |
+t20 is a real player, in frame, **occluded** — a third reason we cannot measure someone, next to
+"off frame" and "not there at all". Measured: t20 has the highest occlusion of any track in the
+scene (0.61 mean coverage by nearer bodies on his own measured frames), and at f0–9 he is 93–100 %
+covered, by t17 and t15 among others — exactly the two players the user named.
 
-Exactly two tracks in the whole scene leave the picture, and both are in the user's *not judged*
-list. The user's off-frame example — *«для 32 отображение корректное»* — names a track id that does
-not exist in this scene; **31 or 16 is meant**, and both are the case being described.
+So the discriminator is not *why* we failed to measure. It is **whether somebody else is already
+representing that human**:
 
-> ⚠ **This test needs `--camera`.** `out/cue/scene_*.json` store the *invented* fallback camera
-> (772 px @ 1280×720, principal point dead centre; `controller.py:654`). Its field of view is so
-> wide that all 24 tracks land inside the image and the criterion silently becomes a constant. With
-> the measured fit (4169 px @ 1920×1080) tracks 16 and 31 separate out. The script prints a warning
-> when it detects the fallback.
+> An imputed run is a phantom **iff the track is one half of a handover pair (П3)** — because the
+> merge will take the other half's measurements over this half's mannequin. A track with no
+> partner is a real player the pipeline simply failed to measure, and R-6 says **show him, marked**,
+> not delete him.
+
+| verdict | tracks | meaning |
+|---|---|---|
+| `PHANTOM_HALF` | 3, 66 · 10, 77 · 15, 25 | merge with its partner, drop this mannequin |
+| `OK_UNMEASURED` | **20**, 71 | real player, unmeasured — show him marked (R-6) |
+| `OK_OFF_FRAME` | 16 (leaves f43), **31** (enters f34) | holding him is correct |
+| `OK` | the 14 `FULL` tracks | — |
+
+Off-frame and occluded stay as **diagnostics** — they say *why* a stretch is unmeasured, which is
+what a reviewer needs — but they are not what decides the verdict.
+
+> ⚠ **The off-frame diagnostic needs `--camera`.** `out/cue/scene_*.json` store the *invented*
+> fallback camera (772 px @ 1280×720, principal point dead centre; `controller.py:654`). Its field
+> of view is so wide that all 24 tracks land inside the image. With the measured fit (4169 px @
+> 1920×1080) exactly two tracks leave the picture: **16 and 31**. The user confirmed 31 is the one
+> they meant by "32" — *«31 уходит за кадр, это он»*.
 
 ### П3 — handover: a HEAD that dies where a TAIL is born is one human
 
@@ -112,6 +130,43 @@ Same team, birth within ±14 frames of the death, roots within 6 m at the handov
 
 Everything else in the scene is ≥ 8.9 m. The next-nearest same-team candidate to a real pair is
 four times further away, so the threshold is not delicate.
+
+**It is an assignment, not a candidate list — one partner each, nearest first.** This matters: t20
+is *also* a candidate head for t25, at 2.09 m. Reporting every candidate would have paired him and
+convicted a real player. Letting t15 claim t25 at 0.85 m leaves t20 unpaired and therefore whole.
+
+#### What "stitch 15 → 25" actually does — worked through
+
+The user asked for this one spelled out. Today the pipeline holds **two subjects for one human**:
+
+| | frames 0–26 | frames 27–59 |
+|---|---|---|
+| **t15** | **measured** — the real, detected player | *imputed* — frozen mannequin coasting 1.23 m |
+| **t25** | *imputed* — frozen mannequin, **held** at x = −41.13 | **measured** — the real, detected player |
+
+Both bodies are on the pitch the whole time, 0.85–2.9 m apart. In the first half the eye sees the
+real player (t15) with a motionless duplicate beside him; in the second half the real player is
+t25 and the motionless duplicate is t15.
+
+And because an imputed prefix **holds** rather than extrapolates (П6), t25's mannequin stands for
+frames 0–23 at the position t25 will only reach at f24 — it travels 5 cm in 24 frames. *That is
+the whole of «25 — некорректно определено изначальное положение»*: his opening position is not
+mis-estimated, it is **not estimated at all**, it is the later position copied backwards.
+
+Stitching takes the two ids to be one subject and keeps, at each frame, the half that was
+**measured**:
+
+* frames 0–26 → t15's measurements (the player's real path from where he actually started)
+* frames 24–59 → t25's measurements
+
+The merged track is measured on **51 of 60 frames**, up from 27 and 24. t25's invented prefix is
+not repaired — it is **deleted**, because a real measurement of that human exists for those frames
+under a different id. Same for t15's invented tail.
+
+Two items on the user's list close with that one operation, and no new model, data or run is
+needed: the two ids already exist, both halves are already measured, and the only thing missing is
+the statement that they are the same person. The evidence for the statement: 0.85 m apart, their
+spans overlap by 2 frames, and both measure **blue** off the video pixels (§ П7).
 
 ### П4 — twin: two tracks inside one body
 
@@ -148,42 +203,84 @@ travel over 24 frames, while the human it represents was crossing the box.
 That is the exact defect the user reported for 25. It is not a separate failure mode from П2 — it
 is what an in-frame phantom prefix *looks like* when the player it belongs to was moving.
 
+### П7 — kit measured off the video, not taken from `team_id`
+
+> я просто брал цвет игроков в реконструкции за истину, но похоже, что там тоже ошибки.
+
+Right to doubt it. `team_id` is a k-means cluster label over a colour sampled once per track, so a
+track that changes human keeps its first kit. `--kit` reads the shirt straight from the source
+frames instead — median HSV of the upper-torso strip of the **detector's own 2D box**.
+
+Two traps, both hit while building it:
+
+* **The 2D record's ids are not the scene's.** Split and stitch renumber: 9 of 24 disagree,
+  including two clean swaps (scene 9 ↔ npz 10, scene 11 ↔ npz 12) and t66 landing on npz box 2 —
+  which is the phantom standing inside player 2, visible in П4. So the box is found by projecting
+  the subject's feet and taking the nearest box bottom, **never by id**.
+* **A heavily occluded box samples the occluder's shirt.** A few flipped frames inside a crossing
+  are that. Flips at a track's *death* or *birth* are the ones that mean something.
+
+Result: **`team_id` agrees with the pixels on 22 of 24 tracks.** The two that do not:
+
+| track | `team_id` | measured shirt | reading |
+|---|---|---|---|
+| **t3** | B (blue) | **`YYYYYY?BBBB?YYYYYYY???YYYYYYY?BBBBBB`** | yellow for most of its life, then **blue for its last 6 measured frames** — the frames where t66 takes over. The id walks off a yellow player onto a blue one and then dies. |
+| **t77** | B (blue) | **`YYY`** | all 3 of its measured frames are yellow, while its handover partner t10 is solidly blue. |
+
+And the two the user asked about directly: **t20 measures `BYYYYYYYYY??YYYYYY` — yellow, team A
+confirmed. t71 measures `?BB?B` — blue, team B confirmed.** They are *different kits*, so
+«20 стал 71» would join two different players. The colour did not change by mistake there.
+
+Also visible: t12 opens with 7 yellow frames before settling blue, and t13 and t17 each carry a
+short yellow patch. `split_on_kit_change` (#132, on by default) evidently did not cut these — worth
+a look, since it is the mechanism that is supposed to.
+
 ## 4. Score against the eye
 
-**19 of 20 judged tracks agree.**
+**19 of 20 judged tracks agree**, after the t20 correction moved П2 from "in-frame" to "duplicate".
 
 | criteria | tracks | user's verdict |
 |---|---|---|
-| `OK` (FULL, no in-frame imputed run) | 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13, 17 | correct ✅ ×12 |
-| `PHANTOM` | 3, 10, 15, 25, 66, 71, 77 | stitch / misplaced ✅ ×7 |
-| `PHANTOM` | **20** | **correct ❌** |
-| `OK_OFF_FRAME` | 16, 31 | not judged (one of them is the user's "32") |
+| `OK` (`FULL`) | 1, 2, 4, 5, 6, 7, 8, 9, 11, 12, 13, 17 | correct ✅ ×12 |
+| `PHANTOM_HALF` | 3, 66 · 10, 77 · 15, 25 | stitch / misplaced ✅ ×6 |
+| `OK_UNMEASURED` | **20** | correct ✅ (after the correction) |
+| `OK_UNMEASURED` | **71** | **stitch ❌ — the one open disagreement** |
+| `OK_OFF_FRAME` | 16, **31** | 31 confirmed as the "32" ✅; 16 not judged |
 | `OK` | 14, 18 | not judged — predicted fine |
 
-Recall on defects is 7/7: **no track the user called broken was missed.** The single false positive
-is t20.
+**Every defect the user named is caught, and no track he called correct is convicted.** The single
+disagreement is t71 — and it is the one the user himself flagged as uncertain.
 
-## 5. The three things this does not settle
+## 5. What is still open
 
-**(a) t20 — the one disagreement.** Its shape is `CORE`: imputed f0–9, measured f10–19,
-interpolated f20–26, measured f27–34, then imputed f35–59. That is 42 of 60 frames not measured,
-25 of them a frozen mannequin sliding 1.68 m in frame, and 11 frames of it standing inside t25. By
-every criterion it is a phantom at the ends; the eye called it correct. Either the ends were not
-noticed (they are late in the clip, f35–59), or `CORE` deserves more trust than `TAIL`/`HEAD`
-because its position is anchored by real measurements on *both* sides. **Not resolved by narrowing
-the criterion to fit** — the user re-checks t20 at frames 0–9 and 35–59 in `/app`, pitch panel,
-`mark imputed` on.
+**(a) 15 → 71 (eye) vs 15 → 25 (geometry).** The user's own second look:
 
-**(b) 15 → 71 (eye) vs 15 → 25 (geometry).** The user named `15, 71`. The handover test ranks
-`15 → 25` second-strongest in the scene (0.85 m, 2-frame gap) and `15 → 71` needs a **29-frame
-blind gap** with no measurement of that human at all. The two readings are mutually exclusive, and
-they are not equally cheap to be wrong about: if `15 → 25` is right, that single stitch *also*
-fixes the 25 placement complaint, because 25's invented prefix would be replaced by 15's measured
-frames 0–26. Check: `/app`, frames 24–30, `ids` on — does t15 hand over to t25 or does another
-player take that box?
+> 15 сложно сказать, выглядит вообще как 15 стал 20-м, а 20 стал 71, но цвет поменял.
 
-**(c) "32".** No such track. Tracks 16 and 31 are the only off-frame ones and both match the
-description. Which one did the user mean?
+What the measurements say about that chain:
+
+* **15 and 20 are both `measured` on frames 10–19**, converging from 2.15 m to 0.59 m. The
+  pipeline is looking at two humans there — consistent with the user's own reading that t20 is the
+  player *behind* 15, not 15 himself.
+* **20 → 71 is geometrically plausible**: 1.08 m between t20's last measurement (f34) and t71's
+  first (f55), and t20's coasted tail lands 1.13 m from t71 at f55.
+* **but the kit says no.** t20 measures yellow on 16 of 18 measured frames; t71 measures blue on
+  all its usable frames (§ П7). Two kits, two players.
+* `15 → 25` stays the strongest reading in the scene after `10 → 77`: 0.85 m, 2-frame overlap,
+  both blue, and it disposes of the t25 placement complaint for free.
+
+t71 then has no partner and is simply a real player picked up for the last 5 frames — which is
+what the criteria now say (`OK_UNMEASURED`). **User is checking frames 24–30 with `ids` on.**
+
+**(b) Two tracks whose kit contradicts their `team_id`** — t3 (flips yellow→blue at its death) and
+t77 (yellow, paired with blue t10). Both sit inside the user's stitch list, so they are not
+cosmetic: if t3's last six frames are already a different human, the `3 → 66` merge is joining the
+wrong end. Worth re-checking by eye at frames 30–36.
+
+**(c) `split_on_kit_change` did not cut t3, t12, t13 or t17**, all of which carry two kits in the
+measured scan. #132 reported that gate taking two-human tracks 9 → 0; either it did not run on
+this scene, the stitcher re-merged its pieces, or the flips are occlusion artefacts. Cheap to
+check, and it bears directly on (b).
 
 ## 6. What follows for the pipeline
 
@@ -192,10 +289,12 @@ Ordered by how much of the user's list each item closes.
 1. **Stitch on the handover criterion (П3).** Three pairs → three players instead of six. This is
    the user's whole stitch list and it needs no new model — the signal is already in `provenance`
    plus the roots. The existing stitcher (#132) merges on kit change; this adds
-   *dies-where-another-is-born*.
-2. **Do not export a long in-frame imputed run (П2).** After stitching, whatever imputed run is
-   left in frame is a mannequin the user has said should not be displayed. Off-frame runs stay —
-   that half is already correct.
+   *dies-where-another-is-born*. Assign, don't just list: one partner each, nearest first, or a
+   real player (t20) gets swept into someone else's merge.
+2. **Drop the mannequin half of every merged pair (П2).** What is left unmeasured after that is a
+   player nobody measured — off frame, occluded, or missed — and he **stays**, marked. That is the
+   user's rule and R-6's both: *«если футболист становится фантомом в кадре, то его отображать не
+   следует»* applies to the duplicate, not to the man we failed to see.
 3. **Anchor the invented prefix (П6)**, for the runs that survive: extrapolate backwards from the
    first measured velocity instead of holding the position.
 4. **Give the scene a vertical DOF (П5)** so a jump can exist at all. Until then t17 cannot be

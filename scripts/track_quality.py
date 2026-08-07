@@ -172,14 +172,8 @@ def classify(tid: int, track: dict, project, min_run: int, off_frac: float) -> d
         out_frac = 1.0 - (sum(inside[a:b + 1]) / (b - a + 1))
         (off if out_frac >= off_frac else bad).append((a, b, out_frac))
 
-    if not bad and not off:
-        verdict = 'OK'
-    elif not bad:
-        verdict = 'OK_OFF_FRAME'
-    else:
-        verdict = 'PHANTOM'
     return {
-        'tid': tid, 'shape': shape, 'verdict': verdict, 'n': n,
+        'tid': tid, 'shape': shape, 'verdict': None, 'n': n,
         'n_measured': len(measured), 'first_m': measured[0] if measured else None,
         'last_m': measured[-1] if measured else None,
         'timeline': ''.join(SYM.get(p, '?') if inside[i] else '_' for i, p in enumerate(prov)),
@@ -188,13 +182,54 @@ def classify(tid: int, track: dict, project, min_run: int, off_frac: float) -> d
     }
 
 
-def stitch_candidates(tracks: dict, verdicts: dict, max_gap: int, max_dist: float) -> list:
-    heads = [t for t, v in verdicts.items() if v['shape'] == 'HEAD']
+def greedy_match(cands: list) -> list:
+    """One partner each, nearest handover first — an assignment, not a candidate list.
+
+    Matters for t20: he is a candidate head for t25 at 2.09 m, but t15 claims t25 at 0.85 m, so a
+    proper assignment leaves t20 unpaired and therefore whole. Reporting every candidate instead
+    would have convicted a real player of being a phantom.
+    """
+    taken, out = set(), []
+    for c in sorted(cands, key=lambda x: x['dist']):
+        if c['head'] in taken or c['tail'] in taken:
+            continue
+        taken.add(c['head'])
+        taken.add(c['tail'])
+        out.append(c)
+    return out
+
+
+def assign_verdicts(verdicts: dict, pairs: list, min_run: int) -> None:
+    """The criterion the user's t20 correction forced (2026-08-07).
+
+    An imputed run is a phantom **iff another track is measuring the same human at that time** —
+    i.e. this track is one half of a handover pair, and the merge will take the other half's
+    measurements over this half's mannequin. A track with no partner is a real player the pipeline
+    simply failed to measure: R-6 says show him, marked, not delete him. That is exactly t20, whom
+    the eye called correct while an in-frame test called him a phantom.
+    """
+    paired = {c['head'] for c in pairs} | {c['tail'] for c in pairs}
+    for tid, v in verdicts.items():
+        runs = v['phantom_runs'] + v['off_frame_runs']
+        if tid in paired:
+            v['verdict'] = 'PHANTOM_HALF'
+        elif not runs:
+            v['verdict'] = 'OK'
+        elif v['off_frame_runs'] and not v['phantom_runs']:
+            v['verdict'] = 'OK_OFF_FRAME'
+        else:
+            v['verdict'] = 'OK_UNMEASURED'
+        v['long_runs'] = [(a, b) for a, b, _ in runs if b - a + 1 >= min_run]
+
+
+def stitch_candidates(tracks: dict, verdicts: dict, max_gap: int, max_dist: float,
+                      ignore_team: bool = False) -> list:
+    heads = [t for t, v in verdicts.items() if v['shape'] in ('HEAD', 'CORE')]
     tails = [t for t, v in verdicts.items() if v['shape'] == 'TAIL']
     out = []
     for h in heads:
         for t in tails:
-            if tracks[h]['team'] != tracks[t]['team']:
+            if not ignore_team and tracks[h]['team'] != tracks[t]['team']:
                 continue
             die, born = verdicts[h]['last_m'], verdicts[t]['first_m']
             gap = born - die
@@ -233,6 +268,80 @@ def twins(tracks: dict, radius: float, min_frames: int) -> list:
     return sorted(out, key=lambda t: -t['frames'])
 
 
+def kit_scan(tracks: dict, project, clip: Path, boxes_npz: Path) -> None:
+    """What colour shirt is each track actually wearing, read off the video pixels?
+
+    The user, 2026-08-07: *«я просто брал цвет игроков в реконструкции за истину, но похоже, что
+    там тоже ошибки»*. So this reads the kit from the source frames instead of trusting
+    ``team_id`` (which is a k-means cluster label over a colour sampled once per track).
+
+    Two traps, both hit while building this:
+
+    * **The 2D record's track ids are NOT the scene's.** Split/stitch renumber, so 9 of 24 ids
+      disagree — including two straight swaps (scene 9↔npz 10, scene 11↔npz 12). The box is
+      therefore found by projecting the subject's feet and taking the nearest box bottom-centre,
+      never by id.
+    * **A heavily occluded box samples the occluder's shirt.** A kit "flip" of a few frames inside
+      a crossing is that, not evidence of an id swap. Flips at a track's death or birth are the
+      interesting ones.
+    """
+    import cv2
+    d = np.load(boxes_npz, allow_pickle=True)
+    ids, per_frames, per_boxes = d['track_ids'], d['frames'], d['boxes']
+    by_frame: dict[int, list] = {}
+    for k in range(len(ids)):
+        for j, f in enumerate(per_frames[k]):
+            by_frame.setdefault(int(f), []).append(per_boxes[k][j][:4])
+    cap = cv2.VideoCapture(str(clip))
+    cache: dict[int, object] = {}
+
+    def frame(i):
+        if i not in cache:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+            ok, img = cap.read()
+            cache[i] = img if ok else None
+        return cache[i]
+
+    def kit_at(f, root):
+        uv = project(f, np.array([root[0], root[1], root[2] - 0.92]))   # feet, where a box ends
+        if uv is None or f not in by_frame:
+            return '-'
+        best = min(by_frame[f], key=lambda b: np.hypot((b[0] + b[2]) / 2 - uv[0], b[3] - uv[1]))
+        if np.hypot((best[0] + best[2]) / 2 - uv[0], best[3] - uv[1]) > 45:
+            return '-'
+        x0, y0, x1, y1 = best
+        h, w = y1 - y0, x1 - x0
+        a, b = int(y0 + 0.20 * h), int(y0 + 0.45 * h)       # shirt: below the head, above shorts
+        c0, c1 = int(x0 + 0.25 * w), int(x0 + 0.75 * w)
+        img = frame(f)
+        if img is None or b <= a or c1 <= c0 or min(a, c0) < 0:
+            return '-'
+        patch = img[a:b, c0:c1]
+        if patch.size == 0:
+            return '-'
+        med = np.uint8([[np.median(patch.reshape(-1, 3), axis=0)]])
+        hsv = cv2.cvtColor(med, cv2.COLOR_BGR2HSV)[0][0]
+        if 18 <= hsv[0] <= 48 and hsv[1] > 90:
+            return 'Y'
+        if 85 <= hsv[0] <= 135 and hsv[1] > 55:
+            return 'B'
+        return '?'
+
+    print('\n== kit measured from the video, at every MEASURED frame (Y yellow · B blue · ? '
+          'unclear · - no box) ==')
+    print(f'{"track":>6} {"team":>5} {"kit":>4}  per measured frame')
+    for tid in sorted(tracks):
+        tr = tracks[tid]
+        ms = [i for i, p in enumerate(tr['prov']) if p == 'measured']
+        s = ''.join(kit_at(int(tr['frames'][i]), tr['transl'][i]) for i in ms)
+        y, b = s.count('Y'), s.count('B')
+        kit = 'Y' if y > b * 1.5 else ('B' if b > y * 1.5 else 'MIX')
+        clash = (tr['team'] == 'A' and kit == 'B') or (tr['team'] == 'B' and kit == 'Y')
+        print(f'{tid:6d} {str(tr["team"]):>5} {kit:>4}  {s}' +
+              ('   <== team_id disagrees with the pixels' if clash else ''))
+    cap.release()
+
+
 def explain_imputed(tracks: dict) -> None:
     print('\n== is an imputed run a frozen mannequin? per run: root travel vs limb travel ==')
     print(f'{"track":>6}  {"run":>12} {"root move":>10} {"limb move":>11}')
@@ -266,6 +375,13 @@ def main() -> None:
     ap.add_argument('--max-dist', type=float, default=6.0, help='handover metres for a stitch pair')
     ap.add_argument('--explain-imputed', action='store_true',
                     help='print the per-run root-vs-limb travel the criteria rest on')
+    ap.add_argument('--kit', action='store_true',
+                    help='read each track\'s shirt colour off the video (needs --camera + --boxes)')
+    ap.add_argument('--clip', default='samples/video/Colombia-1-0-Congo-DR1080p.mp4')
+    ap.add_argument('--boxes', default='out/cue/cue_off.npz',
+                    help='npz of measured 2D boxes; ids are matched by geometry, not by number')
+    ap.add_argument('--ignore-team', action='store_true',
+                    help='drop the same-team filter on handovers (the team label is not reliable)')
     args = ap.parse_args()
 
     scene = load_scene(REPO / args.scene)
@@ -285,6 +401,9 @@ def main() -> None:
 
     verdicts = {tid: classify(tid, tr, project, args.min_run, args.off_frac)
                 for tid, tr in sorted(tracks.items())}
+    cands = stitch_candidates(tracks, verdicts, args.max_gap, args.max_dist, args.ignore_team)
+    pairs = greedy_match(cands)
+    assign_verdicts(verdicts, pairs, args.min_run)
 
     print('\n== provenance timeline (M measured · ~ interpolated · . imputed · '
           '_ root outside image)')
@@ -294,20 +413,23 @@ def main() -> None:
               f'{v["timeline"]}')
 
     print('\n== verdict per track ==')
+    why = {'PHANTOM_HALF': 'half of one human — merge with its partner, drop this mannequin',
+           'OK_OFF_FRAME': 'left the picture, so holding him is right',
+           'OK_UNMEASURED': 'real player we failed to measure — show him, marked (R-6)',
+           'OK': ''}
     for tid, v in verdicts.items():
-        note = ''
-        if v['phantom_runs']:
-            note = 'in-frame imputed ' + ', '.join(f'f{a}-{b}' for a, b, _ in v['phantom_runs'])
-        elif v['off_frame_runs']:
-            note = 'left the picture ' + ', '.join(f'f{a}-{b}' for a, b, _ in v['off_frame_runs'])
-        print(f'  t{tid:<3d} {v["verdict"]:<13} {v["shape"]:<5} '
-              f'measured {v["n_measured"]:2d}/{v["n"]:2d}  {note}')
+        runs = ', '.join(f'f{a}-{b}' for a, b in v['long_runs'])
+        print(f'  t{tid:<3d} {v["verdict"]:<14} {v["shape"]:<5} '
+              f'measured {v["n_measured"]:2d}/{v["n"]:2d}  {why[v["verdict"]]}'
+              + (f'  [{runs}]' if runs else ''))
 
-    cands = stitch_candidates(tracks, verdicts, args.max_gap, args.max_dist)
-    print(f'\n== stitch candidates (HEAD dies where TAIL is born, same team, gap <= {args.max_gap} '
-          f'frames, <= {args.max_dist} m) ==')
-    for c in cands:
-        print(f'  t{c["head"]} -> t{c["tail"]}   handover {c["dist"]:5.2f} m   frame gap '
+    team_note = 'ignoring the team label' if args.ignore_team else 'same team'
+    print(f'\n== handover pairs ({team_note}, gap <= {args.max_gap} frames, <= {args.max_dist} m) '
+          '== · ✓ = accepted by the assignment, one partner each')
+    accepted = {(c['head'], c['tail']) for c in pairs}
+    for c in sorted(cands, key=lambda x: x['dist']):
+        mark = '✓' if (c['head'], c['tail']) in accepted else ' '
+        print(f'  {mark} t{c["head"]} -> t{c["tail"]}   handover {c["dist"]:5.2f} m   frame gap '
               f'{c["gap"]:+3d}')
     if not cands:
         print('  (none)')
@@ -333,9 +455,11 @@ def main() -> None:
 
     if args.explain_imputed:
         explain_imputed(tracks)
+    if args.kit:
+        kit_scan(tracks, project, REPO / args.clip, REPO / args.boxes)
 
     if args.labels:
-        score(verdicts, cands, json.loads((REPO / args.labels).read_text()))
+        score(verdicts, pairs, json.loads((REPO / args.labels).read_text()))
 
 
 def score(verdicts: dict, cands: list, labels: dict) -> None:
@@ -348,8 +472,9 @@ def score(verdicts: dict, cands: list, labels: dict) -> None:
             unjudged.append(tid)
             continue
         got = v['verdict']
-        ok = ((want in ('correct', 'off_frame_ok') and got in ('OK', 'OK_OFF_FRAME'))
-              or (want in ('stitch', 'misplaced') and got == 'PHANTOM'))
+        ok = ((want in ('correct', 'off_frame_ok')
+               and got in ('OK', 'OK_OFF_FRAME', 'OK_UNMEASURED'))
+              or (want in ('stitch', 'misplaced') and got == 'PHANTOM_HALF'))
         (agree if ok else disagree).append((tid, want, got))
     print(f'  agree {len(agree)}/{len(agree) + len(disagree)} judged tracks; '
           f'{len(unjudged)} not judged by eye: {unjudged}')
