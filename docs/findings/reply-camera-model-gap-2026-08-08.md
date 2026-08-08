@@ -100,8 +100,14 @@ against what we measured:
 | 236 frames | ~9 % | 3.3–5.0 m | ~340 px | fit **refuses**, reprojection **471 px** |
 
 A single-focal model that fits at 60 frames and fails at 236, with the failure the right order of
-magnitude for the review's own drift figures. That is its WorldPose statistic **confirmed as a
-prediction on our clip**, which is a much better position than either of us was in.
+magnitude for the review's own drift figures.
+
+> ⚠ **§6 disproves the reading of this table.** The two rows compare *different calibrations* —
+> the golden npz's and the scene's — not two window lengths of the same one. Running the scene's
+> own calibration at 30, 60, 120 and 236 frames gives 467, 480, 476 and 471 px: **flat**. The
+> window is not the variable. The zoom figure still transfers (our clip drifts ~11 %); the
+> inference drawn here from it does not. Left in place because it is the reasoning the measurement
+> was written to test.
 
 ---
 
