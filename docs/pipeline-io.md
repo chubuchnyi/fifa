@@ -25,8 +25,12 @@ measured it says so — that distinction is the point of the last section.
 
 Two conversions bite people:
 
-- **SMPL-X poses arrive in a camera frame** and are rotated to world by
-  `R_SMPLX_CAMERA_TO_WORLD` (`core/scene/frames.py`).
+- **SMPL-X poses arrive in a camera frame with +y pointing DOWN.** `R_SMPLX_CAMERA_TO_WORLD`
+  (`core/scene/frames.py`) maps `world = (x, z, −y)`. There is a second matrix,
+  `R_SMPLX_CANONICAL_TO_WORLD`, for canonical +y-up output: `world = (x, −z, y)`. Both have
+  det +1. The camera one treats the broadcast camera as level and leaves residual tilt to the
+  camera solve. `smplx_to_world` re-origins on the pelvis first — SMPL-X's pelvis sits ~0.35 m
+  off the model origin.
 - **The solved camera is 180° rolled** relative to the raw video on legacy solves. Any consumer
   of raw pixels must rotate first. `CameraTrack.raw_frame_aligned` says whether that workaround
   is still needed; solves rebuilt by `scripts/recalibrate_camera.py` set it `True`.
@@ -47,14 +51,27 @@ only what depends on it.
 | — identity | `Tracks` | `Tracks` + `IdentityReport` (pure, opt-in) |
 | `CALIBRATE` | `ClipRef` | `FieldCalibration` |
 | `POSE` | `ClipRef`, `Tracks`, `FieldCalibration` | `dict[track_id, SubjectMotion]` |
-| `BALL` | `ClipRef` | `BallTrack` (2D) → lifted to 3D with the calibration |
-| `ASSEMBLE` | all of the above | `Scene` |
+| `BALL` | `ClipRef` | **`Ball2DTrack`** — 2D only |
+| — ball lift | `Ball2DTrack`, `FieldCalibration`, motions | `BallTrack` (3D). Pure core, **not cached** |
+| `ASSEMBLE` | `ReconstructionResult` | `Scene` — **called by the controller, not by `ReconstructionPipeline.run`** |
 | — coherence | `Scene` | `Scene` + `CoherenceReport` (fills gaps, writes `provenance`) |
 | — handover | `Scene` | `Scene` + `HandoverReport` (opt-in, `--handover`) |
 | — physics gates | `Scene` | `Scene` + per-gate reports |
 | `RENDER` / `EXPORT` / `OBSERVE` | `Scene` | images / files / `Observation` |
 
-`AMPLIFY`, `ENV`, `AVATAR` exist in the enum and are stubs.
+**Six of the twelve enum members are wired.** `RECON_ORDER = (DETECT, TRACK, CALIBRATE, POSE,
+BALL, ASSEMBLE)` is the only order executed. `AMPLIFY`, `ENV`, `AVATAR`, `RENDER`, `EXPORT` and
+`OBSERVE` are declared and have **no orchestration call site** — render/export/observe happen
+through `controller.Application`, not through the stage runner.
+
+`stitch` is off in `ReconstructionPipeline` (`stitch_cfg=None`) and **on** at the CLI
+(`--no-stitch` to disable). Both statements are true at different layers.
+
+**Cache key.** `content_key` hashes `{stage, input_hash, params, model_version}`. `input_hash` is
+`clip_hash(clip)`, which covers `source_id`, `uri`, `width/height` and **only the first frame, the
+last frame and the count** — not the full frame list. Two different frame subsets with the same
+endpoints and length collide. POSE additionally folds the stitch and identity configs into its
+params, so toggling either invalidates the pose cache.
 
 ---
 
@@ -80,7 +97,8 @@ sports`) splits them.
 **`Tracklet`** — `track_id: int`, `frames: (T,) int`, `bboxes_xyxy: (T, 4) float`, `cls: str`,
 `team_id: str | None`.
 **`Tracks`** — `tracklets: list[Tracklet]`, `teams: list[Team]`.
-**`Team`** — `id`, `name`, `color_rgb: (3,)` in 0..1, the mean kit colour of its members.
+**`Team`** (lives in `core/scene/subject.py`, not perception) — `id: str`, `name: str | None`,
+`color_rgb: (3,) | None` in 0..1, the mean kit colour of its members.
 
 `team_id = None` means unassigned. `StitchConfig.require_same_team` treats it as a **wildcard**,
 so a null label removes a constraint rather than adding one.
@@ -90,8 +108,17 @@ so a null label removes a constraint rather than adding one.
 **`FieldCalibration`** — `homographies: (T, 3, 3) float` (image → world plane), `frames: (T,) int`,
 `confidence: (T,) float` in `[0, 1]`, `keypoints: dict | None` (adapter-defined).
 
-Confidence is **per frame**. #126 measured that it is bit-identical across runs whose homographies
-differ by 0.76 m median / 3.67 m max, i.e. it is not predictive — and #136 now gates on it.
+Direction is **image px → world pitch plane in metres**: `[x, y, 1]ᵀ ~ H @ [u, v, 1]ᵀ` with Z = 0.
+Helpers `image_to_world(frame, uv)` and `world_to_image(frame, xy)` are on the type.
+
+Confidence is **per frame**, and `MIN_SOLVED_CONFIDENCE = 0.02`. **Confidence exactly `0.0` means
+the frame was not solved at all** — the homography is carried from the last good frame, or is
+`eye(3)`. So a scene can carry a full `(T, 3, 3)` array in which a third of the frames are copies.
+That is what produced the 2026-08-03 vertical-clip catastrophe: 43 % of 355 frames on a stale
+homography.
+
+#126 measured that confidence is bit-identical across runs whose homographies differ by 0.76 m
+median / 3.67 m max, i.e. it is not predictive — and #136 now gates on it.
 
 ### Pose
 
@@ -113,7 +140,10 @@ differ by 0.76 m median / 3.67 m max, i.e. it is not predictive — and #136 now
 
 ### Ball
 
-**`BallTrack`** — `frames: (T,)`, `positions_3d: (T, 3)` metres,
+**`Ball2DTrack`** — what the `BallTracker` port returns: `frames: (T,)`,
+`positions_2d: (T, 2)` px, `confidence: (T,)`.
+
+**`BallTrack`** — the 3D result of `lift_ball_to_3d`: `frames: (T,)`, `positions_3d: (T, 3)` metres,
 `height_confidence: (T,)` (Z is recovered by ballistics and is genuinely uncertain, so it is a
 first-class field), `track_2d: (T, 2) | None` px, `mode: (T,)` of `BallMode`.
 
@@ -147,11 +177,26 @@ Two consequences worth stating plainly:
 is a list of `Correction` records; `resolved` is computed by the correction engine and never
 stored. Every editor — CLI, MCP, browser — appends to the same list.
 
-**`Correction`** — `id`, `target: CorrectionTarget`, `frame_range`, `mode`, `payload`, `note`,
-`enabled`, `created_at`. `TargetKind` includes `POSE_BODY_JOINT`, `ROOT_TRANSLATION`,
-`ROOT_ORIENTATION`, `FIELD_CALIBRATION`. A `FIELD_CALIBRATION` correction carries a
-`PlaneTransformPayload(matrix: (3, 3))` — a **similarity on the pitch plane: 4 degrees of freedom**
-(translate x, translate y, rotate, uniform scale).
+**`Correction`** — `id`, `target: CorrectionTarget`, `frame_range` (**inclusive** start/end),
+`mode`, `payload`, `enabled: bool`, `note`, `created_at`.
+
+`TargetKind` has six members: `POSE_BODY_JOINT`, `ROOT_ORIENTATION`, `ROOT_TRANSLATION`,
+`SHAPE_BETA`, `BALL_POSITION`, `FIELD_CALIBRATION`. `CorrectionMode` has four:
+`CONSTANT_OFFSET`, `KEYFRAME_INTERP`, `REFIT`, `TEMPORAL_SMOOTHING`.
+
+Payloads, and the delta-vs-absolute distinction that matters when reading them back:
+
+| payload | carries |
+|---|---|
+| `OffsetPayload` | `delta` — a **relative** `(3,)` vector or axis-angle, or `(n_betas,)` for `SHAPE_BETA` |
+| `KeyframePayload` | `key_frames (K,)`, `key_values (K, D)` — **absolute** values — and `interp: linear \| slerp` |
+| `PlaneTransformPayload` | `matrix (3, 3)`, composed world-side as `H' = H @ matrix` |
+| `SmoothingPayload` | `window` (odd), `method`, `sigma` |
+| `RefitPayload` | `constraints: dict`, opaque to core |
+
+A `FIELD_CALIBRATION` correction is a **similarity on the pitch plane: 4 degrees of freedom**
+(translate x, translate y, rotate, uniform scale). It cannot express a focal, a tilt or
+distortion — see [`pipeline-io-proposed.md`](pipeline-io-proposed.md).
 
 ---
 
@@ -179,10 +224,12 @@ A 236-frame, 38-subject scene is ~42 MB. Read it with
 | `centre` | `(3,)` | camera position in world metres. (−2.29, −70.13, 17.22) |
 | `rvecs` | `(T, 3)` | per-frame rotation, Rodrigues |
 | `frames` | `(T,)` | frame indices |
-| `world_to_image` | `(T, 3, 3)` | per-frame homography |
+| `world_to_image` | `(T, 3, 3)` | pitch-plane world (X, Y, 1) → image px. `K @ [r₁ \| r₂ \| −R·c]`. **The inverse of `FieldCalibration.homographies`** — `apply_rigid_camera.py` inverts per frame |
 
 Pinned by `tests/e2e/test_golden_real_camera.py`, which is mutation-checked. **No distortion, no
 translation over time, no zoom.** It is a pan-tilt-roll model on a fixed tripod.
+`CameraTrack.translation = −R @ centre`. The current writer also emits `width`/`height`; this file
+predates that and does not have them.
 
 ### Cached detections — `out/**/dets_*.npz`
 
@@ -197,7 +244,7 @@ artifact fails at export time, not mid-render (`adapters/blender/anim_contract.p
 
 | file | required keys |
 |---|---|
-| `anim_subject_*.npz` | `verts`, `faces`, `color`, `frames`, `alpha`, `provenance` |
+| `anim_subject_*.npz` | `verts (T, 10475, 3)`, `faces (20908, 3)`, `color`, `frames`, `alpha`, `provenance` |
 | `ball.npz` | `frames`, `positions_3d`, `height_confidence`, `mode` |
 | `pitch.npz` | `pitch_verts`, `pitch_faces`, `goal_verts`, `goal_faces` |
 | `stadium.npz` | `verts`, `faces`, `colors`, `uv`, `tile` |

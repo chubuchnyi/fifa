@@ -39,6 +39,13 @@ image pixels.
 Add nothing; just bin those existing `(uv, dist)` pairs by radius from the principal point and
 print the profile.
 
+**One thing to get right or the measurement is worthless.** `FieldCalibration.confidence` of
+exactly `0.0` means that frame was **not solved** — its homography is a copy carried from the last
+good frame (`MIN_SOLVED_CONFIDENCE = 0.02`). On the vertical clip that was 43 % of 355 frames.
+A carried homography drifts with the pan, so its residual grows with *time*, not with radius, and
+mixing those frames in would fake exactly the signal we are testing for. **Bin only frames with
+confidence above the floor, and report how many were dropped.**
+
 | outcome | conclusion |
 |---|---|
 | residual flat with radius | not the lens or the focal. Look at extrinsics or at the pitch model |
@@ -63,7 +70,8 @@ we produce. Fitting one radial coefficient `k1` needs:
 | type | unchanged |
 | `scripts/fit_rigid_camera.py` | ＋ one parameter in the optimiser |
 | `calib/<clip>.npz` | ＋ key `dist: (k,)` |
-| every projector | ▲ apply distortion — `core/scene/projection.py`, `poseannot/camera.py`, `scripts/apply_rigid_camera.py`, `track_quality.py` |
+| `calib/<clip>.npz` | ＋ key `dist: (k,)`; the writer already emits `width`/`height` that this file predates |
+| every projector | ▲ apply distortion. There are at least four and they must agree or the overlay and the export diverge again: `core/scene/projection.py`, `poseannot/camera.py`, `scripts/apply_rigid_camera.py`, `scripts/track_quality.py` |
 
 The last row is the real cost: there are several places that project world → pixel and they must
 all agree, or the overlay and the export disagree again.
