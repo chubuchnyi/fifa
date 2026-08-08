@@ -99,6 +99,18 @@ COH_ARGS=()
 if [ "${STITCH:-1}" = "1" ]; then echo "== continuity: stitch ON (default)";
 else COH_ARGS+=(--no-stitch); echo "== continuity: stitch OFF (STITCH=${STITCH})"; fi
 if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence: --coherence ON"; fi
+# HANDOVER=1 → merge two ids that are one human and drop the duplicate mannequin (#135 П3+П2).
+# Off by default: it is the only pass that deletes a subject, so a wrong merge erases a player.
+if [ "${HANDOVER:-0}" = "1" ]; then COH_ARGS+=(--handover); echo "== handover: --handover ON"; fi
+# DET_RES → RF-DETR input square. Unset means the per-clip lookup in
+# config/detector_resolution.yaml decides (896 for the two clips measured so far). Set it to
+# compare resolutions on the same code: 896 cut mid-pitch identity events 89->61 on the
+# broadcast clip and 90->58 on the fan clip against 560, for 1.5x the detector.
+if [ -n "${DET_RES:-}" ]; then
+  COH_ARGS+=(--detector-resolution "$DET_RES"); echo "== detector: input square ${DET_RES} px"
+else
+  echo "== detector: input square from config/detector_resolution.yaml"
+fi
 # PHYSICS=1 → M3-9 kinematic gate: clamp impossible root speed/accel, mark teleports (#207).
 if [ "${PHYSICS:-0}" = "1" ]; then COH_ARGS+=(--physics); echo "== physics: --physics ON (M3-9 kinematic gate)"; fi
 # PHYSICS_PROFILE selects the config/physics.yaml named profile (default / conservative /
