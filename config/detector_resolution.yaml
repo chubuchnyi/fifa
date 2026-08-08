@@ -1,0 +1,38 @@
+# RF-DETR input square, per clip.
+#
+# RF-DETR resizes the whole frame to resolution x resolution. Aspect ratio is not kept, so how
+# much of a player survives the resize depends on the clip's own shape and on how far the camera
+# is. The best value is therefore a property of the clip, not a constant.
+#
+# Measured on two clips (2026-08-08, 236 frames each, all five squares). The number we minimise is
+# mid-pitch identity events — a track that is born or dies away from the frame edge, i.e. the
+# tracker losing or swapping a player mid-play.
+#
+#   broadcast 1920x1080          fan clip 1080x1920
+#     560  -> 89 events            560  -> 90 events
+#     896  -> 61 events  <- best   896  -> 58 events  <- best
+#    1064  -> 66 events           1064  -> 65 events
+#    1288  -> 73 events           1288  -> 75 events
+#    1512  -> 97 events
+#
+# Both clips are best at 896, but that is two clips. Do not read it as a law. Going higher makes
+# things worse on both: at 1512 the detector finds more boxes than at 560 and produces more
+# identity errors than at 560.
+#
+# To measure a new clip:
+#   1. on the GPU box:  python scripts/dump_detections.py --clip <mp4> --frames 236 \
+#                           --resolutions 560 896 1064 1288 --out-dir out/dets
+#   2. on CPU, per npz: PYTHONPATH=src .venv/bin/python scripts/bench_assignment_margin.py \
+#                           --dets <npz> --clip <mp4> --frames 236
+#   3. take the resolution with the fewest "mid-pitch identity events" and add it below.
+#
+# Resolution must be divisible by 56 (RF-DETR's patch stride).
+# Override order: this file (by clip file name) -> --detector-resolution -> `default` below.
+
+default: 896
+
+clips:
+  # broadcast, 1920x1080, floodlit night match
+  Colombia-1-0-Congo-DR1080p.mp4: 896
+  # phone video from the stand, 1080x1920 portrait
+  14604731_1080_1920_30fps.mp4: 896

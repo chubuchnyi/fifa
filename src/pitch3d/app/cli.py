@@ -672,12 +672,12 @@ def main(argv: list[str] | None = None) -> int:
                              "broadcast clip cuts between cameras, and tracking + calibrating "
                              "through one blends two views into a single 'episode'")
     parser.add_argument("--detector-resolution", type=int, default=None,
-                        help="RF-DETR input square in px, divisible by 56. Default 896, which is "
-                             "MEASURED: it takes mid-pitch identity events 89 -> 61 and raw "
-                             "tracklets 70 -> 56 against 560, for 1.5x the cheapest stage. The "
-                             "curve is a U — 1288 and 1512 are worse than 896 on identity while "
-                             "finding MORE boxes — so raising this past 896 is not free. Pass 560 "
-                             "for the pre-2026-08-08 behaviour")
+                        help="RF-DETR input square in px, divisible by 56. Default: looked up per "
+                             "clip in config/detector_resolution.yaml (896 for both clips measured "
+                             "so far). Raising it is not free — on both clips 1288 and 1512 gave "
+                             "MORE identity errors than 896 while finding more boxes. Measure a "
+                             "new clip with scripts/dump_detections.py; the procedure is in the "
+                             "config file")
     parser.add_argument("--handover", action="store_true",
                         help="merge two ids that are one human: a subject whose measurements "
                              "stop mid-clip and another whose measurements start there, within "

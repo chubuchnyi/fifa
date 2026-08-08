@@ -18,6 +18,7 @@ satisfying the very same ``Detector`` port test the fake passes (roadmap M1).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -86,6 +87,38 @@ class DetectionBackend(Protocol):
         ...
 
 
+#: Where the per-clip input squares live. Kept as data, not code, because the best value depends
+#: on the clip (its aspect ratio and how far the camera sits), and we have measured only two.
+_REPO_ROOT = Path(__file__).resolve().parents[3].parent
+RESOLUTION_CONFIG = _REPO_ROOT / "config" / "detector_resolution.yaml"
+
+
+def resolution_for_clip(clip: ClipRef | None, path: Path | None = None) -> int | None:
+    """Input square for this clip: an exact file-name entry, else the config default, else None.
+
+    Returns ``None`` when the config is missing or unreadable, which makes the backend fall back
+    to its own default. A missing config must not stop a run.
+    """
+    cfg_path = path or RESOLUTION_CONFIG
+    try:
+        import yaml
+    except ImportError:
+        return None
+    try:
+        data = yaml.safe_load(cfg_path.read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    clips = data.get("clips")
+    if clip is not None and clip.uri and isinstance(clips, dict):
+        entry = clips.get(Path(str(clip.uri)).name)
+        if entry is not None:
+            return int(entry)
+    default = data.get("default")
+    return None if default is None else int(default)
+
+
 @dataclass
 class RFDETRDetector(Detector):
     """RF-DETR player/ball detector (FR-5) — pure mapping over an injected backend.
@@ -105,9 +138,10 @@ class RFDETRDetector(Detector):
     class_map: dict[int, str] = field(default_factory=lambda: dict(ROBOFLOW_SPORTS_CLASSES))
     weights: str | None = None
     device: str = "cuda"
-    #: Network input square forwarded to the default backend. ``None`` takes
-    #: :class:`RFDETRBackend`'s measured default (896); pass an int to override, or the string
-    #: form via ``--detector-resolution`` on the CLI. See the backend's field for the numbers.
+    #: Network input square. ``None`` means "look the clip up in
+    #: ``config/detector_resolution.yaml``, else use that file's ``default``". An int forces the
+    #: value and skips the lookup. The best square is a property of the clip, not a constant —
+    #: see the config file for the measurements and for how to measure a new clip.
     resolution: int | None = None
 
     def info(self) -> ModelInfo:
@@ -124,7 +158,7 @@ class RFDETRDetector(Detector):
         )
 
     def detect(self, clip: ClipRef) -> Detections:
-        backend = self.backend or self._default_backend()
+        backend = self.backend or self._default_backend(clip)
         frames: list[FrameDetections] = []
         for raw in backend.detect_raw(clip):
             items: list[Detection] = []
@@ -136,8 +170,9 @@ class RFDETRDetector(Detector):
             frames.append(FrameDetections(frame=int(raw.frame), items=items))
         return Detections(frames=frames)
 
-    def _default_backend(self) -> DetectionBackend:
-        kwargs = {} if self.resolution is None else {"resolution": int(self.resolution)}
+    def _default_backend(self, clip: ClipRef | None = None) -> DetectionBackend:
+        res = self.resolution if self.resolution is not None else resolution_for_clip(clip)
+        kwargs = {} if res is None else {"resolution": int(res)}
         return RFDETRBackend(weights=self.weights, device=self.device, **kwargs)
 
 
@@ -152,34 +187,16 @@ class RFDETRBackend:
     weights: str | None = None
     device: str = "cuda"
     predict_floor: float = 0.05  # permissive backend floor; the adapter does authoritative filtering
-    #: Network input square, in px. RF-DETR resizes the whole frame to ``resolution x
-    #: resolution``, so aspect ratio is **not** preserved and a portrait phone clip is squashed
-    #: hardest: 1080x1920 -> 560x560 is 0.52x across and **0.29x down**, turning a measured
-    #: 28 x 72 px player into **14 x 21 px** before the detector ever sees him.
+    #: Network input square, in px. ``None`` uses RF-DETR's own default of 560.
     #:
-    #: **Default 896, measured, and it replaced 560 by overturning our own earlier verdict.**
-    #: W1 (2026-08-07) compared resolutions on *players found per frame*, saw +2 %, and concluded
-    #: the knob was not a lever. That was the wrong metric. Re-measured 2026-08-08 on what the
-    #: knob actually feeds — identity, over 236 frames of the broadcast clip:
+    #: RF-DETR resizes the whole frame to ``resolution x resolution`` and does not keep the aspect
+    #: ratio. A 1080x1920 portrait clip is squashed to 0.52x across and 0.29x down at 560, so a
+    #: 28x72 px player reaches the network as 14x21 px.
     #:
-    #: ===== ============ ================== =============== ==========
-    #:  res   players/f    mid-pitch events   raw tracklets    s/frame
-    #: ===== ============ ================== =============== ==========
-    #:   560    18.23             89               70           0.042
-    #:   896    18.63           **61**           **56**         0.063
-    #:  1064    18.83             66               62           0.063
-    #:  1288    19.09             73               65           0.103
-    #:  1512    18.33             97               76           0.149
-    #: ===== ============ ================== =============== ==========
-    #:
-    #: **A 31 % drop in identity churn for 1.5x the cheapest stage in the pipeline** — against the
-    #: McByte mask cue, which bought 14 % for 686 s of GPU. And the curve is a **U, not a ramp**:
-    #: 1512 is worse than 560 on identity while finding more boxes, because the extra detections at
-    #: very high input are duplicates and slivers that fragment tracks. So "higher is better" is as
-    #: false as "resolution does not matter"; 896 is an optimum, not a ceiling.
-    #:
-    #: Set ``None`` for RF-DETR's own 560 (the pre-2026-08-08 behaviour). Must be divisible by 56.
-    resolution: int | None = 896
+    #: Callers should not set this directly. :class:`RFDETRDetector` resolves it per clip from
+    #: ``config/detector_resolution.yaml``, because the best value depends on the clip. The
+    #: measurements and the procedure for a new clip are in that file.
+    resolution: int | None = None
     _model: object = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:

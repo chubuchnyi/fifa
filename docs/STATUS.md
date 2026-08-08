@@ -58,7 +58,7 @@ what the plan assumed:
 
 | | outcome |
 |---|---|
-| **W1** detector resolution | ⚠ **RETRACTED 2026-08-08, default is now 896.** The refutation measured *players per frame* (+2 %) — not what the knob feeds. Re-measured on identity, 236 frames, **two clips**: mid-pitch events **89 → 61** broadcast and **90 → 58** fan, raw tracklets 70 → 56 and 76 → 54, for **1.5× the cheapest stage**. The McByte mask cue bought 14 % for 686 s of GPU; this is twice that for 5 s. And the curve is a **U** — 1512 finds *more* boxes than 560 and produces *more* churn (97 vs 89) — so 896 is an optimum, not a ceiling. `--detector-resolution` overrides |
+| **W1** detector resolution | ⚠ **corrected 2026-08-08.** The first measurement counted players per frame (+2 %) and concluded the knob was useless. Measured on identity instead — 236 frames, two clips — **896 beats 560**: mid-pitch identity events 89 → 61 (broadcast) and 90 → 58 (fan), raw tracklets 70 → 56 and 76 → 54, for 1.5× the detector. Going higher is worse: at 1512 the detector finds more boxes than at 560 and makes more identity errors (97 vs 89). The best value depends on the clip, so it lives in `config/detector_resolution.yaml` keyed by clip name, not in the code. Override with `--detector-resolution` |
 | **W2** #137 `team=None` | **fixed** — the identity gate un-teamed everything it cleaned. 23-of-27 unlabelled → 0 of 29 |
 | **W3** stitch on П3 | **refuted where the plan put it** — pre-pose the rule joins two different shirts 3 times in 6. Do not relax the 2D stitcher |
 | **W3+W4** the merge | **built, OFF by default** (`--handover`). On the judged scene: **24 → 21 subjects**, the three pairs the eye named, **183 mannequin frames gone**. ⚠ **Needs the eye:** `bash scripts/view_handover_ab.sh` |

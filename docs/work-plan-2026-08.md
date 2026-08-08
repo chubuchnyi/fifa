@@ -25,7 +25,7 @@ here — if that fact is wrong, the item leaves the queue.
 
 | # | Item | Why it is here (measured) | Verified by |
 |---|---|---|---|
-| **W1** ⚠ **retracted → default now 896** | **Detector input resolution** | RF-DETR resizes the frame to a `res × res` **square** and its default is **560**, which we never set. A measured 28 × 72 px player reaches the net as **14 × 21 px** on the portrait clip. Every cue downstream is capped by that. The SoccerTrack-2025 winner's small-target work moved HOTA **0.380 → 0.491** — larger than any association change in the review | players found per frame at 0.3 and 0.1, box sizes, s/frame, on both clips |
+| **W1** ⚠ corrected → per-clip config | **Detector input resolution** | RF-DETR resizes the frame to a `res × res` **square** and its default is **560**, which we never set. A measured 28 × 72 px player reaches the net as **14 × 21 px** on the portrait clip. Every cue downstream is capped by that. The SoccerTrack-2025 winner's small-target work moved HOTA **0.380 → 0.491** — larger than any association change in the review | players found per frame at 0.3 and 0.1, box sizes, s/frame, on both clips |
 | **W2** ✅ fixed | **#137 — `team=None` on 23 of 27** | Kit colour is the one appearance signal that survives at 28 px, and `StitchConfig.require_same_team` treats `None` as a **wildcard**, so a null label silently removes the stitcher's only working constraint. Clustering works locally on both clips (broadcast **56/56**, fan **A=11 / B=9** with measured white/red) — so this is the pod path, not a scale wall | a full 355-frame run that assigns teams, or the line that drops them |
 | **W3** ✅ refuted → merged into W4 | **Stitch on the handover criterion (П3)** | Closes the user's entire stitch list — three pairs become three players — and needs no new model: the signal is already in `provenance` plus the roots. Must be an **assignment** (one partner each, nearest first) or t20 gets swept into t25's merge at 2.09 m | `track_quality.py` against the 24 eye labels: 19/20 → 20/21 |
 | **W4** ✅ built, OFF by default — needs the eye | **Drop the mannequin half of every merged pair (П2)** | `imputed` is mechanically a frozen mannequin — **0.00 rad** of limb travel while the root coasts 1.68–3.66 m. The duplicate half is what the eye calls a phantom; the man nobody measured stays, marked (R-6) | phantom count in `track_quality.py`, then the user's eye in `/app` |
@@ -52,14 +52,12 @@ neither emits SMPL-X natively). Full reasoning: occlusion-stack review §6, §8.
 Appended as items land. Each entry states what was run, on what, and the number — including when
 the number says the idea was wrong.
 
-### W1 — detector input resolution → **RETRACTED 2026-08-08. The default is now 896.**
+### W1 — detector input resolution → **wrong conclusion, corrected 2026-08-08 (see W1-bis)**
 
-> ⚠ **This verdict was wrong, and the user called it.** The measurement below is correct and its
-> conclusion does not follow from it: I compared resolutions on **players found per frame**, saw
-> +2 %, and declared the knob dead. Players/frame is not what the knob feeds. Identity is — and on
-> identity the same +2 % in detections is a **31–36 % drop in churn**. The re-measurement is in
-> [W1-bis](#w1-bis--the-same-knob-measured-on-what-it-actually-feeds--89--61-identity-events)
-> below; this section is kept intact because the numbers are real and only the reading was bad.
+> ⚠ **This conclusion was wrong.** The numbers below are correct; the conclusion drawn from them
+> is not. They measure players found per frame. That is not the thing the resolution affects most.
+> Measured on identity instead, 896 reduces identity errors by 31–36 % against 560. See W1-bis
+> below. This section is left in place because the measurements are still valid.
 
 Run on `demorig` 2026-08-07, RF-DETR at four input squares over 60 frames of each clip,
 `scripts/bench_detector_resolution.py`:
@@ -102,85 +100,87 @@ the carrier, not from the resolution alone. This measurement is the resolution a
 the resolution alone is not where their win came from. Retraining the detector is a different item
 with a different cost, and it is not in this queue.
 
-*Closed 2026-08-07. Cost: ~4 min of a free box.* **Reopened and overturned 2026-08-08.**
+*Closed 2026-08-07, reopened 2026-08-08.*
 
-### W1-bis — the same knob, measured on what it actually feeds → **89 → 61 identity events**
+### W1-bis — resolution re-measured on identity (2026-08-08)
 
-The user overrode the verdict and asked for the knob to be raised and everything downstream re-run
-on the new detections. That was the right call, and it exposed the hole: **W1 never measured
-anything downstream of the detector.**
+**What was wrong with W1.** It compared resolutions by counting players found per frame. That
+number barely moves (+2 %), so W1 concluded the knob does not matter. But the detector's output
+feeds the tracker, and the tracker is where the errors are. Nobody measured that.
 
-`scripts/dump_detections.py` (new) writes detections at a chosen input square in the same npz the
-CPU probes already read, so the GPU box produces the detections once and every probe re-runs
-locally with no other change. **236 frames, five resolutions, two clips.**
+**What was run.** `scripts/dump_detections.py` (new) writes detections at a chosen input square,
+in the npz format the existing CPU probes read. So the GPU box produces detections once, and every
+probe re-runs locally without a GPU. 236 frames, five squares, two clips.
 
-**The control is my own 560 dump, not the old cached npz.** They differ — 4461 detections against
-4362, identical counts on 108 of 236 frames — so comparing new-high against old-cached would have
-confounded resolution with whatever else changed. Every row below comes from the same dumper on
-the same box on the same day.
+**The control is the new 560 dump, not the old cached one.** They differ: 4461 detections against
+4362, same count on 108 of 236 frames. Comparing a new high-resolution run against the old cached
+file would have mixed the resolution change with everything else that changed since. All rows
+below come from the same script, same box, same day.
 
-| res | players/frame | **mid-pitch identity events** | raw tracklets | s/frame |
-|---|---|---|---|---|
-| **Broadcast** 1920×1080 | | | | |
-| 560 | 18.23 | 89 | 70 | 0.042 |
-| **896** | 18.63 | **61** | **56** | 0.063 |
-| 1064 | 18.83 | 66 | 62 | 0.063 |
-| 1288 | **19.09** | 73 | 65 | 0.103 |
-| 1512 | 18.33 | 97 | 76 | 0.149 |
-| **Fan clip** 1080×1920 | | | | |
-| 560 | 14.54 | 90 | 76 | 0.042 |
-| **896** | 15.11 | **58** | **54** | 0.063 |
-| 1064 | 15.12 | 65 | 60 | 0.063 |
-| 1288 | **15.27** | 75 | 67 | 0.103 |
+**The number being minimised** is mid-pitch identity events: a track that appears or disappears
+away from the frame edge. That means the tracker lost or swapped a player mid-play. Same
+definition `scripts/mask_cue_ab.py` uses.
 
-**Two clips, different aspect ratios, different stadiums, different kits, same optimum and the
-same shape.** Broadcast **89 → 61 (−31 %)**, fan **90 → 58 (−36 %)**, raw tracklets 70 → 56 and
-76 → 54. For **1.5× the cheapest stage in the pipeline**.
+| clip | res | players/frame | mid-pitch events | raw tracklets | s/frame |
+|---|---|---|---|---|---|
+| broadcast 1920×1080 | 560 | 18.23 | 89 | 70 | 0.042 |
+| | **896** | 18.63 | **61** | **56** | 0.063 |
+| | 1064 | 18.83 | 66 | 62 | 0.063 |
+| | 1288 | 19.09 | 73 | 65 | 0.103 |
+| | 1512 | 18.33 | 97 | 76 | 0.149 |
+| fan 1080×1920 | 560 | 14.54 | 90 | 76 | 0.042 |
+| | **896** | 15.11 | **58** | **54** | 0.063 |
+| | 1064 | 15.12 | 65 | 60 | 0.063 |
+| | 1288 | 15.27 | 75 | 67 | 0.103 |
 
-For scale: the McByte mask cue bought mid-pitch events **28 → 24 (14 %)** for **686 s of GPU** per
-pass. This is more than twice the effect, for 5 s.
+**Result.** 896 is best on both clips. Identity events drop 31 % on the broadcast clip and 36 % on
+the fan clip. Raw tracklets drop from 70 to 56 and from 76 to 54. The cost is 1.5× the detector,
+which is the cheapest stage: 0.042 → 0.063 s per frame.
 
-**The curve is a U, not a ramp — and that is the second finding.** At 1512 the detector finds
-*more* boxes than at 560 and produces **more** identity churn than at 560 (97 against 89). The
-extra detections at very high input are duplicates and slivers, and each one is a chance for
-ByteTrack to hand an id to the wrong body. So "higher is better" is exactly as false as
-"resolution does not matter". **896 is an optimum, and it is not the highest thing tested.**
+For comparison: the McByte mask cue reduced these events by 14 % and cost 686 s of GPU per pass.
 
-**Why players/frame pointed the wrong way.** It moves +2 % across the whole sweep and *peaks at
-1288*, which is the second-worst resolution for identity. The two quantities are not weakly
-correlated — they are differently shaped. A metric that peaks where the real objective is
-degrading is worse than no metric.
+**Going higher makes it worse.** At 1512 the detector finds more boxes than at 560 (18.33 vs
+18.23) and produces more identity errors than at 560 (97 vs 89). The extra detections at high
+input are duplicates and partial boxes, and each one is another chance for the tracker to attach
+an id to the wrong player. So 896 is a minimum, not a ceiling.
 
-**Corroborated by an independent probe.** `bench_handover_stitch.py`, which knows nothing about
-mid-pitch events, on the same detections — П3 pre-pose candidates and how many join two shirts:
+**Why the old metric misled.** Players per frame peaks at 1288, which is the second-worst
+resolution for identity. The two numbers do not track each other.
 
-| res | tracklets | П3 accepts | **kit clashes** |
+**Second probe, same conclusion.** `bench_handover_stitch.py` counts something different — how
+many of the merges the П3 rule proposes join two different shirts:
+
+| res | tracklets | П3 accepts | kit clashes |
 |---|---|---|---|
-| 560 | 70 | 9 | **5** |
-| 896 | 56 | 6 | **2** |
-| 1064 | 62 | 6 | **2** |
+| 560 | 70 | 9 | 5 |
+| 896 | 56 | 6 | 2 |
+| 1064 | 62 | 6 | 2 |
 | 1288 | 65 | 9 | 4 |
 
-Same U. Fewer fragments means fewer wrong-partner candidates for anything downstream to pick.
+Fewer fragments, fewer wrong candidates.
 
-**Shipped.** `RFDETRBackend.resolution` default **`None` → 896**, threaded through
-`RFDETRDetector` and `wiring.default_ports`, with `--detector-resolution` as the manual override
-and `None` still meaning RF-DETR's own 560 (the pre-2026-08-08 behaviour). Suite **1199 passed /
-19 skipped**.
+**The best value depends on the clip, so it is not in the code.** It lives in
+`config/detector_resolution.yaml`, keyed by clip file name, with the measurements and the
+procedure for a new clip written into that file. Resolution order: clip entry →
+`--detector-resolution` → the config's `default`. `RFDETRBackend` itself carries no measured
+number; constructed bare it uses RF-DETR's own 560. 12 tests cover the lookup, including a
+missing and a corrupt config (a bad config returns `None` and the run continues).
 
-*Closed 2026-08-08. ~6 min of GPU on the free box, the rest CPU.*
+Two clips is not a rule. Both happened to land on 896; a third clip may not.
 
-### The other closed items, re-run on the new detections
+*Closed 2026-08-08. About 6 min of GPU on the free box; everything else on CPU.*
 
-| item | re-run? | result at 896 |
+### Re-running the other closed items on the new detections
+
+| item | re-run | result at 896 |
 |---|---|---|
-| **W2 / #137** team labels | ✅ yes | **0 unlabelled of 56**, A 26 / B 30, both teams found. The fix holds; it was never resolution-dependent |
-| **W3** П3 pre-pose | ✅ yes | Verdict **unchanged and slightly stronger**: 6 accepted merges, **2 kit clashes against 5 at 560**. Still do not relax the 2D stitcher — but higher resolution is now the cheapest way to reduce the mistakes it has to avoid |
-| **W5** assignment margin | ✅ yes | Premise **holds at every resolution**. At 896: margin < 0.20 catches 48.7 % of breaking tracks on 8.9 % of rows (**lift 5.49×**, the best of the sweep). Fewer breaks to catch, caught more selectively |
-| **W13** kit classifier | ➖ n/a | Reads video pixels, not detections. Resolution cannot move it; the grass fix stands and its 15 tests are green |
-| **W9** WorldPose constants | ➖ n/a | Ground truth from another dataset entirely. Untouched |
-| **W10** BT.709 | ➖ n/a | A property of the decode, upstream of the detector. Untouched |
-| **W4** handover merge | ❌ **not re-run** | It needs a **new scene**, i.e. pose on GPU, and the 24 eye labels are bound to the 560-era `out/cue/scene_off.json`. A scene at 896 has different track ids, so the **20/21 score cannot be carried over** — it would need a fresh eye pass. The merge code is unchanged and its 9 tests are green; what is unmeasured is how many handovers remain once the detector stops fragmenting tracks. **That is the next run, and it is the one that needs the user's eye anyway.** |
+| **W2 / #137** team labels | yes | 0 unlabelled of 56 tracklets, A 26 / B 30. The fix holds. It never depended on resolution |
+| **W3** П3 pre-pose | yes | Conclusion unchanged: still do not relax the 2D stitcher. The numbers improve — 6 accepted merges with 2 kit clashes, against 9 and 5 at 560 |
+| **W5** assignment margin | yes | Holds at every resolution. At 896, margin < 0.20 catches 48.7 % of breaking tracks while firing on 8.9 % of rows (lift 5.49×, the best of the sweep) |
+| **W13** kit classifier | not applicable | Reads video pixels, not detections. 15 tests green |
+| **W9** WorldPose constants | not applicable | Different dataset entirely |
+| **W10** BT.709 | not applicable | Property of the video decode, before the detector |
+| **W4** handover merge | **no** | Needs a new scene, which needs pose on the GPU. The 24 eye labels are tied to the old scene `out/cue/scene_off.json`; a scene at 896 has different track ids, so the 20/21 score cannot be carried over without a fresh pass by eye. The merge code is unchanged, 9 tests green. What is unknown: how many handovers are left once the detector stops fragmenting tracks |
 
 ### W2 — #137, `team=None` on 23 of 27 → **narrowed to "assigned, then lost"**
 
