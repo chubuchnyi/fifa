@@ -36,81 +36,173 @@ photoreal result. Real-time is not a goal; **quality and ease of manual correcti
 
 ```mermaid
 flowchart TD
-    subgraph driving["driving adapters (primary)"]
-        CLI[cli.py dry-run]
-        MCP[mcp/ — LLM agent control surface]
+    subgraph driving["driving adapters (primary) — three, all equal"]
+        CLI[app/cli.py — operator CLI + fakes dry-run]
+        MCP[adapters/mcp/ — LLM agent control surface]
+        PA[poseannot/ — browser Studio, FastAPI]
     end
     subgraph app["app/  (composition root)"]
-        WIRING[wiring.py]
+        CTRL[controller.Application — the use-cases]
+        WIRING[wiring.py — port selection by name/dotted path]
     end
     subgraph adapters["adapters/  (infrastructure)"]
-        MODELS[models/ — detect, track, calibrate, HMR, ball, env, avatars]
+        MODELS[models/ — detect, track, calibrate, HMR, ball, masks, env, avatars]
         VIEWSYNTH[viewsynth/ — video-diffusion backends]
-        RENDER[render/ — splat/avatar passes + VS seam A]
-        OBSERVER[observer — SceneObserver: multi-view snapshots]
-        BLENDER[blender/ — bpy adapter]
-        EXPORT[export/ — glTF/USD/FBX/Alembic/JSON/three.js]
-        FAKES[fakes/ — deterministic test doubles + FakeSceneObserver]
+        RENDER[render/ — overlay wired; splat/VS-seam-A stubs]
+        BLENDER[blender/ — out-of-process bpy]
+        EXPORT[export/ — glTF/three.js/JSON wired; USD/FBX/Alembic stubs]
+        IO[io/ — clip ingest, crops, frame decode]
+        PROF[profiles/ — per-player prior store]
+        FAKES[fakes/ — deterministic doubles, incl. SceneObserver + queue + cache]
     end
     subgraph core["core/  (pure, numpy only)"]
         SCENE[scene/ — canonical data model + serialization]
-        CORR[correction/ — 4 propagation modes, honest math]
-        ORCH[orchestration/ — stages, pipeline, queue/cache contracts]
-        AGENT[agent/ — viewpoint math + scene summary for LLM feedback]
-        PORTS[ports/ — ABCs: ModelProvider*, ViewSynthesizer, RenderPass, SceneObserver, Exporter, Cache, JobQueue]
+        CORR[correction/ — propagation modes + ~20 physics gates]
+        ORCH[orchestration/ — pipeline DAG, stitch, identity, handover, shots, ball lift]
+        AGENT[agent/ — viewpoint math + scene summary + autonomy]
+        CONFIG[config/ — PhysicsConfig loader + per-gate dataclasses]
+        PORTS[ports/ — ABCs only]
     end
+    EVAL[eval/ — benchmark harness: composes adapters, not part of core]
 
-    CLI & MCP --> WIRING
-    WIRING --> MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES
-    MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES --> PORTS
-    MODELS & VIEWSYNTH & RENDER & OBSERVER & BLENDER & EXPORT & FAKES --> SCENE
+    CLI & MCP & PA --> CTRL
+    CTRL --> WIRING
+    WIRING --> MODELS & VIEWSYNTH & RENDER & BLENDER & EXPORT & IO & PROF & FAKES
+    MODELS & VIEWSYNTH & RENDER & BLENDER & EXPORT & IO & PROF & FAKES --> PORTS & SCENE
+    EVAL --> MODELS & PORTS & SCENE
     PORTS --> SCENE
-    CORR --> SCENE
+    CORR --> SCENE & CONFIG
+    ORCH --> PORTS & SCENE & CONFIG
     AGENT --> PORTS & SCENE & CORR
-    ORCH --> PORTS & SCENE
 ```
 
-**Rule:** arrows only point toward `core`. `core/` has no arrow leaving it (except `numpy`).
-The only way the core touches Blender, a GPU model, a video-diffusion API, or an LLM is through
-a port/adapter. Both the CLI and the **MCP server** are *driving* adapters that call the same
-application wiring — so an LLM agent and a human run the identical use-cases. This is what makes
-the whole core testable with **fakes, no GPU, no Blender, no LLM** (AC-7).
+**Rule:** arrows only point toward `core`. `core/` has no arrow leaving it (except `numpy`) —
+**verified, not asserted**: `grep -rn "from ..adapters" src/pitch3d/core/` is empty. The only way
+the core touches Blender, a GPU model, a video-diffusion API, or an LLM is through a port/adapter.
+That is what makes the whole core testable with **fakes, no GPU, no Blender, no LLM** (AC-7).
+
+Four things about this diagram are easy to get wrong, so they are called out:
+
+- **There are three driving adapters, not two.** `poseannot/` (§4a) is the third, and it is a
+  *stricter* citizen than the other two: it imports `pitch3d.core.*` **only** and never touches
+  `adapters/` — `studio.py` says so in a comment where it reaches for defaults. A human in the
+  browser, an LLM over MCP and the CLI therefore all resolve the same `Correction` stack.
+- **`controller.Application` is the use-case layer, not `wiring.py`.** Wiring only *chooses* the
+  ports; every entry point goes through `Application` for the actual work. New pipeline work goes
+  there. (`app/anim_export.py` and `scripts/blender_animate.py` look like rival pipelines and are
+  not — they consume an already-exported `scene.json` and never reconstruct.)
+- **`core/config/` is inside the core and is a leaf.** It has no package-internal imports at all
+  in `gates.py`, which exists precisely to break a cycle: the correction modules need their config
+  dataclasses, but the YAML loader in `physics.py` imports `KinematicConfig`/`CoherenceConfig`
+  *from* `core.correction`. Splitting the dataclasses out is what keeps that acyclic.
+- **`eval/` is not core**, despite living under `src/pitch3d/`. It imports
+  `adapters.models.{calibration,pose}` directly, so it sits outside the hexagon as a
+  measurement-only consumer — the same level as `app/`. Nothing in the pipeline imports it.
 
 ---
 
 ## 4. Package structure & responsibilities
 
+Re-measured against the tree on 2026-08-08. Four packages were missing outright — `core/config/`,
+`eval/`, `adapters/io/`, `adapters/profiles/` — and `adapters/render/` was described as one wired
+pass plus stubs when it holds nine real ones.
+
+Two things the old tree hid structurally. `poseannot/` is **not under `src/`** — it is a sibling
+package at the repo root, and it is a first-class driving adapter (§4a). And `eval/` lives *under*
+`src/pitch3d/` but is **not** part of the hexagon (it imports adapters; see §3).
+
 ```
 src/pitch3d/
-  core/
-    scene/          # WorldFrame (Z-up, meters), Field+homography, Camera, Subject (SMPL-X),
+  core/                     # pure: numpy + stdlib, no I/O, no models. 84 modules.
+    scene/          # WorldFrame (Z-up, metres), Field+homography, Camera, Subject (SMPL-X),
                     # BallTrack, 3-layer model (proposal/corrections/resolved), Confidence,
-                    # RenderAssetRef, SynthViewRef, provenance/RunLog, JSON serialization,
-                    # virtual-operator camera planning (cameras.py — pan/zoom from fixed mounts, ADR-0011)
-    correction/     # rotations (Rodrigues/slerp/Shepperd), 4 propagation modes as pure functions,
-                    # layer resolve (proposal ⊕ corrections → resolved)
-    orchestration/  # Stage enum, Pipeline DAG, cache-key derivation, ball 2D→3D lift,
-                    # contracts used from ports (JobQueue/Cache) — abstract only
+                    # RenderAssetRef, SynthViewRef, provenance/RunLog, JSON serialization.
+                    # Also: pitch.py + stadium.py (geometry), plane_camera.py (one-camera fit),
+                    # cameras.py (virtual-operator pan/zoom from fixed mounts, ADR-0011),
+                    # player_profile.py (per-player priors), review.py (needs-attention list)
+    correction/     # rotations (Rodrigues/slerp/Shepperd), the 4 propagation modes, layer resolve
+                    # (proposal ⊕ corrections → resolved) — engine.py. Around it, ~20 physics
+                    # GATES and PROBES as one-function-per-file pure passes: foot_floor,
+                    # foot_plant, contact_lock/probe, joint_kinematics, joint_smooth, orientation,
+                    # orient_verticality, collision, coherence, facing_align, inertia_smooth,
+                    # jerk_clamp, momentum_smooth, gravity_project, pose_motion_sync, anchor …
+                    # A *gate* edits the scene and returns a report; a *probe* only measures.
+    orchestration/  # Stage enum + Pipeline DAG + cache-key derivation (stages.py, pipeline.py),
+                    # assemble.py (stage outputs → Scene), and the identity chain that runs
+                    # around POSE: continuity.py (2D stitch, pre-pose), identity.py (GTA-style
+                    # split/merge gate), handover.py (post-pose "two ids, one human" merge, П3+П2),
+                    # shots.py (cut guard), ball_lift.py (2D→3D with ballistics)
+    config/         # PhysicsConfig: shipped YAML → named profile → PITCH3D_* env → Python
+                    # overrides, with every scalar's provenance recorded in `.lineage`.
+                    # gates.py holds the per-gate dataclasses and imports NOTHING package-internal
+                    # — that is what breaks the physics.py ↔ core.correction cycle (§3)
     agent/          # pure viewpoint camera math (look_at, standard_viewpoints) + scene_summary
-                    # — the port-free pieces of the LLM visual-feedback loop (ADR-0008)
+                    # + autonomy.py — the port-free pieces of the LLM feedback loop (ADR-0008)
     ports/          # ABCs only: ModelProvider, Detector, Tracker, FieldCalibrator,
                     # PoseEstimator(+refit), BallTracker, EnvReconstructor, AvatarBuilder,
-                    # ViewSynthesizer (seams A&B), RenderPass, SceneObserver, Exporter, Cache, JobQueue
+                    # ViewSynthesizer (seams A&B), RenderPass, SceneObserver, Exporter,
+                    # MotionPrior, Cache, JobQueue
   adapters/
-    models/         # real-model adapters behind ports: detect/track/calibrate/pose/ball all wired
-                    # (split: pure half unit-tested via injected stub; heavy half gated by extra)
-    viewsynth/      # ViewSynthesizer backends (ReCamMaster/TrajectoryCrafter/GEN3C…) — stubs, both seams
-    blender/        # proxy plan (pure, no bpy) + out-of-process `blender --background` (.blend F-curves, proxy SCENE_3D) — gated on a binary;
-                    # pitch3d-free modules imported BY FILE into Blender scripts: scene_builders.py (shared node-graphs),
-                    # anim_contract.py (versioned anim-export manifest, both sides validate — ADR-0011)
-    render/         # ReprojectionOverlayRenderPass wired (numpy+stdlib, no GPU); splat/VS-seam-A stubs
-    mcp/            # LLM control surface: tool→use-case dispatch (pure) + serve() over stdio (lazy SDK, mcp extra) — driving adapter, ADR-0008
-    export/         # GltfExporter wired: SMPL-X npz + JSON real; glTF/GLB gated (export extra); USD/FBX/Alembic stubs
+    models/         # real-model adapters behind ports: detect/track/calibrate/pose/ball wired
+                    # (split: pure half unit-tested via injected stub; heavy half gated by extra).
+                    # Named backends are separate files so the dotted-path injection of ADR-0006
+                    # is literal: smplestx_backend, sam3dbody_backend, pnlcalib_backend,
+                    # wasb_backend, mask_propagation (Cutie), appearance_hsv, smplx_lbs/_foot_*
+    viewsynth/      # ViewSynthesizer port stub for both seams — `__init__.py` ONLY, no backend
+                    # wired. ReCamMaster/TrajectoryCrafter/GEN3C are candidates, not code
+    blender/        # out-of-process Blender: pure proxy/cycles plan assembly + `blender
+                    # --background` runner + the live GUI edit bridge (ADR-0010); gated on a
+                    # binary. pitch3d-free modules imported BY FILE into Blender scripts:
+                    # scene_builders.py (shared node-graphs), anim_contract.py (versioned manifest)
+    render/         # 9 real RenderPass implementations, NOT the one-overlay-plus-stubs this tree
+                    # used to claim: reprojection overlay, tactical radar, Cycles photoreal +
+                    # orbit, stadium backdrop, lighting estimation, attention panel, SceneObserver
+    mcp/            # LLM control surface: tool→use-case dispatch (pure) + serve() over stdio
+                    # (lazy SDK, mcp extra) — driving adapter, ADR-0008
+    export/         # GltfExporter wired: SMPL-X npz + JSON real; glTF/GLB gated (export extra);
+                    # three.js viewer; USD/FBX/Alembic stubs
+    io/             # clip ingest (ffprobe), crop refs, frame decode — the ClipRef side of ports/io
+    profiles/       # persistence for per-player priors (local_json.py) behind the profile port
     fakes/          # deterministic doubles incl. FakeViewSynthesizer (both seams),
                     # FakeSceneObserver (stdlib PNG snapshots), in-proc queue, cache
-  app/              # wiring (composition) + CLI dry-run (source → … → export)
-                    # + anim_export CLI: scene.json → Blender-ready npz dir incl. cameras.npz + manifest (ADR-0011)
+  app/              # controller.py — Application: THE use-case layer, driven by all three
+                    #   driving adapters. run_reconstruction owns the gate chain order.
+                    # wiring.py — composition: port selection by name or dotted path (ADR-0006)
+                    # cli.py — operator CLI + fakes-only dry run
+                    # anim_export.py — scene.json → Blender-ready npz dir + manifest (ADR-0011)
+  eval/             # OUTSIDE the hexagon (§3): benchmark harness that composes real adapters.
+                    # harness.py + dataset.py + backends.py, dataset readers (3DPW, SoccerNet),
+                    # metrics (MPJPE), calib_metrics, novel_view, synthetic, bodymodel.
+                    # Measurement only — nothing in the pipeline imports it.
+
+poseannot/                  # sibling package, NOT under src/ — see §4a
 ```
+
+### 4a. `poseannot/` — the human driving adapter
+
+12 modules at the repo root, a FastAPI app plus a build-step-free browser front end. Full detail:
+[`poseannot-architecture.md`](poseannot-architecture.md). What matters *here* is why it belongs in
+this document at all, which is one measured fact:
+
+```bash
+grep -rho "from pitch3d[.a-z_]*" poseannot/*.py | sort -u   # 25 imports, ALL core.*, zero adapters
+```
+
+**It is a driving adapter that talks only to `core/`.** Not to `adapters/`, not to
+`app.wiring`. It loads a `scene.json`, resolves it through `core.correction.engine`, re-runs
+`core.correction`'s gates as an ephemeral layer, and writes user edits back as `Correction` rows.
+Its SMPL-X forward kinematics come from the upstream `smplx` package imported directly, **not**
+from `adapters/models/smplx_lbs.py` — so the browser path does not depend on the model adapter
+layer at all.
+
+That is the strongest evidence the hexagon is real rather than aspirational: a whole second
+application, written months after the core, attached without needing a single new port and without
+reaching around one.
+
+The consequence for the correction contract (ADR-0002) is the point of the whole design: a human
+dragging a joint in the browser, an LLM calling an MCP tool, and `cli.py --physics` all append to
+the *same* `Correction` list and are resolved by the *same* `resolve_subject_motion`. There is no
+second edit path.
 
 ---
 
