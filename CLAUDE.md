@@ -19,6 +19,7 @@ cold start; everything else is opened on demand.
 | What we validated / refuted / never judged, across every thread | `docs/findings/research-ledger-2026-08-07.md` |
 | What was tried and rejected, with numbers | `docs/adr/0012-rejected-approaches-log.md` |
 | Pipeline shape end to end | `docs/pipeline.md` |
+| Exact data contract: types, shapes, units, npz keys | `docs/pipeline-io.md` |
 | How to run on the local RTX 4080 instead of the pod | `docs/local-gpu-box.md` |
 
 Do not read `docs/roadmap.md` or `docs/archive/m1-status-and-plan.md` for current state — they are

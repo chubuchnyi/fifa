@@ -1,5 +1,10 @@
 # The pipeline — broadcast clip → novel-view video
 
+This is the **shape** — which stage feeds which. For the **data contract** (exact types, array
+shapes, units, npz keys, and which numbers are measured rather than invented) see
+[`pipeline-io.md`](pipeline-io.md); proposed changes to it are in
+[`pipeline-io-proposed.md`](pipeline-io-proposed.md).
+
 One command on the pod runs the whole thing (STATUS §0):
 
 ```bash
