@@ -105,6 +105,10 @@ class RFDETRDetector(Detector):
     class_map: dict[int, str] = field(default_factory=lambda: dict(ROBOFLOW_SPORTS_CLASSES))
     weights: str | None = None
     device: str = "cuda"
+    #: Network input square forwarded to the default backend. ``None`` takes
+    #: :class:`RFDETRBackend`'s measured default (896); pass an int to override, or the string
+    #: form via ``--detector-resolution`` on the CLI. See the backend's field for the numbers.
+    resolution: int | None = None
 
     def info(self) -> ModelInfo:
         return ModelInfo(
@@ -112,7 +116,11 @@ class RFDETRDetector(Detector):
             version="sports",
             backend=Backend.LOCAL,
             license="Apache-2.0",
-            params={"score_threshold": self.score_threshold, "device": self.device},
+            params={
+                "score_threshold": self.score_threshold,
+                "device": self.device,
+                "resolution": self.resolution,
+            },
         )
 
     def detect(self, clip: ClipRef) -> Detections:
@@ -129,7 +137,8 @@ class RFDETRDetector(Detector):
         return Detections(frames=frames)
 
     def _default_backend(self) -> DetectionBackend:
-        return RFDETRBackend(weights=self.weights, device=self.device)
+        kwargs = {} if self.resolution is None else {"resolution": int(self.resolution)}
+        return RFDETRBackend(weights=self.weights, device=self.device, **kwargs)
 
 
 @dataclass
@@ -143,14 +152,34 @@ class RFDETRBackend:
     weights: str | None = None
     device: str = "cuda"
     predict_floor: float = 0.05  # permissive backend floor; the adapter does authoritative filtering
-    #: Network input square, in px. ``None`` keeps RF-DETR's own default, which is **560** — and
-    #: that default is the first thing that happens to our subjects. RF-DETR resizes the whole
-    #: frame to ``resolution x resolution``, so aspect ratio is not preserved and a portrait phone
-    #: clip is squashed hardest: 1080x1920 -> 560x560 is 0.52x across and **0.29x down**, turning a
-    #: measured 28 x 72 px player into **14 x 21 px** before the detector sees him. The broadcast
-    #: clip's 41 x 86 px becomes 12 x 45. Every association cue downstream is capped by what
-    #: survives this resize, so it is a knob worth having (#138). Must be divisible by 56.
-    resolution: int | None = None
+    #: Network input square, in px. RF-DETR resizes the whole frame to ``resolution x
+    #: resolution``, so aspect ratio is **not** preserved and a portrait phone clip is squashed
+    #: hardest: 1080x1920 -> 560x560 is 0.52x across and **0.29x down**, turning a measured
+    #: 28 x 72 px player into **14 x 21 px** before the detector ever sees him.
+    #:
+    #: **Default 896, measured, and it replaced 560 by overturning our own earlier verdict.**
+    #: W1 (2026-08-07) compared resolutions on *players found per frame*, saw +2 %, and concluded
+    #: the knob was not a lever. That was the wrong metric. Re-measured 2026-08-08 on what the
+    #: knob actually feeds — identity, over 236 frames of the broadcast clip:
+    #:
+    #: ===== ============ ================== =============== ==========
+    #:  res   players/f    mid-pitch events   raw tracklets    s/frame
+    #: ===== ============ ================== =============== ==========
+    #:   560    18.23             89               70           0.042
+    #:   896    18.63           **61**           **56**         0.063
+    #:  1064    18.83             66               62           0.063
+    #:  1288    19.09             73               65           0.103
+    #:  1512    18.33             97               76           0.149
+    #: ===== ============ ================== =============== ==========
+    #:
+    #: **A 31 % drop in identity churn for 1.5x the cheapest stage in the pipeline** — against the
+    #: McByte mask cue, which bought 14 % for 686 s of GPU. And the curve is a **U, not a ramp**:
+    #: 1512 is worse than 560 on identity while finding more boxes, because the extra detections at
+    #: very high input are duplicates and slivers that fragment tracks. So "higher is better" is as
+    #: false as "resolution does not matter"; 896 is an optimum, not a ceiling.
+    #:
+    #: Set ``None`` for RF-DETR's own 560 (the pre-2026-08-08 behaviour). Must be divisible by 56.
+    resolution: int | None = 896
     _model: object = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:

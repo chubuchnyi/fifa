@@ -107,6 +107,7 @@ def default_ports(
     ball: str = "fake", env: str = "fake", avatar: str = "fake", render: str = "fake",
     export: str = "fake", observer: str = "fake", viewsynth: str = "fake",
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
+    detector_resolution: int | None = None,
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
@@ -211,6 +212,7 @@ def default_ports(
         det = RFDETRDetector(
             device=device, weights=detector_weights,
             class_map=dict(DETECTOR_CLASS_MAPS[detector_classes]),
+            resolution=detector_resolution,
         )
     else:
         raise ValueError(f"unknown detector {detector!r}; expected 'fake' or 'rfdetr'")

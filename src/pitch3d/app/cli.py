@@ -122,6 +122,7 @@ def run_dry_run(
     avatar: str = "fake", render: str = "fake", export: str = "fake", observer: str = "fake",
     viewsynth: str = "fake", amplify_views: int = 0, amplify_deviation: float = 0.3,
     device: str = "cpu", detector_weights: str | None = None, detector_classes: str = "coco",
+    detector_resolution: int | None = None,
     pose_backend: str | None = None, ball_backend: str | None = None,
     calibrator_backend: str | None = None, tracker_backend: str | None = None,
     avatar_backend: str | None = None, occlusion_backend: str | None = None,
@@ -151,7 +152,7 @@ def run_dry_run(
         out_dir=out_dir, n_subjects=n_subjects, detector=detector, tracker=tracker,
         calibrator=calibrator, pose=pose, ball=ball, env=env, avatar=avatar, render=render,
         export=export, observer=observer, viewsynth=viewsynth, device=device,
-        detector_weights=detector_weights,
+        detector_weights=detector_weights, detector_resolution=detector_resolution,
         detector_classes=detector_classes, pose_backend=pose_backend, ball_backend=ball_backend,
         calibrator_backend=calibrator_backend, tracker_backend=tracker_backend,
         avatar_backend=avatar_backend, occlusion_backend=occlusion_backend,
@@ -670,6 +671,13 @@ def main(argv: list[str] | None = None) -> int:
                         help="reconstruct across camera cuts (guard is ON by default): a "
                              "broadcast clip cuts between cameras, and tracking + calibrating "
                              "through one blends two views into a single 'episode'")
+    parser.add_argument("--detector-resolution", type=int, default=None,
+                        help="RF-DETR input square in px, divisible by 56. Default 896, which is "
+                             "MEASURED: it takes mid-pitch identity events 89 -> 61 and raw "
+                             "tracklets 70 -> 56 against 560, for 1.5x the cheapest stage. The "
+                             "curve is a U — 1288 and 1512 are worse than 896 on identity while "
+                             "finding MORE boxes — so raising this past 896 is not free. Pass 560 "
+                             "for the pre-2026-08-08 behaviour")
     parser.add_argument("--handover", action="store_true",
                         help="merge two ids that are one human: a subject whose measurements "
                              "stop mid-clip and another whose measurements start there, within "
@@ -740,6 +748,7 @@ def main(argv: list[str] | None = None) -> int:
         amplify_deviation=args.amplify_deviation,
         device=args.device,
         detector_weights=args.detector_weights,
+        detector_resolution=args.detector_resolution,
         detector_classes=args.detector_classes,
         pose_backend=args.pose_backend,
         ball_backend=args.ball_backend,

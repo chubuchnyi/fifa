@@ -53,7 +53,16 @@ ap.add_argument('--window', type=int, default=2,
                 help='frames either side of an event that count as "at" it')
 args = ap.parse_args()
 
-W, H = 1920, 1080
+# Read the frame size from the clip, never assume it. A portrait phone video is 1080x1920 and
+# hardcoding 1920x1080 silently makes `plausible()` and `at_edge()` reject everything — the first
+# run of this probe on the fan clip reported 0 events for exactly that reason.
+import cv2  # noqa: E402
+
+_cap = cv2.VideoCapture(str(REPO / args.clip))
+W = int(_cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
+H = int(_cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
+_cap.release()
+print(f'clip {Path(args.clip).name}: {W}x{H}')
 c = np.load(REPO / args.dets, allow_pickle=True)
 dets = Detections(frames=[
     FrameDetections(frame=int(f), items=[
