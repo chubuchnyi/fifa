@@ -170,6 +170,61 @@ Two clips is not a rule. Both happened to land on 896; a third clip may not.
 
 *Closed 2026-08-08. About 6 min of GPU on the free box; everything else on CPU.*
 
+### W1-ter — three full scenes, 236 frames, and the eye's verdict (2026-08-08)
+
+Three complete pipeline runs on the same clip and the same code, differing only in the named
+thing. The log confirms each arm got what it was told: `== detector: input square 560 px`,
+`896 px`, and `896 px` with `== handover: --handover ON`. (The first attempt at this could not be
+verified — the container was `--rm` and the output was never redirected, so there were no logs.
+The resolution is still not recorded in the scene itself; that is a gap.)
+
+Scenes: `out/res_ab236/f236_res560.json`, `f236_res896.json`, `f236_res896_handover.json`.
+
+**The counters barely separate 560 from 896.**
+
+| scene | subjects | measured | interpolated | imputed | imputed % |
+|---|---|---|---|---|---|
+| 560 | 38 | 3976 | 149 | 4843 | 54.0 % |
+| 896 | 38 | 4050 | 146 | 4772 | 53.2 % |
+| 896 + handover | 34 | 4045 | 164 | 3815 | 47.5 % |
+
+Same subject count, 1.9 % more measured frames, imputed fraction within one point. **The raw
+tracker improvement does not survive into the assembled scene** — the stitch and coherence passes
+absorb most of it. The 60-frame window measured earlier, where 896 looked worse (24 subjects
+against 22), was noise: on 236 frames they are equal.
+
+**The user's eye separates them clearly.** Judged in the 3D viewer on the 60-frame scenes,
+2026-08-08: *«просто 896 повторяет поведение игроков лучше из этих 3-х вариантов»*. Plain 896
+beat both 560 and 896+handover.
+
+**Root speed is the number that agrees with the eye.** Measured on consecutive *measured* frames
+only, so it judges the measurement and not the imputation, against the WorldPose GT from W9:
+
+| | speed p50 | p99 | max | accel p99 | p99.9 |
+|---|---|---|---|---|---|
+| **WorldPose GT** | 2.04 | 7.25 | **9.74** | 8.35 | 15.21 |
+| 560 | 2.24 | 12.53 | **40.4** | 264.0 | 482.9 |
+| **896** | 2.16 | **10.88** | **22.2** | 259.5 | 444.9 |
+| 896 + handover | 2.16 | 11.09 | 23.3 | 266.8 | 444.9 |
+
+896 is closer to ground truth on every speed statistic, and the maximum root speed drops from
+**40.4 to 22.2 m/s**. A root moving at 40 m/s is a track that jumped to a different body. Halving
+that is what "reproduces player behaviour better" looks like as a number.
+
+**What this changes about how to measure identity work.** Subject counts and imputed-frame counts
+did not distinguish the two scenes at all; the eye did, and so did root-speed extremes. Use
+max and p99 root speed against the GT for this kind of question, not counts.
+
+**Handover did not help.** Fewer subjects and 957 fewer imputed frames, but slightly worse root
+speed (max 23.3 against 22.2) and the eye ranked it below plain 896. It stays off by default. The
+user is sending a detailed breakdown; until then the open question is which of three causes it is
+— the seam at the join, a player added or removed, or motion smoothed more than it should be.
+
+**All three are still far from ground truth.** p99 speed 10.9 against 7.25, max 22.2 against 9.74,
+accel p99 260 against 8.35. The resolution change is real and it is not the last problem.
+
+*Closed 2026-08-08. About 25 min of GPU on the free box.*
+
 ### Re-running the other closed items on the new detections
 
 | item | re-run | result at 896 |
