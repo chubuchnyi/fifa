@@ -259,3 +259,22 @@ Merging the review's list with §2, one step ahead of it:
 The review changed items 3–6 of my plan and added item 4. §2 added item 0 and made items 1–2
 conditional on it. Nothing in the original ordering survives except the instruction to measure
 before building, which both documents got right.
+
+---
+
+## 8. State of the plan
+
+`pipeline-io-proposed.md` has been rewritten around this rather than patched. The order is now:
+
+0. re-run with the measured camera (`RIGID_CAMERA`, frames 0–59) — may dissolve the premise
+1. three residuals, not one — paint, foot-vs-box, common-mode vs scatter
+2. why our calibration is worse than `fit_rigid_camera.py`'s on the same clip
+3. per-frame focal, then `k1` — after 2, and re-measuring the golden test, never nudging it
+4. serialize `PlaneCameraFit` into `scene.json` — hours, and it would have caught #140 on day one
+5. verticality and foot contact, per the review
+6. WorldPose for calibrator and pose; synthetic retired
+7. training-set export, after 3
+8. UI controls, last
+
+Deleted from the first version on the review's evidence: camera translation, free principal point,
+synthetic calibration GT.

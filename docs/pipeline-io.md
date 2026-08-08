@@ -328,6 +328,15 @@ tail in the per-frame homographies. Detail:
 scene has no camera, and anything comparing it to the source pixels is meaningless.
 `scripts/track_quality.py` says so unprompted and is why its `--camera` flag is not optional.
 
+**What survives and what does not.** Scene-to-source comparisons — overlay alignment, pitch
+markings, skeletons on players — were never testing what they appeared to. Scene-to-scene
+comparisons are untouched, because they never read `scene.camera`: identity churn, phantom counts,
+handover pairs, root-speed distributions, and the eye's ranking of 560 vs 896 vs 896+handover.
+
+Tracked as **#140**. The fix is proposed as step 4 of
+[`pipeline-io-proposed.md`](pipeline-io-proposed.md) — serialize `PlaneCameraFit` into the scene,
+so "measured or invented" stops being a magic number test.
+
 Two more consequences that have cost sessions:
 
 - A scene reconstructed without `--camera`/the rigid fit stores the 772 px fallback, whose field

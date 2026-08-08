@@ -6,182 +6,215 @@ first; this only lists what moves.
 Marks: **▲ CHANGE** an existing contract · **＋ NEW** something that does not exist ·
 **◆ MEASURE** a diagnostic, no contract change.
 
-Nothing here is built. This is the proposal to argue with.
+Nothing here is built.
 
-> **Measured 2026-08-08 — three of the guesses below are now settled, and the order changes.**
-> Against 89 WorldPose GT broadcast cameras: focal moves >5 % in **89/89** clips (median 44 %),
-> the camera translates in **0/89** (exactly 0.000 m), distortion is **~47 px** at the frame
-> corner, principal-point wander is ~1 px. So **step 2b (per-frame focal) is the dominant term and
-> should be first**, 2a stays, and **2c and the camera-translation hypothesis should be dropped**.
-> At our 60-frame fit that costs ~0.4–0.8 m of player position; at 240 frames, 2–5 m. Numbers,
-> method and caveats: [`findings/camera-model-gap-2026-08-08.md`](findings/camera-model-gap-2026-08-08.md)
-> · reproduce with `scripts/bench_camera_model_gap.py`.
-
----
-
-## Why any of this
-
-Observed by eye on `f236_res896`, 2026-08-08: the drawn pitch does not sit on the painted pitch,
-and skeletons do not sit on players — **and both get worse toward the edges of the frame**.
-
-Both errors together, growing with radius from the image centre, is the signature of the camera
-model, not of individual players' depth. Our camera model is one focal for the whole clip, one
-camera position, per-frame rotation, and no distortion. It structurally cannot express three
-things that all produce exactly that radial signature:
-
-1. zoom — the operator changing focal during the clip
-2. camera translation — a rail, a crane, a nudged tripod
-3. lens distortion
-
-So the proposal is ordered to test that before building anything expensive.
+> ## ⚠ Rewritten 2026-08-08 (2). The first version's premise was wrong.
+>
+> It reasoned from *"the overlay drifts worse toward the frame edges, so the camera model is
+> missing a parameter"* and spent four steps choosing which parameter. Measured since:
+>
+> **Every scene we have — nine of nine — carries the synthetic 772 px fallback, not a measured
+> camera.** The observation was made through a camera that is wrong everywhere, at 5.4× the real
+> focal and the wrong image size. There was no camera model applied to argue about.
+>
+> Full reasoning: [`findings/reply-camera-model-gap-2026-08-08.md`](findings/reply-camera-model-gap-2026-08-08.md).
+> Board entry: **#140**.
 
 ---
 
-## Step 1 ◆ MEASURE — split the pitch residual by radius
-
-**No contract change. Measurable today with existing code.**
-
-`poseannot/pitch_evidence.py::classify(uv, video, frame)` already returns, per drawn pitch point,
-the distance to the nearest real paint (`NaN` where there is no evidence). It is fed `(N, 2)`
-image pixels.
-
-Add nothing; just bin those existing `(uv, dist)` pairs by radius from the principal point and
-print the profile.
-
-**One thing to get right or the measurement is worthless.** `FieldCalibration.confidence` of
-exactly `0.0` means that frame was **not solved** — its homography is a copy carried from the last
-good frame (`MIN_SOLVED_CONFIDENCE = 0.02`). On the vertical clip that was 43 % of 355 frames.
-A carried homography drifts with the pan, so its residual grows with *time*, not with radius, and
-mixing those frames in would fake exactly the signal we are testing for. **Bin only frames with
-confidence above the floor, and report how many were dropped.**
-
-| outcome | conclusion |
-|---|---|
-| residual flat with radius | not the lens or the focal. Look at extrinsics or at the pitch model |
-| residual grows with radius | focal or distortion. Go to step 2 |
-| residual grows with **frame index** | the solve drifts. A per-frame problem, not a lens one |
-
-Half a day. It decides whether the rest of this document is worth doing.
-
----
-
-## Step 2 ▲ CHANGE — give the camera the parameter it is missing
-
-Only whichever one step 1 points at.
-
-### 2a. Distortion — **cheap, no schema change**
-
-`CameraIntrinsics.distortion: np.ndarray | None` **already exists** and is `None` on every solve
-we produce. Fitting one radial coefficient `k1` needs:
+## What is actually wrong, measured
 
 | | |
 |---|---|
-| type | unchanged |
-| `scripts/fit_rigid_camera.py` | ＋ one parameter in the optimiser |
-| `calib/<clip>.npz` | ＋ key `dist: (k,)`; the writer already emits `width`/`height` that this file predates |
-| every projector | ▲ apply distortion. There are at least four and they must agree or the overlay and the export diverge again: `core/scene/projection.py`, `poseannot/camera.py`, `scripts/apply_rigid_camera.py`, `scripts/track_quality.py` |
+| `scene.camera` on all 9 scenes on disk | `fx = 772.02 @ 1280×720`, `distortion = None` |
+| the clip | 1920×1080, real focal ≈ 4200 |
+| `camera_from_calibration` on the scene's own calibration | `focal_px = 4340.8` (sane), `reprojection_px = 471.1`, `realizable = False` |
+| the calibration itself | 236/236 frames solved, median confidence 0.472, **no frame at 0.0** |
 
-Keeping those four projectors in step is the real cost of 2a, not the optimiser change.
+`controller.run_reconstruction` ends with `scene.camera = _measured_camera(...) or
+_static_camera(...)`. The refusal is correct and deliberate (#61: a scene once carried two cameras
+12686 px apart for months). **The silent substitution is the defect**, and `PlaneCameraFit` — the
+only record of which camera you got — is held in memory and never serialized.
 
-### 2b. Per-frame focal — **schema change**
+**Why it is not zoom, on our clip.** Reprojection is invariant to window length: 467 px at 30
+frames, 480 at 60, 471 at 236. At 30 frames the drift is 0.8 %, which cannot produce 467 px.
+Confidence filtering does not help either — 453 px on the top 10 %, the third confirmation of #126.
 
-`CameraTrack.intrinsics` is **one object for the whole track**. Its own docstring already calls
-per-frame intrinsics a future refinement and says core does not need to change for it.
+**Where the error lives.** Against the golden fit over frames 0–59: median **0.63 m**, p90
+**3.22 m**, max **18.58 m**. Tail-dominated, and the tail sits at the far end of the pitch — the
+top and edges of the frame. That is the original observation, and it is in the **calibration**, not
+in the camera model's parameter count.
+
+**The clean control:** `calib/*.npz` was produced by a *different* fitter
+(`scripts/fit_rigid_camera.py`) on the same clip and succeeded, with one focal and a
+mutation-checked camera position.
+
+---
+
+## What real broadcast cameras do — measured by the review, and it stands
+
+From 89 WorldPose GT cameras ([`findings/camera-model-gap-2026-08-08.md`](findings/camera-model-gap-2026-08-08.md),
+reproduce with `scripts/bench_camera_model_gap.py`):
+
+| | measured | consequence for this plan |
+|---|---|---|
+| focal drift within a clip | **>5 % in 89/89**, median 44 % | per-frame focal is the dominant model term |
+| camera translation | **0.000 m in 89/89** | ~~hypothesis~~ **deleted** |
+| principal-point wander | ~1 px median | ~~step 2c~~ **deleted** |
+| distortion at the corner | ~47 px | keep, second |
+
+**Confirmed on our clip:** the focal runs 4083 → 4556 across windows, ~11 %, in line with the
+review's 9.2 % median at this window size. So the model term is real — it is just not what breaks
+the fit here.
+
+---
+
+## Step 0 ◆ MEASURE — re-run with the measured camera
+
+**Nothing to build. It may dissolve everything below.**
+
+`RIGID_CAMERA` (#129) appears nowhere in `scripts/pod_real_e2e.sh` and zero times in the 236-frame
+run log, so every scene under discussion was built without it. On frames **0–59**, where
+`calib/Colombia-1-0-Congo-DR1080p.npz` is valid and the golden fit holds, this is one run.
+
+Then look at the overlay again. If it aligns, the whole camera-model discussion was about a model
+that was never applied.
+
+---
+
+## Step 1 ◆ MEASURE — three residuals, not one
+
+The first version binned **only the pitch-paint residual, by radius**. Two problems: the goal is
+players, not paint; and a radius profile cannot distinguish a camera missing a parameter from a
+camera that is absent — it reads "grows with radius" either way, and would have sent me to fit
+distortion on a model that never ran.
+
+| residual | source | what it separates |
+|---|---|---|
+| pitch paint vs drawn line | `pitch_evidence.classify(uv, …)` — exists, returns per-point distance | camera on the ground plane |
+| **subject foot vs detector box bottom** | projected root + cached detections — both exist | camera vs per-player depth |
+| **common-mode vs per-player scatter** | the same two arrays | all subjects displaced alike ⇒ camera; scattered ⇒ grounding or association |
+
+The second and third were in the first version's *step 5*, costed at "ten lines" and ranked behind
+days of UI work. That was the worst call in the document: they are the only test that separates the
+two error classes.
+
+**Bin only frames whose confidence clears `MIN_SOLVED_CONFIDENCE = 0.02`, and report the drop
+count.** Confidence exactly 0.0 means the frame was never solved and its homography is a copy
+carried from the last good one — that drifts with *time*, not radius, and mixing those frames in
+manufactures the very signal being tested for. (On this clip no frame is at 0.0; on the vertical
+clip it was 43 % of 355.)
+
+---
+
+## Step 2 ＋ NEW — why is the pipeline's calibration worse than `fit_rigid_camera.py`'s?
+
+Same clip, same frames 0–59, two calibrations: one reduces to a single camera with a
+mutation-checked position, the other reprojects at 480 px and is refused. **That gap is the binding
+constraint, and no schema change touches it.**
 
 | | |
 |---|---|
-| `CameraTrack` | ▲ `intrinsics: CameraIntrinsics` → also accept `(T,)` of them, or add `focal_per_frame: (T,)` |
-| `scene.json` | ▲ serialization follows the type, no wrapper change |
+| ◆ compare | the two homography sets point-by-point on the pitch — done once, median 0.63 m / max 18.6 m. Repeat per frame and per image region to locate the tail |
+| ◆ check | different PnLCalib invocation, different post-processing, or a different world convention |
+| ＋ likely outcome | a **robust** fit — reject outlier frames or regions — rather than a new parameter |
+
+---
+
+## Step 3 ▲ CHANGE — per-frame focal, then `k1`
+
+Only after step 2, and now on a mechanism argument rather than a frequency one.
+
+`camera_from_calibration` does not degrade when one focal cannot fit — it **refuses**, and the
+fallback is silent. So on a clip that zooms enough, the single-focal model yields **no camera at
+all**. That makes per-frame focal not an accuracy improvement but **the precondition for a measured
+camera existing**.
+
+### 3a. Per-frame focal — schema change
+
+| | |
+|---|---|
+| `CameraTrack` | ▲ `intrinsics: CameraIntrinsics` (one, shared) → per-frame. Its own docstring already calls this a future refinement and says core need not change |
 | `calib/<clip>.npz` | ▲ `focal` scalar → `(T,)` |
-| `tests/e2e/test_golden_real_camera.py` | ▲ **pins `focal 4169.32` and one optical centre for all 60 frames.** It must be re-measured, not nudged |
-| consumers | ▲ `poseannot/camera.py`, `anim_export.py` cameras.npz, Blender |
+| `tests/e2e/test_golden_real_camera.py` | ▲ pins `focal 4169.32` and one optical centre for 60 frames. **Re-measure, never nudge** — it is mutation-checked and the only real measurement in the suite |
+| consumers | ▲ `poseannot/camera.py`, `anim_export.py` `cameras.npz`, Blender |
 
-Bigger, and it invalidates a golden test that is currently mutation-checked. Do it only if 2a is
-not enough.
+### 3b. Distortion `k1` — no schema change
 
-### 2c. Free principal point — cheap, same shape as 2a
-
-`cx, cy` already exist and are set to the image centre. Making them fitted parameters is one more
-term in the optimiser and no type change at all.
-
----
-
-## Step 3 ＋ NEW — synthetic ground truth for the calibrator
-
-**The only way to know what the solver loses, rather than guess.**
-
-Render a scene with a *known* camera — known focal, known distortion, known pose — and ask the
-calibrator to recover it. `src/pitch3d/eval/synthetic.py` already generates synthetic scenes and
-`eval/harness.py` already runs Condition A (GT camera) vs Condition B (our solve), so the frame
-exists.
+`CameraIntrinsics.distortion` **already exists** and is `None` on every solve we produce.
 
 | | |
 |---|---|
-| ＋ `eval/synthetic_calib.py` | render pitch + players at known camera params, with deliberate distortion |
-| ＋ metric | recovered focal vs true, recovered pose vs true, residual vs radius |
-| contract | none — this is a test harness, not a pipeline stage |
+| `scripts/fit_rigid_camera.py` | ＋ one parameter in the optimiser |
+| `calib/<clip>.npz` | ＋ key `dist: (k,)`; the writer already emits `width`/`height` that the current file predates |
+| every projector | ▲ four must stay in step or overlay and export diverge again: `core/scene/projection.py`, `poseannot/camera.py`, `scripts/apply_rigid_camera.py`, `scripts/track_quality.py` |
 
-Domain gap is small here: a white line on green is a white line on green. This is the half of
-synthetic data that genuinely transfers. **Pose is the half that does not** — for pose the
-appearance gap is real and the answer is WorldPose, not rendering.
+Keeping those four in step is the real cost, not the optimiser change.
+
+### ~~3c. Free principal point~~ · ~~camera translation~~
+
+**Deleted.** 1 px median wander, and 0.000 m in 89/89 clips.
 
 ---
 
-## Step 4 ＋ NEW — export corrections as a training set
+## Step 4 ＋ NEW — serialize which camera you got
 
-For "fine-tune the model", the current file is the wrong shape.
-
-`edits.json` holds `Correction` records, i.e. a **delta**: `PlaneTransformPayload(matrix)` says
-how far the operator moved the layout. A trainer needs the **absolute** answer per frame.
+The cheapest change in this document, and it would have caught #140 on day one.
 
 | | |
 |---|---|
-| ＋ `scripts/export_calib_dataset.py` | resolve corrections against the solve → per-frame corrected homography + the pitch keypoints it implies |
-| ＋ output | `{frame, keypoints_image: (K, 2), keypoints_world: (K, 2), homography: (3, 3), source_clip}` |
-| contract | none in core — a new consumer of an existing correction stack |
+| ▲ `Scene` or `CameraTrack` | ＋ carry `PlaneCameraFit` (`focal_px`, `reprojection_px`, `realizable`) into `scene.json` |
+| ＋ any consumer comparing a scene to source pixels | refuse, or say so loudly, when the camera is synthetic |
 
-**The trap to state out loud.** Human corrections are made *through* the current camera. If the
-camera model is wrong — which is the premise of this whole document — then corrections made on
-top of it inherit that error, and training on them teaches the model to reproduce it. So this
-step must come **after** step 2, never before.
-
-And for **pose** specifically there is no need to build a dataset at all: WorldPose is 89 clips
-of real World Cup 3D poses at 8 cm accuracy, already on disk at `AVATAR/WorldPose/`.
-
-**Correction 2026-08-08: the video is not missing either.** All 89 clips have GT camera *and* GT
-pose *and* footage on disk (`models/worldpose/`, 24 GB), and the GT poses are our exact
-`PoseSequence` schema — `global_orient`, `body_pose`, `transl`, `betas`, 22 players. That makes
-**step 3 above (synthetic calibration GT) redundant**: real broadcast beats a render, measures
-both halves of the goal rather than one, and carries no domain gap.
+Today the two are indistinguishable on disk. `track_quality.py` detects it by testing `fx ≈ 772` —
+a magic number, because there is nothing else to test.
 
 ---
 
-## Step 5 ▲ CHANGE — controls in the browser, after the above
+## Step 5 ＋ NEW — verticality and foot contact
 
-Today's calibration UI is a **4-DOF similarity on the pitch plane**: drag to translate, a turn
-handle to rotate and scale, plus a typed panel, undo, and a measured `fit px · ok/off` readout.
-It writes `FIELD_CALIBRATION` corrections that reach the export (#128).
+Neither version of this document mentioned it, and the goal is "positions **and poses**".
 
-Four degrees of freedom cannot fix a wrong focal, a wrong tilt or distortion. That is why the
-alignment fight has been expensive: the control set does not contain the error.
-
-| | |
-|---|---|
-| ＋ point correspondences | drag known pitch landmarks onto their image position; ≥4 gives a homography, and with the 105 × 68 model, focal and pose. **This is also exactly the format step 4 exports** |
-| ＋ residual-vs-detections readout | project each subject's feet, compare to its detector box bottom-centre. Per-player pixel error, no human input |
-| ＋ "is it the camera or one player" line | are all subjects displaced the same way, or one. This is ten lines and it decides which of the two problems you are looking at |
-| ▲ existing 4-DOF drag | keep. It is right for the residual planar offset, once the camera is right |
+#135 П5 measured the largest root-Z excursion **in a whole scene at 0.082 m** — nobody ever leaves
+the ground. WorldPose GT says a real player's root ranges **0.23 m** per clip at the median and
+rises **0.67 m** at p99 inside half a second. No camera fix touches this.
 
 ---
 
-## What I would not do
+## Step 6 ▲ CHANGE — WorldPose, and ~~synthetic~~
 
-- **Per-frame calibration by hand.** A layout a metre out on one frame is a metre out on all of
-  them; correcting one frame buys alignment there and a jump next door. The existing correction
-  is whole-clip by default for this reason.
-- **Synthetic data for pose appearance.** Weak transfer, and WorldPose already exists.
-- **Building the annotation UI first.** If step 2 closes the edges, there is far less to annotate,
-  and what remains is annotated on top of a camera that is right.
+**Correction to the first version:** it said the WorldPose video "is an agreement with FIFA, not
+annotation work". **Wrong — 124 video files, 24 GB, at `models/worldpose/`.** All 89 clips have
+footage *and* GT poses (our exact `PoseSequence` schema) *and* GT cameras with per-frame `K`, `R`,
+`t` and five distortion coefficients.
+
+~~The first version's step 3, `eval/synthetic_calib.py`~~ — **retired entirely.** WorldPose
+measures the calibrator on real footage with a known answer and no domain gap, and measures pose
+too. Synthetic keeps one narrow use: injecting a distortion or zoom profile WorldPose does not
+contain, to test a solver's range. A follow-up, not a step.
+
+---
+
+## Step 7 ＋ NEW — export corrections as a training set
+
+Unchanged, including the trap, which the review confirmed:
+
+`edits.json` holds a **delta** (`PlaneTransformPayload.matrix`); a trainer needs the **absolute**
+per-frame answer. And human corrections are made *through* the current camera — if that camera is
+wrong, training on them teaches the model to reproduce the error. **After step 3, never before.**
+
+With #140 known this is doubly true: corrections made on a 772 px scene are worthless as data.
+
+---
+
+## Step 8 ＋ NEW — controls in the browser, last
+
+Today's calibration UI is a 4-DOF similarity on the pitch plane. Four degrees of freedom cannot fix
+a wrong focal, a wrong tilt, distortion — or a camera that is not there. Point-correspondence
+dragging (≥4 known pitch landmarks → homography → focal and pose) is the right control, and it is
+also exactly the format step 7 exports.
+
+Worth building only for what steps 0–3 leave behind.
 
 ---
 
@@ -189,10 +222,13 @@ alignment fight has been expensive: the control set does not contain the error.
 
 | step | cost | what it buys |
 |---|---|---|
-| 1 ◆ residual by radius | half a day, no new code | tells you if any of the rest is needed |
-| 2a ▲ distortion | ~1 day, several projectors to keep in sync | closes a radial error without a schema change |
-| 2c ▲ free principal point | hours | same shape, sometimes the whole answer |
-| 2b ▲ per-frame focal | days, breaks a golden test | only if the operator zoomed |
-| 3 ＋ synthetic calib GT | ~1 day, harness exists | tells you what the solver loses, exactly |
-| 4 ＋ training-set export | ~1 day | turns manual work into data — **after** step 2 |
-| 5 ＋ UI controls | days | needed only for what steps 1–3 leave behind |
+| 0 ◆ re-run with the measured camera | one run, no new code | may dissolve the premise entirely |
+| 1 ◆ three residuals | half a day | camera vs player, which nothing else answers |
+| 2 ◆ why our calibration is worse | ~1 day | the binding constraint, measured |
+| 3a ▲ per-frame focal | days, re-measures a golden test | the precondition for a measured camera on a zooming clip |
+| 3b ▲ distortion `k1` | ~1 day, four projectors in sync | ~47 px at the corner |
+| 4 ＋ serialize the camera fit | hours | would have caught #140 on day one |
+| 5 ＋ verticality | unscoped | the pose half of the goal, untouched by everything above |
+| 6 ▲ WorldPose | already local | GT for calibrator and pose, no domain gap |
+| 7 ＋ training-set export | ~1 day | after 3 |
+| 8 ＋ UI controls | days | last |
