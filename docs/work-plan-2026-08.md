@@ -29,7 +29,7 @@ here — if that fact is wrong, the item leaves the queue.
 | **W2** ✅ fixed | **#137 — `team=None` on 23 of 27** | Kit colour is the one appearance signal that survives at 28 px, and `StitchConfig.require_same_team` treats `None` as a **wildcard**, so a null label silently removes the stitcher's only working constraint. Clustering works locally on both clips (broadcast **56/56**, fan **A=11 / B=9** with measured white/red) — so this is the pod path, not a scale wall | a full 355-frame run that assigns teams, or the line that drops them |
 | **W3** ✅ refuted → merged into W4 | **Stitch on the handover criterion (П3)** | Closes the user's entire stitch list — three pairs become three players — and needs no new model: the signal is already in `provenance` plus the roots. Must be an **assignment** (one partner each, nearest first) or t20 gets swept into t25's merge at 2.09 m | `track_quality.py` against the 24 eye labels: 19/20 → 20/21 |
 | **W4** ✅ built, OFF by default — needs the eye | **Drop the mannequin half of every merged pair (П2)** | `imputed` is mechanically a frozen mannequin — **0.00 rad** of limb travel while the root coasts 1.68–3.66 m. The duplicate half is what the eye calls a phantom; the man nobody measured stays, marked (R-6) | phantom count in `track_quality.py`, then the user's eye in `/app` |
-| **W5** | **Selective mask propagation** | arXiv 2606.13033 is **training-free**, treats base tracker and VOS as black boxes, and its dispatch signal is the **assignment margin in the Hungarian cost matrix** — implementable over our own matrix at the same seam as the McByte cue, no weights. Answers our measured **686 s GPU / 4.2 h CPU** per pass by firing Cutie only where the tracker is unsure | mid-pitch identity events vs the 28 → 24 the always-on cue bought, and the propagation cost |
+| **W5** ✅ premise confirmed, not built | **Selective mask propagation** | arXiv 2606.13033 is **training-free**, treats base tracker and VOS as black boxes, and its dispatch signal is the **assignment margin in the Hungarian cost matrix** — implementable over our own matrix at the same seam as the McByte cue, no weights. Answers our measured **686 s GPU / 4.2 h CPU** per pass by firing Cutie only where the tracker is unsure | mid-pitch identity events vs the 28 → 24 the always-on cue bought, and the propagation cost |
 | **W6** | **GTA-Link** | **MIT**, offline, consumes and returns MOT-format text. Its Connector is appearance-clustered global re-association; we measured our own stitcher's *gates* are not the binding constraint, so the clustering is the genuinely new part | identity count and seam speeds against the 36 / 14-merge baseline |
 | **W7** | **`full_realism` on the real clip** | **3 physics gates on, ~12 built and off**, and of the 3 only `joint` and `orientation` have a paired before/after. One run measures eight at once — including `collision`, which the fan scene says is real: **32 twin pairs, 19 of them with both tracks measured** | `motion_stats.py` + the user's eye on an A/B |
 | **W8** | **Vertical DOF (П5)** | Largest root-Z excursion in a whole scene is **0.082 m** (broadcast) / **0.234 m** (fan); a jump moves a pelvis ~0.4 m. Until this exists «17 не прыгнул» cannot be fixed. WorldPose GT now says what the range should be | root-Z distribution vs WorldPose GT |
@@ -292,6 +292,75 @@ Suite **1184 passed / 19 skipped**. Verified end to end through the CLI on the f
 verified on the real scene above.
 
 *Closed 2026-08-07 for the code. **Open for the eye** — the A/B is staged and t10 is the question.*
+
+### W5 — selective mask propagation → **the dispatch signal works, but only if you ask it the right question**
+
+SMP (arXiv 2606.13033) fires the VOS only where the tracker is unsure, triggering on the
+**assignment margin in the Hungarian cost matrix**. Our reason to want it is measured: the McByte
+mask cue costs **686 s GPU / 4.2 h CPU** per pass and bought mid-pitch identity events 28 → 24.
+Paying that everywhere for a 14 % gain is exactly what SMP claims to fix.
+
+So the premise gets tested before anything is built — **on CPU, with no Cutie and no GPU**.
+`scripts/bench_assignment_margin.py` replays the pipeline's own tracker over cached detections and
+records every cost matrix, using the seam the mask cue already patches. No new monkey-patch: a
+recorder that quacks like a `MaskCue` gets both the matrix and its frame number from the real
+association loop, and returns the cost unchanged so it cannot perturb what it measures.
+
+It reproduces **78 mid-pitch identity events** over 235 frames — independently matching #133's
+own count of 78, which is a good sign the event definition is the same one.
+
+**The naive question gives a null, and it looks convincing until you run the control.** Margins at
+event frames really are lower — p10 **0.154** against 0.352 away, median ratio 0.92. But **73 % of
+all rows already sit within ±2 frames of an event**, so a trigger firing at random hits event
+frames anyway. Against a same-size random draw (200 repetitions):
+
+| margin < | rows fired | of all | event frames hit | random | **lift** |
+|---|---|---|---|---|---|
+| 0.02 | 37 | 0.4 % | 11/65 | 10.0 | 1.10× |
+| 0.05 | 91 | 1.0 % | 22/65 | 22.0 | 1.00× |
+| 0.10 | 200 | 2.3 % | 34/65 | 38.6 | 0.88× |
+| 0.20 | 566 | 6.4 % | 52/65 | 60.4 | 0.86× |
+| 0.40 | 1012 | 11.4 % | 60/65 | 64.5 | 0.93× |
+
+**No better than chance, and slightly worse at the useful thresholds.** The mechanism is real:
+ambiguity *clusters*, so a fixed number of low-margin rows covers *fewer* distinct frames than a
+random draw. Per frame, the signal is worthless — on a crowded frame something is always
+ambiguous.
+
+**The fair question is per track, and there the signal is strong.** Not "was something ambiguous
+on the frame where an identity broke" but "was **the breaking track's own row** ambiguous":
+
+| | p10 | p25 | median |
+|---|---|---|---|
+| breaking tracks (n=49) | **0.021** | **0.072** | **0.127** |
+| every (frame, track) (n=4580) | 0.162 | 0.502 | 0.739 |
+
+A breaking track's margin is **5.8× lower at the median**, and against the base rate:
+
+| margin < | catches breaking tracks | fires on rows | **lift** |
+|---|---|---|---|
+| 0.05 | 22.4 % | 2.0 % | **11.3×** |
+| 0.10 | 30.6 % | 4.4 % | **7.0×** |
+| 0.20 | **65.3 %** | **12.3 %** | **5.3×** |
+| 0.40 | **85.7 %** | 21.1 % | **4.1×** |
+
+**Verdict: the premise holds.** Firing on ~12 % of rows catches two thirds of the tracks that
+break; ~21 % catches 86 %. Against an always-on cue that pays 100 %, that is a **4–5× compute
+saving at most of the coverage** — 686 s GPU becomes roughly 145 s.
+
+**Two limits, both load-bearing, neither of which SMP fixes.**
+
+* **29 of 78 events have no row at all for that track.** They are *births*: a track being born was
+  not in the previous matrix, so there is nothing to be unsure about. Dispatch can catch a track
+  about to **die**, never one about to appear. Since a mid-pitch birth is usually the other half of
+  a death, catching the death may prevent it — but that is a hypothesis, not this measurement.
+* **The ceiling is unchanged.** The cue itself converts 4 of 28 events (14 %). Perfect dispatch
+  cannot beat that. **SMP makes the cue cheaper, not better** — which is only worth building if the
+  saving is then spent on a *stronger* per-call propagation. That is the real opportunity and it is
+  a separate item.
+
+*Premise closed 2026-08-08 by measurement, CPU only, no GPU. The implementation is not built: it
+should not be, until there is a reason to spend the saving.*
 
 ### W13 — **the kit reader called the grass yellow, and it had already reached a committed doc**
 
