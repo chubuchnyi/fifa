@@ -91,6 +91,7 @@ PYTHONPATH=src .venv/bin/python scripts/bench_novel_view_metric.py  # R7: why 0.
 PYTHONPATH=src .venv/bin/python scripts/bench_joint_limits.py       # R5: is hyperextension ever reached?
 PYTHONPATH=src .venv/bin/python scripts/bench_camera_swim.py        # R2: does the camera swim?
 PYTHONPATH=src .venv/bin/python scripts/bench_calib_confidence.py   # #105: is calib confidence predictive?
+PYTHONPATH=src python scripts/bench_camera_model_gap.py             # what one focal per clip costs, in metres
 python scripts/motion_stats.py --scene <export/scene.json>          # #207: speed/accel plausibility
 .venv/bin/python scripts/check_layout_preview.py                    # #127: does the browser's drag preview match the commit? (needs the server + node)
 .venv/bin/python scripts/track_quality.py --camera calib/Colombia-1-0-Congo-DR1080p.npz \

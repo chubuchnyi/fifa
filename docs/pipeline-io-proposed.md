@@ -8,6 +8,15 @@ Marks: **▲ CHANGE** an existing contract · **＋ NEW** something that does no
 
 Nothing here is built. This is the proposal to argue with.
 
+> **Measured 2026-08-08 — three of the guesses below are now settled, and the order changes.**
+> Against 89 WorldPose GT broadcast cameras: focal moves >5 % in **89/89** clips (median 44 %),
+> the camera translates in **0/89** (exactly 0.000 m), distortion is **~47 px** at the frame
+> corner, principal-point wander is ~1 px. So **step 2b (per-frame focal) is the dominant term and
+> should be first**, 2a stays, and **2c and the camera-translation hypothesis should be dropped**.
+> At our 60-frame fit that costs ~0.4–0.8 m of player position; at 240 frames, 2–5 m. Numbers,
+> method and caveats: [`findings/camera-model-gap-2026-08-08.md`](findings/camera-model-gap-2026-08-08.md)
+> · reproduce with `scripts/bench_camera_model_gap.py`.
+
 ---
 
 ## Why any of this
@@ -137,8 +146,13 @@ top of it inherit that error, and training on them teaches the model to reproduc
 step must come **after** step 2, never before.
 
 And for **pose** specifically there is no need to build a dataset at all: WorldPose is 89 clips
-of real World Cup 3D poses at 8 cm accuracy, already on disk at `AVATAR/WorldPose/`. The missing
-half is the video, which is an agreement with FIFA, not annotation work.
+of real World Cup 3D poses at 8 cm accuracy, already on disk at `AVATAR/WorldPose/`.
+
+**Correction 2026-08-08: the video is not missing either.** All 89 clips have GT camera *and* GT
+pose *and* footage on disk (`models/worldpose/`, 24 GB), and the GT poses are our exact
+`PoseSequence` schema — `global_orient`, `body_pose`, `transl`, `betas`, 22 players. That makes
+**step 3 above (synthetic calibration GT) redundant**: real broadcast beats a render, measures
+both halves of the goal rather than one, and carries no domain gap.
 
 ---
 
