@@ -97,9 +97,11 @@
     <!-- One switch for the whole drawn layer. Judging the reconstruction against the video means
          seeing the video, and un-ticking six toggles one at a time to get there loses the state
          you had. This restores it on the way back. -->
-    <button @click="overlaysOff = !overlaysOff" :class="{ active: overlaysOff }"
-            :title="overlaysOff ? 'overlays hidden — click or press H to bring them back'
-                                : 'hide every overlay and show the bare frame (H)'"
+    <button @click="toggleOverlays()" :class="{ active: overlaysOff }"
+            :title="overlaysOff ? 'overlays hidden and they STAY hidden across frames, reloads '
+                                 + 'and clip switches — click or press H to bring them back'
+                                : 'hide every overlay and show the bare frame (H). The choice '
+                                 + 'sticks across frames and reloads.'"
             x-text="overlaysOff ? 'overlays: off' : 'overlays: on'"></button>
     <button @click="togglePitchSource()" x-show="showPitch"
             :class="{ active: pitchSource === 'calib' }"
@@ -275,16 +277,21 @@ badge keeps reading 'one camera'.">layout</button>
              "viewbox" — which SVG ignores (case-sensitive). Without a viewBox the
              1920-space points render 1:1 inside the ~700px box and shoot off the
              frame (the persistent "offset"). preserveAspectRatio="none" + the
-             same explicit px size as the <img> then locks the overlay to it. -->
+             same explicit px size as the <img> then locks the overlay to it.
+             :style MUST stay an OBJECT, not a template string. A string binding
+             rewrites the whole style attribute, which wipes the `display:none`
+             that x-show wrote — so every frame change silently brought the
+             overlay back while `overlaysOff` still read true. An object binding
+             sets width/height property-wise and leaves display alone. -->
         <svg viewBox="0 0 1920 1080" x-ref="overlaySvg"
              x-effect="$el.setAttribute('viewBox', '0 0 ' + srcW + ' ' + srcH)"
              x-show="overlaySvgStr && !overlaysOff"
              x-html="overlaySvgStr"
              preserveAspectRatio="none"
-             :style="`width:${imgSize.w}px;height:${imgSize.h}px`"></svg>
+             :style="{ width: imgSize.w + 'px', height: imgSize.h + 'px' }"></svg>
       </div>
     </div>
-    <div class="ovl-off-badge" x-show="overlaysOff" x-cloak>overlays hidden — H to restore</div>
+    <div class="ovl-off-badge" x-show="overlaysOff" x-cloak>overlays hidden (sticky) — H to restore</div>
     <!-- Layout-drag HUD (#124). The gesture shipped in #112 works, but blind: the handle you
          grab springs back to its fixed screen spot on release (that is by design — the world
          moved under it, not the handle), so the ONLY evidence a drag did anything is the fit
@@ -1181,6 +1188,7 @@ Alpine.data("poseAnnot", () => ({
       this._inited = true;
       this.beginBusy("loading clip — building poses…");
       this.restorePanes();
+      this.restoreOverlaysOff();
       initThree(this);
       this.diag.three = threeState ? "inited" : "FAILED";
       // Clear `busy` too: a long op that died on a 401 would otherwise leave its spinner up
@@ -1298,7 +1306,7 @@ Alpine.data("poseAnnot", () => ({
         if (e.key === "a" || e.key === "A") { this.toggleShowAll(); return; }
         if (e.key === "m" || e.key === "M") { this.toggleOverlayMode(); return; }
         if (e.key === "p" || e.key === "P") { this.togglePitch(); return; }
-        if (e.key === "h" || e.key === "H") { this.overlaysOff = !this.overlaysOff; return; }
+        if (e.key === "h" || e.key === "H") { this.toggleOverlays(); return; }
         if (e.key === "c" || e.key === "C") { this.showCamAdjust = !this.showCamAdjust; return; }
         if (e.key === "j" || e.key === "ArrowRight") this.nextFrame();
         else if (e.key === "k" || e.key === "ArrowLeft") this.prevFrame();
@@ -2275,6 +2283,22 @@ Alpine.data("poseAnnot", () => ({
       };
       window.addEventListener("pointermove", move);
       window.addEventListener("pointerup", up);
+    },
+
+    // The overlays switch is STICKY across frames, reloads and clip switches. Before this it
+    // was per-session state, so judging a reconstruction against the video — which means
+    // stepping frames with the drawn layer off — meant pressing the button again on every
+    // single frame. The user's words, 2026-08-08: «чтобы не нужно было постоянно на каждый
+    // фрэйм нажимать кнопку overlay:on/off».
+    toggleOverlays(force) {
+      this.overlaysOff = (force === undefined) ? !this.overlaysOff : !!force;
+      try { localStorage.setItem("poseannot.overlaysOff", this.overlaysOff ? "1" : "0"); }
+      catch { /* private mode / storage disabled — it just will not persist */ }
+    },
+
+    restoreOverlaysOff() {
+      try { this.overlaysOff = localStorage.getItem("poseannot.overlaysOff") === "1"; }
+      catch { /* leave the default */ }
     },
 
     restorePanes() {
