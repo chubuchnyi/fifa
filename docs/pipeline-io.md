@@ -152,6 +152,12 @@ first-class field), `track_2d: (T, 2) | None` px, `mode: (T,)` of `BallMode`.
 **`CameraIntrinsics`** — `fx, fy, cx, cy: float` px, `width, height: int`,
 `distortion: (k,) | None`.
 
+**`PlaneCameraFit`** — what `camera_from_calibration` returns, and **the only way to tell a
+measured camera from a synthetic one**: `camera: CameraTrack | None`, `focal_px: float`,
+`reprojection_px: float`, `realizable: bool`. Reachable as `Application.camera_fit(scene_id)`.
+It is held in memory only — **it is not serialized into `scene.json`**, so a scene on disk carries
+no record of whether its camera was measured. Nothing in `poseannot` checks it.
+
 **`CameraTrack`** — `intrinsics: CameraIntrinsics` (**one, shared by the whole track**),
 `frames: (T,)`, `rotation_quat: (T, 4)` as (w,x,y,z) world→camera, `translation: (T, 3)` metres
 world→camera, `estimated: bool`, `raw_frame_aligned: bool`.
@@ -272,11 +278,57 @@ real one. This table is the difference.
 | Detections | `--detector rfdetr` | `FakeDetector` |
 | Camera | `--calibrator keypoints` + PnLCalib weights | `FakeFieldCalibrator`: world = (pixel − centre) × 30 m / width. **Affine, no perspective at all** |
 | Pose | `--pose gvhmr` + a real backend | `FakePoseEstimator`: `body_pose = zeros`, a T-pose on every frame |
-| `Scene.camera` | the #129 rigid fit | an **invented** 772 px @ 1280×720 fallback, principal point dead centre |
+| `Scene.camera` | `camera_from_calibration` returns `realizable=True` | an **invented** 772 px @ 1280×720 fallback, principal point dead centre — see below |
 | Role | Roboflow sports weights | everyone is `player` |
 | Team | kit k-means over the sampled torso | `None`, which downstream treats as a wildcard |
 
-Two consequences that have cost sessions:
+### The camera fallback is not hypothetical — measured 2026-08-08
+
+`controller.run_reconstruction` ends with:
+
+```python
+scene.camera = self._measured_camera(scene, clip) or self._static_camera(scene)
+```
+
+`_measured_camera` returns `fit.camera`, which is `None` whenever a set of free per-frame
+homographies cannot be reduced to one camera. That refusal is deliberate and correct (#61: a scene
+once carried two cameras 12686 px apart for months). **The silent substitution is the problem** —
+`_static_camera` builds a synthetic broadcast viewpoint, and downstream nothing distinguishes it
+from a solve.
+
+Checked across every scene on disk:
+
+| scene | fx | size | |
+|---|---|---|---|
+| `out/cue/scene_off.json` — **the reference scene for the #135 eye labels** | 772.0 | 1280×720 | synthetic |
+| `out/cue/scene_on.json` | 772.0 | 1280×720 | synthetic |
+| `out/res_ab/res{560,896,896_handover}.json` | 772.0 | 1280×720 | synthetic |
+| `out/res_ab236/f236_res{560,896,896_handover}.json` | 772.0 | 1280×720 | synthetic |
+| `out/vert137/scene.json` | 772.0 | 1280×720 | synthetic |
+
+**Nine of nine.** Every scene we have judged by eye, scored criteria against, or A/B-ed was drawn
+with a camera at 772 px focal and 1280×720 against a 1920×1080 clip whose real focal is ~4200 px.
+
+Why, on `f236_res896`, measured:
+
+```
+camera_from_calibration(scene.field.calibration, 1920, 1080)
+  focal_px = 4340.8        # sane, within 4 % of the golden 4169.32
+  reprojection_px = 471.1
+  realizable = False
+```
+
+The calibration itself is solved on all 236 frames (median confidence 0.472, no frame at 0.0). The
+reprojection is invariant to window length (467 px at 30 frames, 471 px at 236) and to confidence
+filtering (453 px on the top 10 %), so it is neither zoom nor a rankable subset — it is a
+tail in the per-frame homographies. Detail:
+[`findings/reply-camera-model-gap-2026-08-08.md`](findings/reply-camera-model-gap-2026-08-08.md).
+
+**What to do with this when reading any scene:** check `fx`. If it is 772.02 at 1280×720, the
+scene has no camera, and anything comparing it to the source pixels is meaningless.
+`scripts/track_quality.py` says so unprompted and is why its `--camera` flag is not optional.
+
+Two more consequences that have cost sessions:
 
 - A scene reconstructed without `--camera`/the rigid fit stores the 772 px fallback, whose field
   of view is so wide that **every subject lands inside the image** — which silently turns the

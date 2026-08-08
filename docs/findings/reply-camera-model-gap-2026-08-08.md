@@ -4,9 +4,17 @@ Answer to [`review-pipeline-io-2026-08-08.md`](review-pipeline-io-2026-08-08.md)
 [`camera-model-gap-2026-08-08.md`](camera-model-gap-2026-08-08.md), from the author of
 `pipeline-io.md` / `pipeline-io-proposed.md`. Written 2026-08-08.
 
-**Verdict: the review is right on every point it makes, and its central claim is stronger than it
-argued. But the premise both documents were built on — mine and the review's — is not established,
-because the scene that produced the observation had no measured camera in it at all.**
+**Verdict, after measuring rather than arguing:**
+
+1. The review is right on every point it makes, and its zoom argument is stronger than it made it.
+2. **Our clip does zoom** — ~11 % across 236 frames, confirming its WorldPose statistic transfers.
+3. **Zoom is nevertheless not the binding constraint here.** The one-camera fit refuses just as
+   hard on a 30-frame window, where drift is 0.8 %.
+4. **The premise both documents were built on is not established.** The scene the observation was
+   made on — and *every other scene we have*, nine of nine, including the reference scene for the
+   #135 eye labels — carries the synthetic 772 px fallback, not a measured camera.
+5. The dominant error is a **tail in the per-frame homographies**, not a missing parameter in the
+   camera model. Per-frame focal and `k1` cannot repair it.
 
 ---
 
@@ -65,8 +73,30 @@ silently substituted a synthetic broadcast viewpoint.
 
 The refusal is right and is there on purpose (#61: a scene once carried two cameras 12686 px apart
 for months). **The substitution is the defect** — downstream, a synthetic camera is
-indistinguishable from a measured one unless the caller checks `camera_fit()`, and nothing in the
-viewer does.
+indistinguishable from a measured one unless the caller checks `camera_fit()`, that fit is **held
+in memory and never serialized**, and nothing in the viewer checks it.
+
+### And it is not one scene — it is every scene we have
+
+| scene | fx | size |
+|---|---|---|
+| `out/cue/scene_off.json` — **the reference scene the 24 eye labels were made on** | 772.0 | 1280×720 |
+| `out/cue/scene_on.json` | 772.0 | 1280×720 |
+| `out/res_ab/res{560,896,896_handover}.json` | 772.0 | 1280×720 |
+| `out/res_ab236/f236_res{560,896,896_handover}.json` | 772.0 | 1280×720 |
+| `out/vert137/scene.json` | 772.0 | 1280×720 |
+
+**Nine of nine.** Every eye verdict, every criteria score, every A/B in this thread was made on a
+scene with no measured camera. Two things follow, and they point in opposite directions:
+
+- The verdicts that compare a scene **to the source pixels** — overlay alignment, pitch markings,
+  skeletons on players — were never testing what we thought. That includes the observation that
+  started both of these documents.
+- The verdicts that compare a scene **to itself or to another scene** — identity churn, phantom
+  counts, handover pairs, root-speed distributions, and the eye's ranking of 560 vs 896 vs
+  896+handover — are untouched. They never used `scene.camera`. `scripts/track_quality.py`
+  requires `--camera` for exactly this reason, and that is the only reason its numbers mean
+  anything.
 
 **Consequence for both documents.** The edge-worsening observation was made through a camera that
 is wrong everywhere, not through a camera missing a parameter. Neither my ordering of the three
