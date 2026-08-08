@@ -64,6 +64,7 @@ what the plan assumed:
 | **W3+W4** the merge | **built, OFF by default** (`--handover`). On the judged scene: **24 → 21 subjects**, the three pairs the eye named, **183 mannequin frames gone**. ⚠ **Needs the eye:** `bash scripts/view_handover_ab.sh` |
 | **W9** WorldPose GT | **89 clips, 2.4 M samples.** Speed ceiling 10.5 m/s never fires (real max **9.74**); accel ceiling **8 m/s² clips real football** (p99 = 8.35 on a 100 ms average); a real root ranges **0.23 m** per clip where our best whole scene is 0.234 |
 | **W10** #103 BT.709 | **closed** — the clip declares `bt709`, so OpenCV 5 is right and OpenCV 4 was wrong. Changes **0 of 32** kit readings |
+| **W5** selective mask propagation | **premise confirmed, deliberately not built.** Per *frame* the assignment margin is worthless (lift **0.86–1.10×** against a random trigger of the same size — 73 % of rows already sit near an event). Per **track** it is strong: a breaking track's median margin is **0.127 vs 0.739**, and firing on 12 % of rows catches **65 %** of the tracks that break (**5.3×** lift), 21 % catches 86 %. So ~4–5× cheaper than the always-on cue — but the cue's own ceiling is 14 %, so this buys **cost, not quality**. Build it when there is a stronger propagation to spend the saving on |
 | **W13** kit reader | **the yellow band contained the pitch.** H 18–48 vs grass at H 39–40 → **64.9 % of every frame read "yellow kit"**. Four claims retracted, incl. one that predates this session |
 
 **The one open question for the morning.** The merge `t10 → t77` is almost certainly **wrong**, and
