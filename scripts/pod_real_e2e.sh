@@ -102,6 +102,15 @@ if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence
 # HANDOVER=1 → merge two ids that are one human and drop the duplicate mannequin (#135 П3+П2).
 # Off by default: it is the only pass that deletes a subject, so a wrong merge erases a player.
 if [ "${HANDOVER:-0}" = "1" ]; then COH_ARGS+=(--handover); echo "== handover: --handover ON"; fi
+# RIGID_CAMERA=1 → after the scene is written, put the ONE fitted camera (#119/#129) into it.
+# Without this the scene keeps whatever camera_from_calibration could make of PnLCalib's free
+# per-frame homographies — which on the broadcast clip is nothing at all: the closest realizable
+# pinhole is ~471 px away, the fit refuses, and controller.py substitutes a synthetic 772 px
+# stand-in. Measured 2026-08-08: with the stand-in the overlay residual is 240 px median and only
+# 124 of 1088 projected subjects land within 250 px of any detection; with the fitted camera it is
+# 8.0 px and 1088. This script never applied it — pod_make_video.sh, pod_physics_ab.sh and
+# pod_129_ab.sh do — which is why every scene built here drew players through the wrong camera
+# (#61/#140).
 # DET_RES → RF-DETR input square. Unset means the per-clip lookup in
 # config/detector_resolution.yaml decides (896 for the two clips measured so far). Set it to
 # compare resolutions on the same code: 896 cut mid-pitch identity events 89->61 on the
@@ -165,5 +174,13 @@ PYTHONPATH=src "$PY" -m pitch3d \
   --pose gvhmr --pose-backend "$POSE_BACKEND" \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
   --render overlay --export gltf --format "$FORMAT" --out-dir "$OUT"
+if [ "${RIGID_CAMERA:-1}" = "1" ] && [ -n "${CAMERA_NPZ:-}" ] && [ -f "$CAMERA_NPZ" ]; then
+  echo "== rigid camera: applying $CAMERA_NPZ to ${OUT}/export/scene.json (#119/#129)"
+  PYTHONPATH=src "$PY" scripts/apply_rigid_camera.py "$CAMERA_NPZ" \
+    --scene "$REPO/$OUT/export/scene.json" --out "$REPO/$OUT/export/scene.json"
+elif [ "${RIGID_CAMERA:-1}" = "1" ]; then
+  echo "== rigid camera: SKIPPED — set CAMERA_NPZ=<calib/*.npz> to apply it. Without it the scene"
+  echo "   keeps a synthetic camera and nothing comparing it to the source pixels is meaningful."
+fi
 echo "== done in $(( $(date +%s) - t0 ))s -> ${OUT} =="
 ls -la "${OUT}/export/scene.${FORMAT}" 2>/dev/null | head

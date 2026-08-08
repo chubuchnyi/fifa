@@ -278,3 +278,77 @@ before building, which both documents got right.
 
 Deleted from the first version on the review's evidence: camera translation, free principal point,
 synthetic calibration GT.
+
+---
+
+## 9. Step 0 ran. It is #61, it was already solved, and the fix is one command.
+
+**First, a correction to my own §2.** I filed this as a new defect, **#140**. It is not new.
+`scripts/apply_rigid_camera.py` has carried the whole diagnosis in its module docstring since
+#119/#61:
+
+> *"PnLCalib solves each frame as a free 8-DOF DLT, with nothing tying the result to a pinhole. On
+> this clip the result is not merely an inaccurate camera — it is no camera at all: swept over
+> every focal from 200 to 12000 px, the closest realizable pinhole is still **525 px** away from
+> the stored homographies (#119's are 1.4 px). So `camera_from_calibration` rightly refuses,
+> `app/controller.py` falls back to an invented `Viewpoint.BROADCAST` camera... **which is #61, and
+> exactly what 'the ground marks are right but the players are not' looks like from the UI.**"*
+
+Its 525 px is my 471 px. Its sentence is the user's complaint, verbatim, written weeks earlier.
+What was missing was not the diagnosis or the fix — it was that `scripts/pod_real_e2e.sh` never
+applies it. `RIGID_CAMERA` is wired into `pod_make_video.sh`, `pod_physics_ab.sh` and
+`pod_129_ab.sh`, and not into the script every scene in this thread was built with.
+
+**So step 0b needed no GPU at all:**
+
+```
+PYTHONPATH=src .venv/bin/python scripts/apply_rigid_camera.py \
+    calib/Colombia-1-0-Congo-DR1080p.npz --scene out/res_ab/res*.json
+```
+
+### The three residuals, measured — `scripts/bench_overlay_residual.py`
+
+Each subject's projected feet against the nearest cached detection box bottom-centre, over 60
+frames:
+
+| scene | camera | matched | median | p90 | **common mode** | **scatter** |
+|---|---|---|---|---|---|---|
+| `res896` | synthetic 772 px | **124** | **240.0 px** | 247.8 | **230.4** | 44.2 |
+| `res896_rigid` | measured 4169 px | **1088** | **8.0 px** | 20.0 | **5.9** | 9.9 |
+| `res560_rigid` | measured 4169 px | 1051 | 8.7 px | 19.9 | 6.3 | 10.0 |
+
+**Median residual 240 px → 8.0 px.** And the count is as telling as the error: with the synthetic
+camera only **124 of 1088** projected subjects landed within 250 px of *any* detection — nine in
+ten were not near a player at all.
+
+**The common/scatter split does exactly what it was added for.** Synthetic: common 230.4 against
+scatter 44.2 — overwhelmingly common-mode, i.e. the camera. Measured: common 5.9 against scatter
+9.9 — the common term collapses and what remains is per-player, i.e. grounding or association.
+That is the test the first version of the proposal had ranked last, at "ten lines".
+
+**Confirmed by eye in the viewer** at frame 11: with the measured camera every skeleton sits on its
+player and the foot ellipses are at the feet; the toolbar reads `fit 1.0 px · ok 285 / off 21`.
+With the synthetic camera the whole joint cloud sits up and to the left of the players and most
+have no skeleton on them at all.
+
+### What is left, and it is the review's point
+
+On the fixed scene the residual **grows with radius**: 6.2 → 5.4 → 8.2 → **15.7 px** from the
+image centre to the outer quartile, a 2.5× ramp. That is the focal/distortion signature — it was
+simply swamped by a 230 px common-mode error before. **The review's distortion and per-frame-focal
+argument becomes testable exactly here**, at the 8 px scale rather than the 240 px one.
+
+Resolution does not enter it: `res560_rigid` and `res896_rigid` agree to 0.7 px, as expected — the
+resolution change was an identity result, not a geometry one.
+
+### Consequences
+
+1. **#140 is a duplicate of #61**, re-opened because the fix is not wired into the e2e script. The
+   repair is a pipeline-wiring change, not a model change.
+2. **The observation that started both documents is explained and fixed.** "Ground marks right,
+   players wrong" was a camera 5.4× too small.
+3. **My §2 overstated the novelty.** The mark-it-on-disk work (0a) still stands on its own — it is
+   an R-6 violation independent of whether the diagnosis was known — but the diagnosis was not
+   mine to find.
+4. **Every scene-vs-source judgement in this thread must be redone** on `*_rigid.json`. Every
+   scene-vs-scene one stands.
