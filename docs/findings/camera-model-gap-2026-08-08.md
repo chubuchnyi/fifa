@@ -9,6 +9,7 @@ ordered by guess. This measures which of them is real.
 the proposal is close to inverted.
 
 Reproduce: `PYTHONPATH=src python scripts/bench_camera_model_gap.py` (CPU, seconds, no pipeline).
+The reply sent to the documents' author is [`review-pipeline-io-2026-08-08.md`](review-pipeline-io-2026-08-08.md).
 
 ---
 
