@@ -69,12 +69,10 @@ we produce. Fitting one radial coefficient `k1` needs:
 |---|---|
 | type | unchanged |
 | `scripts/fit_rigid_camera.py` | ＋ one parameter in the optimiser |
-| `calib/<clip>.npz` | ＋ key `dist: (k,)` |
 | `calib/<clip>.npz` | ＋ key `dist: (k,)`; the writer already emits `width`/`height` that this file predates |
 | every projector | ▲ apply distortion. There are at least four and they must agree or the overlay and the export diverge again: `core/scene/projection.py`, `poseannot/camera.py`, `scripts/apply_rigid_camera.py`, `scripts/track_quality.py` |
 
-The last row is the real cost: there are several places that project world → pixel and they must
-all agree, or the overlay and the export disagree again.
+Keeping those four projectors in step is the real cost of 2a, not the optimiser change.
 
 ### 2b. Per-frame focal — **schema change**
 
