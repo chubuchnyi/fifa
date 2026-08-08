@@ -35,7 +35,7 @@ _CLASSES: list[type] = [
     units.UpAxis, units.Handedness,
     provenance.ModelInfo, provenance.RunRecord, provenance.RunLog, provenance.Backend,
     # camera / field
-    camera.CameraIntrinsics, camera.CameraTrack,
+    camera.CameraIntrinsics, camera.CameraTrack, camera.CameraSource,
     field.FieldCalibration, field.FieldModel,
     # motion
     motion.SmplxShape, motion.PoseSequence, motion.SubjectMotion, motion.BallTrack,

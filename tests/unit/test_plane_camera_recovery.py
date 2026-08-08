@@ -16,6 +16,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from pitch3d.core.scene.camera import CameraSource
 from pitch3d.core.scene.plane_camera import REALIZABLE_PX, camera_from_calibration
 from pitch3d.core.scene.projection import quat_to_rotation_matrix
 from pitch3d.eval.synthetic import CAMERA_VIEWS, generate_scene
@@ -103,7 +104,17 @@ def test_the_pipeline_keeps_the_camera_it_solved(reconstructed):
     scene = app.get_scene(scene_id)
     fit = app.camera_fit(scene_id)
     assert fit is not None and fit.camera is not None, "the fakes' calibration IS a camera"
-    assert scene.camera is fit.camera, "the solved camera was overwritten before export"
+    # Substance, not object identity: since #140 the controller wraps the solved camera in a
+    # `replace(...)` to record HOW it was obtained, so `is` no longer holds. What must hold is
+    # that the scene carries the solved camera's numbers and says it is a solve — which is a
+    # stronger statement than identity, because it also fails if a fallback sneaks in with the
+    # right pose.
+    assert scene.camera.source is CameraSource.PLANE_FIT, "scene claims a camera it did not solve"
+    assert scene.camera.is_measured
+    np.testing.assert_allclose(scene.camera.rotation_quat, fit.camera.rotation_quat)
+    np.testing.assert_allclose(scene.camera.translation, fit.camera.translation)
+    assert scene.camera.intrinsics.fx == fit.camera.intrinsics.fx
+    assert scene.camera.fit_reprojection_px == pytest.approx(fit.reprojection_px)
 
     h_i2w = np.asarray(scene.field.calibration.homographies[0], dtype=float)
     rot = quat_to_rotation_matrix(scene.camera.rotation_quat[0])

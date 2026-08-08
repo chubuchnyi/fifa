@@ -11,8 +11,29 @@ Extrinsics convention: world→camera. A world point ``X_w`` maps to camera spac
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import Enum
 
 import numpy as np
+
+
+class CameraSource(str, Enum):
+    """How a :class:`CameraTrack` was obtained. **R-6 applied to the camera itself (#140).**
+
+    The controller ends with ``scene.camera = _measured_camera(...) or _static_camera(...)``. The
+    refusal on the left is correct and deliberate (#61), but the substitution on the right used to
+    be **silent**: on disk a synthetic stand-in and a real solve were byte-indistinguishable, and
+    the only record — ``PlaneCameraFit`` — lived in memory and was never serialized.
+
+    Measured 2026-08-08: **nine of nine scenes on disk** carried the synthetic fallback, including
+    the reference scene the #135 eye labels were made on. Every judgement that compared one of
+    those scenes to the source pixels was reading a camera at 772 px against a clip whose real
+    focal is ~4200. "Mark, never hide" is the rule we apply to phantom players; it was not being
+    applied here.
+    """
+
+    PLANE_FIT = "plane_fit"              # reduced from the field calibration and accepted
+    STATIC_FALLBACK = "static_fallback"  # the plane fit refused; this is NOT the clip's camera
+    PRESCRIBED = "prescribed"            # a synthesized trajectory (ViewSynthesizer, virtual op)
 
 
 @dataclass
@@ -87,6 +108,20 @@ class CameraTrack:
     translation: np.ndarray
     estimated: bool = True
     raw_frame_aligned: bool = False
+    #: How this camera was obtained (#140). Defaults to ``PLANE_FIT`` so an old scene decodes,
+    #: but the controller always sets it explicitly.
+    source: CameraSource = CameraSource.PLANE_FIT
+    #: The plane fit's reprojection in px, whether it was accepted or refused. ``None`` when no
+    #: fit was attempted. This is the number that decides ``realizable``.
+    fit_reprojection_px: float | None = None
+    #: The focal the plane fit recovered, in px — recorded even when the fit was refused, because
+    #: a sane focal with a large reprojection is a different diagnosis from a wild one.
+    fit_focal_px: float | None = None
+
+    @property
+    def is_measured(self) -> bool:
+        """False when this camera is a stand-in and must not be compared to the source pixels."""
+        return self.source is CameraSource.PLANE_FIT
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int)

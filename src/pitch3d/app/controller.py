@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -85,7 +85,7 @@ from ..core.ports.io import ClipRef, CropRef
 from ..core.ports.observation import Observation, Viewpoint
 from ..core.ports.render import RenderQuality, RenderResult
 from ..core.scene.assets import RenderAssetRef, SynthViewRef, SynthViewSeam
-from ..core.scene.camera import CameraTrack
+from ..core.scene.camera import CameraSource, CameraTrack
 from ..core.scene.layers import Correction, CorrectionTarget, TargetKind
 from ..core.scene.plane_camera import PlaneCameraFit, camera_from_calibration
 from ..core.scene.review import AttentionItem, attention_list
@@ -321,7 +321,35 @@ class Application:
                     scene, physics_cfg.joint_smooth, fps=clip.fps,
                 )
 
-        scene.camera = self._measured_camera(scene, clip) or self._static_camera(scene)
+        # R-6 applied to the camera (#140). `_measured_camera` refuses whenever the field
+        # calibration will not reduce to one camera — correct, and deliberate (#61). What was
+        # wrong is that the substitution below was SILENT: on disk a stand-in and a solve were
+        # indistinguishable, and nine of nine scenes turned out to carry the stand-in, including
+        # the one the #135 eye labels were made on. Mark it, in the scene and on the console.
+        measured = self._measured_camera(scene, clip)
+        fit = self._scene_camera_fit.get(scene.id)
+        if measured is not None:
+            scene.camera = replace(
+                measured, source=CameraSource.PLANE_FIT,
+                fit_reprojection_px=None if fit is None else float(fit.reprojection_px),
+                fit_focal_px=None if fit is None else float(fit.focal_px),
+            )
+            print(f"== camera: MEASURED from the field calibration — focal "
+                  f"{scene.camera.intrinsics.fx:.1f} px, reprojection "
+                  f"{scene.camera.fit_reprojection_px or float('nan'):.1f} px")
+        else:
+            scene.camera = replace(
+                self._static_camera(scene), source=CameraSource.STATIC_FALLBACK,
+                fit_reprojection_px=None if fit is None else float(fit.reprojection_px),
+                fit_focal_px=None if fit is None else float(fit.focal_px),
+            )
+            why = ("no field calibration" if fit is None else
+                   f"the plane fit refused: focal {fit.focal_px:.1f} px would reproject at "
+                   f"{fit.reprojection_px:.1f} px")
+            print(f"== camera: SYNTHETIC FALLBACK, {why}. This is NOT the clip's camera "
+                  f"(focal {scene.camera.intrinsics.fx:.1f} px @ "
+                  f"{scene.camera.intrinsics.width}x{scene.camera.intrinsics.height}) — nothing "
+                  f"comparing this scene to the source pixels is meaningful. #140")
         self._scenes[scene_id] = scene
         self._scene_clip[scene_id] = clip
         self._scene_stitch[scene_id] = result.stitch

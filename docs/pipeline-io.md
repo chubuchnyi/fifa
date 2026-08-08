@@ -152,11 +152,16 @@ first-class field), `track_2d: (T, 2) | None` px, `mode: (T,)` of `BallMode`.
 **`CameraIntrinsics`** — `fx, fy, cx, cy: float` px, `width, height: int`,
 `distortion: (k,) | None`.
 
-**`PlaneCameraFit`** — what `camera_from_calibration` returns, and **the only way to tell a
-measured camera from a synthetic one**: `camera: CameraTrack | None`, `focal_px: float`,
-`reprojection_px: float`, `realizable: bool`. Reachable as `Application.camera_fit(scene_id)`.
-It is held in memory only — **it is not serialized into `scene.json`**, so a scene on disk carries
-no record of whether its camera was measured. Nothing in `poseannot` checks it.
+**`PlaneCameraFit`** — what `camera_from_calibration` returns: `camera: CameraTrack | None`,
+`focal_px`, `reprojection_px`, `realizable`. Reachable as `Application.camera_fit(scene_id)`, and
+held in memory only.
+
+**`CameraSource`** — `plane_fit` | `static_fallback` | `prescribed`, on `CameraTrack.source`,
+alongside `fit_reprojection_px`, `fit_focal_px` and the `is_measured` property. **This is the
+on-disk record**, added 2026-08-08 for #140: before it, a synthetic stand-in and a real solve were
+byte-indistinguishable in `scene.json`, and the only record lived in memory. Old scenes without
+the fields still decode, defaulting to `plane_fit` — so treat a scene written before 2026-08-08 as
+unmarked and check `fx` instead.
 
 **`CameraTrack`** — `intrinsics: CameraIntrinsics` (**one, shared by the whole track**),
 `frames: (T,)`, `rotation_quat: (T, 4)` as (w,x,y,z) world→camera, `translation: (T, 3)` metres
@@ -333,9 +338,10 @@ markings, skeletons on players — were never testing what they appeared to. Sce
 comparisons are untouched, because they never read `scene.camera`: identity churn, phantom counts,
 handover pairs, root-speed distributions, and the eye's ranking of 560 vs 896 vs 896+handover.
 
-Tracked as **#140**. The fix is proposed as step 4 of
-[`pipeline-io-proposed.md`](pipeline-io-proposed.md) — serialize `PlaneCameraFit` into the scene,
-so "measured or invented" stops being a magic number test.
+Tracked as **#140**, and the recording half **shipped 2026-08-08**: `CameraTrack.source` now says
+which branch fired, the controller prints it, and the refused fit's focal and reprojection are kept
+so a sane-focal-bad-consistency case stays distinguishable from a wild one. Scenes written before
+that date carry no mark — check `fx` there.
 
 Two more consequences that have cost sessions:
 

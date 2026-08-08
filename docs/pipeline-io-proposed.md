@@ -6,7 +6,7 @@ first; this only lists what moves.
 Marks: **▲ CHANGE** an existing contract · **＋ NEW** something that does not exist ·
 **◆ MEASURE** a diagnostic, no contract change.
 
-Nothing here is built.
+Nothing here is built **except step 0a**, which shipped 2026-08-08.
 
 > ## ⚠ Rewritten 2026-08-08 (2). The first version's premise was wrong.
 >
@@ -69,7 +69,35 @@ the fit here.
 
 ---
 
-## Step 0 ◆ MEASURE — re-run with the measured camera
+## Step 0 — record which camera the scene got, then re-run with the measured one
+
+**Two things in one pass, because the second cannot be read without the first.**
+
+### 0a ▲ CHANGE — serialize the camera's origin · **DONE 2026-08-08** *(was step 4; promoted)*
+
+Step 0b is a comparison of *with a measured camera* against *without*. Reading its result requires
+knowing which camera each scene actually got — and today that is indistinguishable on disk. Run 0b
+without 0a and the output is one more scene whose camera provenance is recorded nowhere, to be
+re-derived a week later. Hours of work, and it is **the instrument for reading 0b**, not a separate
+item.
+
+**And it is not a nice-to-have: #140 is a plain R-6 violation.** The project rule is *mark, never
+hide*. `measured() or fallback()` silently hides a refusal. That is the same rule under which a
+tracker-lost player is interpolated and marked rather than deleted — it was simply never applied to
+the camera.
+
+| | |
+|---|---|
+| ▲ `CameraTrack` | ＋ `source: CameraSource` (`plane_fit` / `static_fallback` / `prescribed`), ＋ `fit_reprojection_px`, ＋ `fit_focal_px`, ＋ `is_measured` |
+| ▲ `controller` | set it explicitly on both branches, and **print** which one fired and why |
+| ▲ `scene.json` | the enum is registered; old scenes without the fields still decode |
+| ＋ tests | 5, incl. the round-trip and backward compatibility |
+
+Keeping the *refused* fit numbers matters: on `f236_res896` the fit recovered 4340.8 px — within
+4 % of the golden 4169.32 — and still reprojected at 471 px. "Refused" alone would have hidden that
+the scale was right and the consistency was not, which is what pointed at the homography tail.
+
+### 0b ◆ MEASURE — re-run with the measured camera
 
 **Nothing to build. It may dissolve everything below.**
 
@@ -77,8 +105,13 @@ the fit here.
 run log, so every scene under discussion was built without it. On frames **0–59**, where
 `calib/Colombia-1-0-Congo-DR1080p.npz` is valid and the golden fit holds, this is one run.
 
-Then look at the overlay again. If it aligns, the whole camera-model discussion was about a model
-that was never applied.
+Then look at the overlay again.
+
+**Do not over-read the result.** Frames 0–59 are two seconds, and that is the span where
+`calib/*.npz` is valid. The observation was made on **f236**. If 0–59 aligns with a measured
+camera, that proves the *path* works — not that f236 will. f236 needs a 236-frame refit, and that
+refit is exactly the one that refuses at 471 px. **Step 0b answers "is a camera applied at all",
+not "is the model sufficient".**
 
 ---
 
@@ -157,23 +190,20 @@ Keeping those four in step is the real cost, not the optimiser change.
 
 ---
 
-## Step 4 ＋ NEW — serialize which camera you got
+## Step 4 ＋ NEW — teach the consumers to refuse
 
-The cheapest change in this document, and it would have caught #140 on day one.
-
-| | |
-|---|---|
-| ▲ `Scene` or `CameraTrack` | ＋ carry `PlaneCameraFit` (`focal_px`, `reprojection_px`, `realizable`) into `scene.json` |
-| ＋ any consumer comparing a scene to source pixels | refuse, or say so loudly, when the camera is synthetic |
-
-Today the two are indistinguishable on disk. `track_quality.py` detects it by testing `fx ≈ 772` —
-a magic number, because there is nothing else to test.
+0a records the mark; this acts on it. Any consumer that compares a scene to the source pixels
+should refuse, or say so loudly, when `camera.is_measured` is false. Today `track_quality.py`
+detects it by testing `fx ≈ 772` — a magic number, because until 0a there was nothing else to test.
 
 ---
 
-## Step 5 ＋ NEW — verticality and foot contact
+## Step 5 ＋ NEW — verticality and foot contact · **runs in parallel**
 
 Neither version of this document mentioned it, and the goal is "positions **and poses**".
+
+**It depends on nothing above it.** Listed last for ordering, not for scheduling — the camera
+branch and this one do not touch the same code and can run at the same time.
 
 #135 П5 measured the largest root-Z excursion **in a whole scene at 0.082 m** — nobody ever leaves
 the ground. WorldPose GT says a real player's root ranges **0.23 m** per clip at the median and
@@ -222,13 +252,14 @@ Worth building only for what steps 0–3 leave behind.
 
 | step | cost | what it buys |
 |---|---|---|
-| 0 ◆ re-run with the measured camera | one run, no new code | may dissolve the premise entirely |
+| **0a ▲ serialize the camera's origin** | **hours** | **the instrument for reading 0b — and closes an R-6 violation** |
+| 0b ◆ re-run with the measured camera | one run, no new code | answers "is a camera applied at all" |
 | 1 ◆ three residuals | half a day | camera vs player, which nothing else answers |
 | 2 ◆ why our calibration is worse | ~1 day | the binding constraint, measured |
 | 3a ▲ per-frame focal | days, re-measures a golden test | the precondition for a measured camera on a zooming clip |
 | 3b ▲ distortion `k1` | ~1 day, four projectors in sync | ~47 px at the corner |
-| 4 ＋ serialize the camera fit | hours | would have caught #140 on day one |
-| 5 ＋ verticality | unscoped | the pose half of the goal, untouched by everything above |
+| 4 ＋ consumers refuse a synthetic camera | hours | acts on the 0a mark |
+| 5 ＋ verticality | unscoped | the pose half of the goal — **parallel, blocks on nothing** |
 | 6 ▲ WorldPose | already local | GT for calibrator and pose, no domain gap |
 | 7 ＋ training-set export | ~1 day | after 3 |
 | 8 ＋ UI controls | days | last |
