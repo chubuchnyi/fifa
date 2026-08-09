@@ -81,12 +81,40 @@ def probe_points(w2i: np.ndarray) -> np.ndarray:
     return xy[inside]
 
 
+#: Frames over which a cubic honestly describes a broadcast pan, at ~30 fps. Past this the
+#: residual is dominated by the polynomial being too low-order, not by noise — see
+#: :func:`smooth_residual_domain`.
+SMOOTH_RESIDUAL_MAX_FRAMES = 90
+
+
+def smooth_residual_domain(n_frames: int, order: int = 3) -> str:
+    """The label this residual must be quoted with, or ``""`` when it is inside its domain.
+
+    Exists because the number escaped its domain and cost a day. `fit_rigid_camera.py` printed a
+    bare ``jitter`` from this function over a 236-frame span; read as noise it said 60.4 px, which
+    is 120x the measured swim (#104: 0.011 m) and sent a whole investigation after temporal
+    instability that does not exist. The same metric over 60 frames says 6.42 px. Nothing was
+    wrong with either number — the second was quoted where the first applies.
+
+    So the span now travels with the value. Modelled on `apply_rigid_camera.py`, which refuses a
+    scene outside its fit's frame range and says which range that is.
+    """
+    if n_frames <= SMOOTH_RESIDUAL_MAX_FRAMES:
+        return ""
+    return (f"OUT OF DOMAIN: a degree-{order} fit over {n_frames} frames "
+            f"(>{SMOOTH_RESIDUAL_MAX_FRAMES}) measures unmodelled camera motion, not noise")
+
+
 def smooth_residual(tracks: np.ndarray, order: int = 3) -> np.ndarray:
     """Distance from each sample to a low-order polynomial through its own track.
 
     A broadcast pan is smooth over 2 s. Fitting a cubic in time and taking what is left is a
     deliberately *generous* estimate of noise — a real camera move is smoother than a cubic,
     so anything this reports is a lower bound on the jitter, not an inflated one.
+
+    **Only over about 2 s.** Past ~90 frames the cubic cannot follow the pan and the residual is
+    model error, not jitter: the same clip reads 6.42 px over 60 frames and 60.42 px over 236.
+    Callers must label the value with :func:`smooth_residual_domain`.
     """
     n_frames = tracks.shape[0]
     t = np.linspace(-1.0, 1.0, n_frames)

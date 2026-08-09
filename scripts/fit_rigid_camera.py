@@ -415,17 +415,20 @@ def score(
     them by quietly spending the others — a rigid camera fitted to the paint alone beat the 480
     free parameters on paint *and* came out jitterier than what it replaced.
     """
-    from scripts.bench_frame_preprocessing import smooth_residual
+    from scripts.bench_frame_preprocessing import smooth_residual, smooth_residual_domain
 
     maps = [plane_h(p[0], p[4 + 3 * j : 7 + 3 * j], p[1:4]) for j in range(len(frames))]
     err = np.concatenate([
         paint_error(h, *evidence[i][::2], xy1) for h, i in zip(maps, frames, strict=True)
     ])
     turn = np.median(pan_error(pan_maps(p, pan[0]), pan[1])) if pan is not None else float("nan")
-    jitter = np.median(smooth_residual(np.stack([project(h, probe) for h in maps])))
+    tracks = np.stack([project(h, probe) for h in maps])
+    jitter = np.median(smooth_residual(tracks))
+    warn = smooth_residual_domain(tracks.shape[0])
     return (f"f={p[0]:7.1f}  C=({p[1]:6.1f},{p[2]:6.1f},{p[3]:5.1f}) m  "
             f"paint {np.median(err):5.2f} (p90 {np.percentile(err, 90):5.2f})  "
-            f"pan {turn:6.2f}  jitter {jitter:5.2f}")
+            f"pan {turn:6.2f}  jitter {jitter:5.2f}"
+            + (f"  <<{warn}>>" if warn else ""))
 
 
 def main() -> None:
