@@ -273,6 +273,34 @@ pipeline uses. `scene.json` is never mutated.
 
 ---
 
+## 3a. Two entry points, and nothing records which one built a scene
+
+`scripts/pod_real_e2e.sh` (reconstruction) and `scripts/pod_make_video.sh` (the video path) both
+drive `controller.Application`, and they **do not apply the same fixes**. The video path applies
+`RIGID_CAMERA`; the reconstruction path did not until 2026-08-09. `broadcast_crop.py` emits one
+rect per framing and states that each segment is a separate reconstruction; the vert137 run fed one
+crop across all 355 frames.
+
+Four instances of the same shape are on record in two days — a capability that exists, is tested,
+is documented, and does not reach the run:
+
+| capability | where it lives | what happened |
+|---|---|---|
+| `apply_rigid_camera.py` (#119) | in the repo, diagnosis in its docstring | `pod_real_e2e.sh` never called it → 9 of 9 scenes at `fx = 772`. Fixed `400e400` |
+| per-segment crop (#136) | `broadcast_crop.py`, contract in its docstring | one crop fed across 355 frames. **Live** |
+| the same docstring's zoom warning | *"past frame ~155… PnLCalib has nothing to solve with"* | rediscovered by measurement two days later |
+| the same docstring, again | — | the fan clip was run with **no crop at all** on 2026-08-09, and died on a singular homography |
+
+**Nothing in `scene.json` records which fixes were applied.** `CameraTrack.source` (2026-08-08) is
+the first field that does, for one stage. Generalising it is step A of
+[`pipeline-io-proposed.md`](pipeline-io-proposed.md).
+
+One trap while reading logs: a missing `== camera carry:` line does **not** mean carry was off.
+`pod_real_e2e.sh` only prints it when `CAMERA_CARRY` is set, but `--camera-carry` has an argparse
+default of **8**, so carry runs regardless. Absence of a log line is not absence of behaviour.
+
+---
+
 ## 4. Measured, or invented
 
 The types do not distinguish these, so a fake run produces a file of exactly the same shape as a

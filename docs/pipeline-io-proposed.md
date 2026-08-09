@@ -8,6 +8,20 @@ Marks: **▲ CHANGE** an existing contract · **＋ NEW** something that does no
 
 Nothing here is built **except step 0a**, which shipped 2026-08-08.
 
+> ## ⚠ Rewritten again 2026-08-09 (3). The plan is now structural, not optical.
+>
+> An architecture brief argued that #140 is not a camera bug but the third instance of one
+> structural defect: **a capability exists, is tested, is documented, and silently does not reach
+> the run.** Checked: two of its three cases hold, one does not, and there is a fourth — mine, from
+> today. See [`findings/reply-architecture-brief-2026-08-09.md`](findings/reply-architecture-brief-2026-08-09.md).
+>
+> **Per-frame focal is dropped.** Measured on our clip: 4180 px over 60 frames, 4156 px over 236 —
+> **0.6 %**, at 2.35 px paint residual. My earlier "11 % drift" was the plane fitter being dragged
+> by the homography tail, not zoom.
+>
+> **The target is any clip, not this one.** The user, 2026-08-09: the probe clip rotates; it is now
+> `14604731_1080_1920_30fps.mp4`. Anything that needs a hand-made per-clip artefact is not a fix.
+
 > ## ⚠ Rewritten 2026-08-08 (2). The first version's premise was wrong.
 >
 > It reasoned from *"the overlay drifts worse toward the frame edges, so the camera model is
@@ -250,16 +264,25 @@ Worth building only for what steps 0–3 leave behind.
 
 ## Order and cost
 
+Re-ordered 2026-08-09. The camera-optics items move down; the contract items move up, because
+they are what stops the pattern recurring.
+
 | step | cost | what it buys |
 |---|---|---|
-| **0a ▲ serialize the camera's origin** | **hours** | **the instrument for reading 0b — and closes an R-6 violation** |
-| 0b ◆ re-run with the measured camera | one run, no new code | answers "is a camera applied at all" |
-| 1 ◆ three residuals | half a day | camera vs player, which nothing else answers |
-| 2 ◆ why our calibration is worse | ~1 day | the binding constraint, measured |
-| 3a ▲ per-frame focal | days, re-measures a golden test | the precondition for a measured camera on a zooming clip |
-| 3b ▲ distortion `k1` | ~1 day, four projectors in sync | ~47 px at the corner |
-| 4 ＋ consumers refuse a synthetic camera | hours | acts on the 0a mark |
-| 5 ＋ verticality | unscoped | the pose half of the goal — **parallel, blocks on nothing** |
-| 6 ▲ WorldPose | already local | GT for calibrator and pose, no domain gap |
-| 7 ＋ training-set export | ~1 day | after 3 |
-| 8 ＋ UI controls | days | last |
+| **A ＋ capability manifest in `scene.json`** | hours | generalise `CameraTrack.source` to every stage. "Was this scene built with X" becomes a field read instead of half a day of archaeology. **Highest leverage** |
+| **B ▲ no silent `or` between measured and fallback** | hours | mark or refuse, everywhere. R-6 applied to ourselves. `CameraTrack.source` (done) is one instance of it |
+| **C ▲ one reconstruction entry point** | ~1 day | the `pod_real_e2e.sh` / `pod_make_video.sh` split produced two of the four cases. Hygiene — it reduces where drift can happen, it does not by itself prevent it |
+| **D ＋ clip class as an explicit input** | ~1 day | tripod and handheld are different contracts: 471 px against 13 607 px on the same code. Today one chain runs on both and emits a scene either way |
+| **E ＋ solvability gate before reconstruction** | ~1 day | the fan clip reconstructed and *then* refused 1976 subject-frames. `broadcast_crop.py` already measures the input; the gate is reading it in time |
+| **F ＋ verticality and foot contact** | unscoped | **three iterations untouched.** Root-Z 0.082 m against 0.23 m for a real player. Blocks on nothing above — start it in parallel |
+| G ◆ three residuals (2 of 3 built) | half a day | the missing one is pitch paint by radius |
+| H ▲ distortion `k1` | ~1 day | **after** the jitter question — the 6.2 → 15.7 px ramp may be jitter, not optics |
+| I ＋ training-set export | ~1 day | after H |
+| J ＋ UI controls | days | last |
+
+**Dropped**: per-frame focal (0.6 % on our clip, 2.35 px residual), free principal point (~1 px),
+camera translation (0.000 m in 89/89 broadcast clips), synthetic calibration GT (WorldPose is real
+footage with GT distortion, already local).
+
+**Done**: `CameraTrack.source` + fit numbers (`794fd46`), `RIGID_CAMERA` wired into the e2e script
+(`400e400`), singular homographies marked unsolved instead of crashing a run (`dfc1075`).
