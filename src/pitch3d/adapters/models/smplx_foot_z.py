@@ -55,6 +55,57 @@ def _lowest_vertex_offset(
     return float(-verts[:, 1].min())
 
 
+def make_smplx_pose_height_provider(
+    model_path: str | None = None,
+    cfg: SmplxFootZConfig | None = None,
+):
+    """The same FK measurement, for the POSE stage — before a :class:`Subject` exists.
+
+    :func:`make_smplx_foot_z_provider` takes a ``Subject``, so it can only run after the scene is
+    assembled, and it is wired into `foot_plant` and `body_scale_probe` — both downstream gates.
+    Meanwhile `GVHMRPoseEstimator._ground_root` substitutes a **constant** pelvis height whenever
+    its backend returns none, which is where root Z is actually decided (#142).
+
+    So the capability existed and did not reach the place that needed it — #141 again. This is the
+    same `_lowest_vertex_offset` over the raw arrays the pose stage already holds.
+
+    Returns a callable ``(betas, global_orient, body_pose) -> (T,) | None``, or ``None`` when the
+    SMPL-X model is unavailable, in which case the caller keeps its constant and marks it nominal.
+    """
+    cfg = cfg or SmplxFootZConfig()
+    path = model_path or locate_smplx_model()
+    if path is None:
+        return None
+    try:
+        model = SmplxModel.load(path)
+    except (FileNotFoundError, KeyError, OSError, ValueError):
+        return None
+
+    def provider(betas, global_orient, body_pose):
+        go = np.asarray(global_orient, dtype=float).reshape(-1, 3)
+        bp = np.asarray(body_pose, dtype=float)
+        n = go.shape[0]
+        if n == 0:
+            return None
+        # Sample, then hold between samples: FK is the cost here, and the standing offset moves
+        # slowly compared with the root. Same cap the Subject-side provider uses.
+        k = min(cfg.max_frames_sampled, n)
+        rows = np.unique(np.linspace(0, n - 1, k).round().astype(int))
+        vals = np.zeros(rows.shape[0], dtype=float)
+        for i, row in enumerate(rows):
+            try:
+                vals[i] = _lowest_vertex_offset(
+                    model, np.asarray(betas, dtype=float).reshape(-1), go[row], bp[row],
+                )
+            except (ValueError, IndexError, KeyError):
+                return None
+        if not np.isfinite(vals).all() or (vals <= 0).any():
+            return None
+        return np.interp(np.arange(n), rows, vals)
+
+    return provider
+
+
 def make_smplx_foot_z_provider(
     model_path: str | None = None,
     cfg: SmplxFootZConfig | None = None,
@@ -116,4 +167,5 @@ def make_smplx_foot_z_provider(
 __all__ = [
     "SmplxFootZConfig",
     "make_smplx_foot_z_provider",
+    "make_smplx_pose_height_provider",
 ]

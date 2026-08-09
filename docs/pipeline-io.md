@@ -325,7 +325,7 @@ real one. This table is the difference.
 | Pose | `--pose gvhmr` + a real backend | `FakePoseEstimator`: `body_pose = zeros`, a T-pose on every frame |
 | `Scene.camera` | `camera_from_calibration` returns `realizable=True` | an **invented** 772 px @ 1280×720 fallback, principal point dead centre — see below |
 | Role | Roboflow sports weights | everyone is `player` |
-| Root **Z** | the backend returns `pelvis_above_foot` (needs SMPL-X FK) | a **constant** `pelvis_height_m` for the whole track — marked `root_z_source = nominal` since 2026-08-09 |
+| Root **Z** | the backend reports `pelvis_above_foot` (SMPLest-X does), **or** `pelvis_height_provider` measures it by SMPL-X FK | a **constant** `pelvis_height_m` for the whole track, marked `root_z_source = nominal`. Needs the SMPL-X model files on the box |
 | Team | kit k-means over the sampled torso | `None`, which downstream treats as a wildcard |
 
 ### The camera fallback is not hypothetical — measured 2026-08-08

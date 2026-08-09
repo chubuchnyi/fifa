@@ -323,6 +323,10 @@ def run_dry_run(
               f"extended {cr.extended_frames} edge frame(s) across "
               f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
+    _fk = getattr(getattr(app.ports, "pose", None), "fk_root_z", None)
+    if _fk:
+        print(f"== root Z: {len(_fk)} subject(s) measured by SMPL-X FK because the pose backend "
+              f"did not report a foot-to-pelvis offset")
     _nominal = getattr(getattr(app.ports, "pose", None), "nominal_root_z", None)
     if _nominal:
         print(f"== root Z: {len(_nominal)} subject(s) have a CONSTANT stand-in height, not a "

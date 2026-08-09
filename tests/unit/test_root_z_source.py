@@ -146,3 +146,56 @@ def test_a_nominal_track_has_zero_range_which_is_why_it_poisons_aggregates():
     p.transl[:, 2] = 0.92
     z = p.transl[:, 2]
     assert float(z.max() - z.min()) == pytest.approx(0.0)
+
+
+# --- the FK fallback: the capability that existed and did not reach this stage (#141) -------
+
+@pytest.mark.skipif(not _CALIB.exists(), reason="committed calibration missing")
+def test_the_fk_provider_replaces_the_constant_and_the_track_is_marked_measured():
+    """The fix. A backend with no height plus a provider gives a MEASURED, varying Z."""
+    def provider(betas, global_orient, body_pose):
+        n = np.asarray(global_orient).reshape(-1, 3).shape[0]
+        return 0.90 + 0.04 * np.sin(np.arange(n) / 2.0)      # what SMPL-X FK would return
+
+    est = GVHMRPoseEstimator(backend=_NoHeight(), pelvis_height_provider=provider)
+    out = est.estimate(_clip(), _tracks(), _real_calibration())
+
+    assert out[7].pose.root_z_source is RootZSource.MEASURED
+    assert est.nominal_root_z == [], "nothing was substituted, so nothing should be flagged"
+    assert est.fk_root_z == [7], "and the FK path must say it ran"
+    assert float(np.std(out[7].pose.transl[:, 2])) > 1e-6
+
+
+@pytest.mark.skipif(not _CALIB.exists(), reason="committed calibration missing")
+def test_a_provider_that_declines_falls_back_to_the_constant_and_says_so():
+    """No SMPL-X model on the box is the common case; it must degrade, not crash or lie."""
+    est = GVHMRPoseEstimator(backend=_NoHeight(), pelvis_height_provider=lambda *_: None)
+    out = est.estimate(_clip(), _tracks(), _real_calibration())
+
+    assert out[7].pose.root_z_source is RootZSource.NOMINAL
+    assert est.nominal_root_z == [7] and est.fk_root_z == []
+
+
+@pytest.mark.skipif(not _CALIB.exists(), reason="committed calibration missing")
+def test_a_provider_returning_the_wrong_length_is_ignored_rather_than_trusted():
+    """A silent shape mismatch would misalign height against frames — refuse it."""
+    est = GVHMRPoseEstimator(backend=_NoHeight(),
+                             pelvis_height_provider=lambda *_: np.full(3, 0.9))
+    out = est.estimate(_clip(), _tracks(), _real_calibration())
+
+    assert out[7].pose.root_z_source is RootZSource.NOMINAL
+    assert est.fk_root_z == []
+
+
+@pytest.mark.skipif(not _CALIB.exists(), reason="committed calibration missing")
+def test_a_backend_that_reports_height_does_not_call_the_provider():
+    """FK is the expensive path; it must not run when the backend already answered."""
+    calls = []
+
+    def provider(*a):
+        calls.append(1)
+        return None
+
+    est = GVHMRPoseEstimator(backend=_WithHeight(), pelvis_height_provider=provider)
+    est.estimate(_clip(), _tracks(), _real_calibration())
+    assert calls == [], "the provider ran even though the backend reported a height"

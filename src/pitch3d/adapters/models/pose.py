@@ -168,6 +168,15 @@ class GVHMRPoseEstimator(PoseEstimator):
     backend: HMRBackend | None = None
     occlusion_backend: OcclusionBackend | None = None
     pelvis_height_m: float = _DEFAULT_PELVIS_HEIGHT_M
+    #: Measures pelvis-above-foot by SMPL-X FK when the backend does not report it —
+    #: ``(betas, global_orient, body_pose) -> (T,) | None``. Build it with
+    #: ``adapters.models.smplx_foot_z.make_smplx_pose_height_provider()``.
+    #:
+    #: Without it root Z falls back to the constant ``pelvis_height_m`` for the whole track, which
+    #: is not a small excursion but no excursion, and it used to be silent (#142). The measurement
+    #: existed in this repo the whole time and was wired only into gates that run *after* the scene
+    #: is assembled — #141, in the one place root Z is actually decided.
+    pelvis_height_provider: object | None = None
     smooth_window: int = 1
     n_betas: int = 10
     device: str = "cuda"
@@ -182,6 +191,8 @@ class GVHMRPoseEstimator(PoseEstimator):
     #: whenever the backend returns no ``pelvis_above_foot``. Read it before quoting any vertical
     #: statistic: a constant is not a small excursion, and it used to be invisible.
     nominal_root_z: list[int] = field(default_factory=list, init=False)
+    #: Track ids whose root Z the FK provider measured because the backend did not report it.
+    fk_root_z: list[int] = field(default_factory=list, init=False)
 
     def _on_pitch(self, world_xy: np.ndarray) -> np.ndarray:
         """Mask of world XY that could be a player: on the pitch, plus a generous margin."""
@@ -205,6 +216,7 @@ class GVHMRPoseEstimator(PoseEstimator):
         out: dict[int, SubjectMotion] = {}
         self.dropped_frames, self.dropped_offpitch, self.dropped_subjects = 0, 0, []
         self.nominal_root_z = []
+        self.fk_root_z = []
         for tl in tracks.tracklets:
             if tl.cls == "ball":
                 continue  # the ball has its own BallTracker; HMR is for people only
@@ -244,6 +256,15 @@ class GVHMRPoseEstimator(PoseEstimator):
             )
             rows = _align_rows(raw.frames, kept_tl.frames)
             height = raw.pelvis_above_foot[rows] if raw.pelvis_above_foot is not None else None
+            measured_height = height is not None
+            if height is None and self.pelvis_height_provider is not None:
+                fk = self.pelvis_height_provider(
+                    raw.betas, raw.global_orient[rows], raw.body_pose[rows],
+                )
+                if fk is not None and np.asarray(fk).shape[0] == rows.shape[0]:
+                    height = np.asarray(fk, dtype=float)
+                    measured_height = True
+                    self.fk_root_z.append(int(tl.track_id))
             transl = _smooth_path(
                 self._ground_root(kept_tl, calibration, height), self.smooth_window
             )
@@ -255,10 +276,10 @@ class GVHMRPoseEstimator(PoseEstimator):
                 # Mark, never hide (#142). `height is None` means the backend gave no measured
                 # foot->pelvis offset and `_ground_root` filled Z with `pelvis_height_m` for the
                 # whole track. XY stays measured; only the height is a stand-in.
-                root_z_source=(RootZSource.MEASURED if height is not None
+                root_z_source=(RootZSource.MEASURED if measured_height
                                else RootZSource.NOMINAL),
             )
-            if height is None:
+            if not measured_height:
                 self.nominal_root_z.append(int(tl.track_id))
             out[tl.track_id] = SubjectMotion(shape=SmplxShape(betas=raw.betas), pose=pose)
         return out

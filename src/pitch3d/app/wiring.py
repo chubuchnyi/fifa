@@ -272,8 +272,21 @@ def default_ports(
         from ..adapters.models import GVHMRPoseEstimator
         from ..adapters.models.pose import HMRBackend, OcclusionBackend
 
+        # Measure pelvis-above-foot by SMPL-X FK when the backend does not report it. Without
+        # this root Z becomes a constant for the whole track and every vertical statistic is about
+        # the constant (#142). The provider already existed; it was wired only into gates that run
+        # after the scene is assembled, never into the stage that decides root Z (#141).
+        _height_provider = None
+        try:
+            from ..adapters.models.smplx_foot_z import make_smplx_pose_height_provider
+
+            _height_provider = make_smplx_pose_height_provider()
+        except ImportError:
+            _height_provider = None
+
         pse = GVHMRPoseEstimator(
             device=device,
+            pelvis_height_provider=_height_provider,
             backend=_resolve_backend(pose_backend, HMRBackend) if pose_backend else None,
             occlusion_backend=(
                 _resolve_backend(occlusion_backend, OcclusionBackend)

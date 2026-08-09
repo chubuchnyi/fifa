@@ -140,9 +140,13 @@ measurement two days later.
 labels were judged on — **6 of 24 subjects have exactly constant Z at 0.92 m**, per-frame `|dZ|`
 median 0.0000. Same shape as #140.
 · **Check:** `np.std(transl[:,2]) < 1e-9` per subject, or `bench_vertical_motion.py`.
-· **Marked 2026-08-09** (`PoseSequence.root_z_source`, `GVHMRPoseEstimator.nominal_root_z`, and a
-CLI line). The substitution still happens — that is legitimate without SMPL-X FK — it is no longer
-silent. Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
+· **Fixed 2026-08-09.** Marked (`root_z_source`, `nominal_root_z`, a CLI line) **and measured**:
+`make_smplx_pose_height_provider` now runs SMPL-X FK at the pose stage when the backend reports no
+height. The measurement existed the whole time — `smplx_foot_z.py` — wired only into `foot_plant`
+and `body_scale_probe`, gates that run *after* the scene is assembled, never into the one place
+root Z is decided. **I then asserted in writing that "a backend without SMPL-X FK cannot know the
+offset", which a two-minute grep disproves.** #141 inside an explanation of #141.
+· Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
 0.92 m; `f236_res896.json` **0 of 38**, so the current path does not hit it.
 
 **Grass fraction does not predict solvability.**
