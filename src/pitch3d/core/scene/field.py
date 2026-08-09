@@ -23,6 +23,12 @@ from .units import FieldDimensions
 MIN_SOLVED_CONFIDENCE = 0.02
 
 
+#: |det H| below this is a homography that maps the plane onto a line — unusable, and not a
+#: solve. Scaled homographies vary over orders of magnitude, so this is deliberately tiny:
+#: it catches genuine rank collapse, not a merely ill-conditioned solve.
+_SINGULAR_DET = 1e-12
+
+
 @dataclass
 class FieldCalibration:
     """Per-frame homography track image↔field-plane, with confidence.
@@ -43,6 +49,31 @@ class FieldCalibration:
         self.homographies = np.asarray(self.homographies, dtype=float).reshape(-1, 3, 3)
         self.frames = np.asarray(self.frames, dtype=int)
         self.confidence = np.asarray(self.confidence, dtype=float).reshape(-1)
+        # A SINGULAR homography is not a low-quality solve, it is not a solve at all: it maps the
+        # plane onto a line, so `world_to_image` cannot invert it and `image_to_world` collapses
+        # every point to the same place. Found 2026-08-09 on the portrait fan clip, where PnLCalib
+        # produced one and `world_to_image` raised `LinAlgError: Singular matrix` inside the ball
+        # lift — killing a 236-frame run outright, with no scene written.
+        #
+        # The repo already has the concept for "this frame was not solved": confidence 0. Say it
+        # here, once, so every consumer that honours `solved_mask` skips these for free instead of
+        # each one growing its own guard (R-6: mark, never hide).
+        if self.homographies.size:
+            bad = ~np.isfinite(self.homographies).all(axis=(1, 2))
+            with np.errstate(all="ignore"):
+                bad |= np.abs(np.linalg.det(self.homographies)) < _SINGULAR_DET
+            if bad.any() and self.confidence.shape[0] == bad.shape[0]:
+                self.confidence = np.where(bad, 0.0, self.confidence)
+
+    @property
+    def degenerate_frames(self) -> np.ndarray:
+        """Frames whose homography is singular or non-finite — unusable, and marked unsolved."""
+        if not self.homographies.size:
+            return np.empty(0, dtype=int)
+        with np.errstate(all="ignore"):
+            bad = (~np.isfinite(self.homographies).all(axis=(1, 2))
+                   | (np.abs(np.linalg.det(self.homographies)) < _SINGULAR_DET))
+        return self.frames[bad] if bad.shape[0] == self.frames.shape[0] else np.empty(0, dtype=int)
 
     def _frame_row(self, frame_index: int) -> int:
         i = int(np.searchsorted(self.frames, frame_index))
@@ -84,11 +115,20 @@ class FieldCalibration:
         anchor — e.g. a player's foot — into the image so it can be matched against a
         2D detection (the ball), which is how ball ground contacts are found (#206).
         """
-        hinv = np.linalg.inv(self.homographies[self._frame_row(frame_index)])
+        h = self.homographies[self._frame_row(frame_index)]
         xy = np.asarray(xy, dtype=float).reshape(-1, 2)
+        # NaN, never an exception. A singular homography killed a whole 236-frame run from inside
+        # the ball lift (2026-08-09, the portrait clip); a caller can skip NaN, it cannot skip a
+        # LinAlgError raised four frames deep. Such frames are also marked confidence 0 at
+        # construction, so `solved_mask` filters them before it ever gets here.
+        with np.errstate(all="ignore"):
+            if not np.isfinite(h).all() or abs(float(np.linalg.det(h))) < _SINGULAR_DET:
+                return np.full((xy.shape[0], 2), np.nan)
+            hinv = np.linalg.inv(h)
         ones = np.ones((xy.shape[0], 1))
         hom = np.hstack([xy, ones]) @ hinv.T
-        return hom[:, :2] / hom[:, 2:3]
+        with np.errstate(all="ignore"):
+            return np.where(np.abs(hom[:, 2:3]) < 1e-12, np.nan, hom[:, :2] / hom[:, 2:3])
 
 
 @dataclass

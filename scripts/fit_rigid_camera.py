@@ -430,6 +430,11 @@ def score(
 
 def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--scene", type=Path, default=SCENE,
+                    help="scene whose per-frame homographies the fit is measured against. The "
+                         "default is the 60-frame carry_off export the shipped calib npz came "
+                         "from; point it at a longer scene to test whether one camera still "
+                         "reduces past 60 frames (#140).")
     ap.add_argument("--frames", type=int, default=60)
     ap.add_argument("--stride", type=int, default=1, help="subsample; a short run must still span "
                                                           "the clip or there is no pan baseline")
@@ -447,7 +452,7 @@ def main() -> None:
     args = ap.parse_args()
 
     frames = list(range(0, args.frames, args.stride))
-    w2i = load_world_to_image(SCENE)
+    w2i = load_world_to_image(args.scene)
     xy1 = marking_samples()
     print(f"{len(frames)} frames, {len(xy1)} marking samples", flush=True)
 
