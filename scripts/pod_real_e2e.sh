@@ -102,6 +102,14 @@ if [ "${COHERENCE:-0}" = "1" ]; then COH_ARGS+=(--coherence); echo "== coherence
 # HANDOVER=1 → merge two ids that are one human and drop the duplicate mannequin (#135 П3+П2).
 # Off by default: it is the only pass that deletes a subject, so a wrong merge erases a player.
 if [ "${HANDOVER:-0}" = "1" ]; then COH_ARGS+=(--handover); echo "== handover: --handover ON"; fi
+# MAX_EXTEND → cap how far past its last measurement a subject may be extrapolated, in frames.
+# Unset = unbounded, the behaviour since #102: a subject measured on 5 frames of 236 is still
+# emitted on all 236. Measured 2026-08-09: 47.9 % of f236_res896 and 41.4 % of fan_auto sit
+# further from ANY measurement than the 12 frames --coherence refuses to bridge *between two*.
+if [ -n "${MAX_EXTEND:-}" ]; then
+  COH_ARGS+=(--max-extend-frames "$MAX_EXTEND")
+  echo "== edge reach: capped at ${MAX_EXTEND} frame(s) past the last measurement"
+fi
 # RIGID_CAMERA=1 → after the scene is written, put the ONE fitted camera (#119/#129) into it.
 # Without this the scene keeps whatever camera_from_calibration could make of PnLCalib's free
 # per-frame homographies — which on the broadcast clip is nothing at all: the closest realizable
