@@ -51,6 +51,22 @@ worst. It is exported in `scene.json` and consumed downstream. #105, #126, and a
 · **Check:** do not rank frames by it. `confidence == 0.0` is still meaningful: never solved.
 · **Live** as a defect, understood as a fact.
 
+**Nothing records the image size the homographies live in — and the filename lies.**
+`FieldCalibration` has no `width`/`height`; `camera_from_calibration` makes the caller supply them.
+`14604731_1080_1920_30fps.mp4` is ingested as **1920×1080** (`vert_crop.mp4`), so reading the
+dimensions off the source filename gives a plausible-looking wrong answer — 24 176 px of
+reprojection instead of 47 685.
+· **Check:** the run log's `== ingested` line, never the filename.
+· **Live.**
+
+**Handheld footage: one camera is not realizable, and segmenting does not rescue it.**
+The fan clip zooms 1.66×, in a clean ramp-then-plateau, so segmentation looks like the answer. It
+is not: the flat plateau alone still reduces at **13 607 px** against the tripod clip's 471 px on
+the same code. The difference is **translation** — WorldPose GT says broadcast cameras translate
+0.000 m in 89/89 clips, a phone translates every frame, and time-segmentation cannot remove a
+per-frame effect. Positions survive (the pitch is a plane); a novel view does not exist.
+· [`architecture-brief-2026-08-09.md`](architecture-brief-2026-08-09.md)
+
 **PnLCalib solves 8 free DOF per frame with nothing tying frames to one camera.**
 Each homography is individually good (1.49 px on paint) and temporally smooth (0.008 m swim), and
 the family is mutually incompatible with any single camera (471 px). Not noise — surplus DOF.
@@ -64,6 +80,13 @@ It fits a cubic across the whole span. The same clip reads **6.42 px over 60 fra
 **60.42 px over 236** — the second is unmodelled camera motion, not noise, and it sent a day
 after temporal instability that does not exist.
 · **Check:** the printed value now carries `OUT OF DOMAIN` past 90 frames (`f94a32e`).
+
+**Excursion statistics are window-dependent, and the board compared two of them.**
+Root-Z `max−min` grows with the window: GT medians are **0.028 / 0.085 / 0.204 m** at 60 / 236 /
+1032 frames. "0.082 m in a whole scene against 0.23 m for a real player" put a 60-frame **maximum**
+against a 1032-frame **median** — a 7× window mismatch that survived four plan revisions.
+· **Check:** same window, same statistic, both sides.
+· [`vertical-motion-2026-08-09.md`](vertical-motion-2026-08-09.md)
 
 **The kit reader called the grass yellow.**
 Yellow was `18 ≤ H ≤ 48, S > 90`; the floodlit pitch is `H 39–40, S ≈ 150`. **64.9 % of every
@@ -95,6 +118,20 @@ behaviour.
 vert137 fed one crop across 355 frames. The same docstring also warns that past frame ~155 the
 clip zooms until only the goal mouth is left and the plane is undetermined — rediscovered by
 measurement two days later.
+· **Live.**
+
+**Root Z silently becomes a constant when SMPL-X FK is absent.**
+`pose.py:334` substitutes the nominal `pelvis_height_m` whenever the backend returns no
+`pelvis_above_foot`, and nothing records it. In `out/cue/scene_off.json` — the scene the #135 eye
+labels were judged on — **6 of 24 subjects have exactly constant Z at 0.92 m**, per-frame `|dZ|`
+median 0.0000. Same shape as #140.
+· **Check:** `np.std(transl[:,2]) < 1e-9` per subject, or `bench_vertical_motion.py`.
+· **Live.**
+
+**Grass fraction does not predict solvability.**
+On the fan clip the *worst*-cropped segment (82.4 % grass) solved **98 %** of its frames and the
+*best* (91.7 %) solved **9 %**. 93 % of all unsolved frames are one contiguous run where the zoom
+leaves no landmarks. Cropping is not the lever it looks like.
 · **Live.**
 
 **A guard that demands a quorum rejects working input.**
