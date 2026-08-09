@@ -149,6 +149,20 @@ offset", which a two-minute grep disproves.** #141 inside an explanation of #141
 · Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
 0.92 m; `f236_res896.json` **0 of 38**, so the current path does not hit it.
 
+**Every subject spans the whole clip, however little was measured.**
+`extend_to_span` (on by default, #102) extends each subject to the union of all present frames, and
+turning it on also raises the interior cap from `max_fill_gap` to the full span — so neither edge
+nor middle is bounded. `f236_res896`: 38 subjects, all 236 frames, **median 37 % measured, worst
+2 %** — 5 real frames and 231 held. **47.9 %** of its subject-frames sit further than 12 frames from
+ANY measurement, 11.9 % further than 120; worst 228. `fan_auto`: 41.4 % beyond 12. Decay bounds the
+coasted distance and `coast_max_speed` the velocity; nothing bounded the **time**, which is why the
+eye keeps finding phantoms standing around.
+· **Check:** per subject, `measured/total` from `track_quality.py`; per frame, distance to the
+nearest `measured` row. Or the new `== coherence: … edge reach:` log line.
+· **Bounded 2026-08-09** (`cec52ae`): `CoherenceConfig.max_extend_frames`, clamped per subject.
+**Default is still `None` = unbounded** — the cap has to be asked for until the eye has judged an
+A/B, so every scene written before that date still has this shape.
+
 **Grass fraction does not predict solvability.**
 On the fan clip the *worst*-cropped segment (82.4 % grass) solved **98 %** of its frames and the
 *best* (91.7 %) solved **9 %**. 93 % of all unsolved frames are one contiguous run where the zoom

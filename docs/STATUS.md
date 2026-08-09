@@ -69,6 +69,34 @@ what the plan assumed:
 | **#140** camera never reaches the scene — **duplicate of #61, fixed by wiring** | 9 of 9 scenes carried `fx = 772 @ 1280×720`. **Not a new defect:** `scripts/apply_rigid_camera.py` has carried the full diagnosis since #119 (*"the closest realizable pinhole is still 525 px away... exactly what 'the ground marks are right but the players are not' looks like from the UI"*). What is missing is that `pod_real_e2e.sh` never applies it — `RIGID_CAMERA` is wired into `pod_make_video.sh`, `pod_physics_ab.sh`, `pod_129_ab.sh` and not into the script every scene here was built with. **Applied to the 60-frame scenes; overlay residual 240.0 px → 8.0 px median**, matched subjects 124 → 1088, common-mode 230 → 5.9 (`scripts/bench_overlay_residual.py`). Confirmed by eye. Remaining residual grows 6.2 → 15.7 px centre-to-edge, which is where distortion becomes testable. **Next: wire RIGID_CAMERA into pod_real_e2e.sh.** [reply §9](findings/reply-camera-model-gap-2026-08-08.md) |
 | **W13** kit reader | **the yellow band contained the pitch.** H 18–48 vs grass at H 39–40 → **64.9 % of every frame read "yellow kit"**. Four claims retracted, incl. one that predates this session |
 
+**2026-08-09 — the fan clip reconstructed itself, and the scenes turned out to be half invented.**
+
+The pipeline now measures its own framing (`adapters/io/framing.py`, `--crop auto`) instead of
+being handed a file someone cut with ffmpeg. On the raw portrait clip: crop `1080×608+0+1294`,
+grass 29 % → 82 %, and PnLCalib solved **120/120 frames** where the raw frame solved **0 of 8**.
+No crash — the singular-homography fix holds. 234 s on `demorig`.
+The camera still refuses: the closest realizable pinhole is **12 382 px** away, so the scene
+carries the synthetic 772 px stand-in and *says so in the log*. Positions on the pitch are real
+(they come from the homography); a novel view of this clip does not exist. That is the predicted
+handheld case, not a regression.
+
+Root Z came out **measured on all 32 subjects** — SMPLest-X reports `pelvis_above_foot` itself, so
+the #142 constant never fired here. The FK provider is the net for backends that do not.
+
+**What the run exposed is bigger than the run.** 51 % of its subject-frames are `imputed`, so I
+measured the scene the eye has actually been judging. `f236_res896`: **38 subjects, all 236 frames,
+median 37 % measured, worst 2 %** — one subject has 5 real frames and 231 held. **47.9 % of its
+subject-frames sit further than 12 frames from ANY measurement**, 11.9 % further than 120, worst
+228. `extend_to_span` runs every subject to the full clip *and* raises the interior cap to the full
+span, so neither edge nor middle was bounded. Decay bounds the coasted **distance** and
+`coast_max_speed` the **velocity**; nothing bounded the **time**. R-6 says a lost subject is never
+blinked out — it does not say the claim of presence never expires.
+`CoherenceConfig.max_extend_frames` bounds it (`cec52ae`, 12 tests, mutation-checked; chain
+`physics.yaml` → `PITCH3D_COH_MAX_EXTEND` → `--max-extend-frames`; `MAX_EXTEND` on the pod script).
+**Default is still unbounded** and stays that way until the eye judges the A/B — this changes what
+every scene contains, so it is not mine to switch on. Register:
+[`findings/landmines.md`](findings/landmines.md).
+
 **The one open question for the morning.** The merge `t10 → t77` is almost certainly **wrong**, and
 the eye called it right on 2026-08-07. At f55–57 t77's box holds a **yellow** Colombia player while
 t10 is **blue #8**; `team_id=B` on t77 is the only mislabel in 24 and is what let it past the team
