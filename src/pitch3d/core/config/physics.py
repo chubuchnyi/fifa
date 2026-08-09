@@ -60,6 +60,7 @@ ENV_MAP: dict[str, tuple[str, str, type]] = {
     "PITCH3D_KIN_TELEPORT":      ("kinematic", "teleport_factor", float),
     "PITCH3D_COH_SMOOTH_WINDOW": ("coherence", "smooth_window",   int),
     "PITCH3D_COH_COAST_SPEED":   ("coherence", "coast_max_speed", float),
+    "PITCH3D_COH_MAX_EXTEND":    ("coherence", "max_extend_frames", int),
     "PITCH3D_FOOT_FLOOR":        ("foot_floor", "floor_m",        float),
     "PITCH3D_FOOT_FLOOR_ON":     ("foot_floor", "enabled",        _bool := lambda s: str(s).lower() in ("1", "true", "yes", "on")),
     "PITCH3D_JOINT_ON":          ("joint",      "enabled",        _bool),

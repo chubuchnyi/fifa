@@ -42,6 +42,12 @@ base:
     extrapolated_confidence: 0.2
     extrapolate_velocity_window: 3
     coast_max_speed:       10.5      # m/s   #207 fix — coast velocity cap
+    max_extend_frames:     null      # cap on edge frames past the last measurement.
+                                     # null = unbounded, the behaviour since #102: a subject
+                                     # measured on 5 frames of 236 is emitted on all 236.
+                                     # Measured 2026-08-09: 47.9 % of f236_res896 and 41.4 % of
+                                     # fan_auto sit further from ANY measurement than the 12
+                                     # frames max_fill_gap refuses to bridge *between two*.
 
   foot_floor:               # Tier 1a — NOT YET APPLIED by the pipeline
     enabled:               false

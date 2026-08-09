@@ -129,7 +129,7 @@ def run_dry_run(
     motion_prior: str = "fake", camera_carry: int = 8,
     min_calib_confidence: float | None = None,
     stitch: bool = True, coherence: bool = False, handover: bool = False,
-    crop: str = "auto",
+    crop: str = "auto", max_extend_frames: int | None = None,
     physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
@@ -187,6 +187,8 @@ def run_dry_run(
         else None
     )
     coherence_cfg = _phys.coherence if (coherence and _phys is not None) else None
+    if coherence_cfg is not None and max_extend_frames is not None:
+        coherence_cfg = replace(coherence_cfg, max_extend_frames=int(max_extend_frames))
     handover_cfg = HandoverConfig(enabled=True) if handover else None
     kinematic_cfg = _phys.kinematic if (physics and _phys is not None) else None
     if _phys is not None:
@@ -351,6 +353,13 @@ def run_dry_run(
               f"extended {cr.extended_frames} edge frame(s) across "
               f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
+        _cap = coherence_cfg.max_extend_frames if coherence_cfg is not None else None
+        _reach = (
+            "UNBOUNDED — a subject seen on one frame is still emitted on every frame of the clip"
+            if _cap is None
+            else f"capped at {_cap} frame(s) past the last measurement"
+        )
+        print(f"   edge reach: {_reach}")
     _fk = getattr(getattr(app.ports, "pose", None), "fk_root_z", None)
     if _fk:
         print(f"== root Z: {len(_fk)} subject(s) measured by SMPL-X FK because the pose backend "
@@ -722,6 +731,16 @@ def main(argv: list[str] | None = None) -> int:
                              "and the calibrator solves 0 of 8 frames; inside the measured crop "
                              "it is 82-92%%. An already-broadcast clip measures to the identity "
                              "and nothing changes. 'off' keeps the raw frame")
+    parser.add_argument("--max-extend-frames", type=int, default=None,
+                        help="cap how far past its last measurement a subject may be "
+                             "extrapolated, in frames. Needs --coherence. Default: no cap, so a "
+                             "subject measured on 5 frames of 236 is emitted on all 236. "
+                             "Measured 2026-08-09: 47.9%% of a 236-frame scene and 41.4%% of a "
+                             "120-frame one sit further from ANY measurement than the 12 frames "
+                             "--coherence refuses to bridge *between two* of them. R-6 says a "
+                             "lost subject is never blinked out; it does not say the claim of "
+                             "presence never expires. Overrides physics.yaml "
+                             "coherence.max_extend_frames / PITCH3D_COH_MAX_EXTEND")
     parser.add_argument("--handover", action="store_true",
                         help="merge two ids that are one human: a subject whose measurements "
                              "stop mid-clip and another whose measurements start there, within "
@@ -808,6 +827,7 @@ def main(argv: list[str] | None = None) -> int:
         kit_split=args.kit_split,
         coherence=args.coherence,
         crop=args.crop,
+        max_extend_frames=args.max_extend_frames,
         handover=args.handover,
         physics=args.physics,
         physics_profile=args.physics_profile,

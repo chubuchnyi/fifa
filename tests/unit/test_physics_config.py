@@ -43,6 +43,9 @@ def _minimal(**profiles) -> dict:
                 "real_confidence": 1.0, "extend_to_span": True,
                 "extrapolate_decay": 0.9, "extrapolated_confidence": 0.2,
                 "extrapolate_velocity_window": 3, "coast_max_speed": 10.5,
+                # null, and it must still appear in `lineage` — otherwise "declared, left unset"
+                # reads the same as "the key is not in the file at all"
+                "max_extend_frames": None,
             },
             "foot_floor": {"enabled": False, "floor_m": 0.0, "warn_hover_m": 0.30},
             "foot_plant": {"enabled": False, "mode": "median_lock",

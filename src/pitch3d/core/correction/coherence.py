@@ -62,6 +62,14 @@ class CoherenceConfig:
     # Coasting is inference, not measurement — inferring at inhuman speed is fabrication (R-6),
     # so the coast velocity is capped at the shared human sprint ceiling.
     coast_max_speed: float = HUMAN_MAX_SPEED  # m/s cap on the extrapolation edge velocity
+    # R-6 says a lost subject is never blinked out. It does not say the claim of presence lasts
+    # forever, and until 2026-08-09 nothing bounded it in *time*: decay bounds the coasted
+    # distance and coast_max_speed the velocity, but a subject measured on 5 frames of 236 was
+    # still emitted on the other 231. Measured on the two scenes on disk: 47.9 % (broadcast
+    # f236_res896) and 41.4 % (fan fan_auto) of all subject-frames sit further than max_fill_gap
+    # from ANY measurement — the very distance this pass refuses to bridge *between two* of them.
+    # None keeps the old unbounded behaviour, so no scene changes shape without someone asking.
+    max_extend_frames: int | None = None  # cap on edge frames added past the last measurement
 
 
 @dataclass
@@ -325,10 +333,19 @@ def add_temporal_coherence(
         motion, filled = fill_motion_gaps(s.proposal, interior_cap)
         extended = np.empty(0, dtype=int)
         if span is not None:
+            # The reach is clamped per subject, not per scene: an edge frame has no measurement on
+            # the far side, so how far it may run is a property of *this* subject's evidence.
+            lo, hi = span
+            if cfg.max_extend_frames is not None:
+                own = np.asarray(motion.pose.frames, dtype=int)
+                if own.size:
+                    n = int(cfg.max_extend_frames)
+                    lo = max(lo, int(own[0]) - n)
+                    hi = min(hi, int(own[-1]) + n)
             new_pose, extended = extend_pose_to_span(
                 motion.pose,
-                span[0],
-                span[1],
+                lo,
+                hi,
                 decay=cfg.extrapolate_decay,
                 vel_window=cfg.extrapolate_velocity_window,
                 max_step=cfg.coast_max_speed / fps,
