@@ -93,8 +93,21 @@ span, so neither edge nor middle was bounded. Decay bounds the coasted **distanc
 blinked out — it does not say the claim of presence never expires.
 `CoherenceConfig.max_extend_frames` bounds it (`cec52ae`, 12 tests, mutation-checked; chain
 `physics.yaml` → `PITCH3D_COH_MAX_EXTEND` → `--max-extend-frames`; `MAX_EXTEND` on the pod script).
-**Default is still unbounded** and stays that way until the eye judges the A/B — this changes what
-every scene contains, so it is not mine to switch on. Register:
+**A/B measured on the fan clip** (same detections, same calibration, one knob apart; 195 s):
+
+| | A unbounded | B cap 12 |
+|---|---|---|
+| subject-frames | 3840 | **2254** (−41 %) |
+| of them measured | 1766 | **1766** — not one measurement lost |
+| of them imputed | 1955 | **369** |
+| subjects | 32 | **32** — nobody deleted |
+| shortest subject | 120 frames | 27 frames |
+| frames >12 from any measurement | 1588 | **2** |
+| worst such distance | 105 | **13** |
+| measured share of the scene | 46 % | **78 %** |
+
+⚠ **Needs the eye:** `bash scripts/view_extend_ab.sh`. **Default stays unbounded** until then —
+this changes what every scene contains, so it is not mine to switch on. Register:
 [`findings/landmines.md`](findings/landmines.md).
 
 **The one open question for the morning.** The merge `t10 → t77` is almost certainly **wrong**, and
