@@ -142,6 +142,15 @@ def _probe_points(h_i2w: np.ndarray, width: float, height: float) -> np.ndarray:
     return p[:, :2] / p[:, 2, None]
 
 
+#: |det H| below this is rank collapse — the plane maps onto a line. See `core/scene/field.py`.
+_SINGULAR_DET = 1e-12
+#: Refuse only when NOTHING is usable. A single homography decomposes, and the shipped tests
+#: fit a
+#: 3-frame scene — a guard demanding a quorum rejects working input, which is worse than the
+#: crash it replaced. (It did: 4 broke 7 tests.)
+_MIN_FIT_FRAMES = 1
+
+
 def camera_from_calibration(
     calibration,
     *,
@@ -165,6 +174,26 @@ def camera_from_calibration(
     """
     h_i2w = np.asarray(calibration.homographies, dtype=float)
     frames = np.asarray(calibration.frames, dtype=int)
+    # Fit only over frames that were actually SOLVED. A degenerate homography is not a bad camera,
+    # it is no camera — inverting it raises, and the previous version did exactly that, killing a
+    # whole 236-frame run from inside the controller (2026-08-09, the portrait clip). Fixing the
+    # crash at `field.world_to_image` was not enough: this function inverts the same matrices
+    # itself, so the guard has to live where the invariant is, not at each call site.
+    #
+    # Fitting through an unsolved frame was wrong regardless of the crash: its homography is a
+    # copy carried from the last good one, so it pulls the focal toward a plane the camera was
+    # never at.
+    conf = np.asarray(getattr(calibration, "confidence", np.ones(len(h_i2w))), dtype=float)
+    with np.errstate(all="ignore"):
+        usable = (np.isfinite(h_i2w).all(axis=(1, 2))
+                  & (np.abs(np.linalg.det(h_i2w)) > _SINGULAR_DET))
+    if conf.shape[0] == usable.shape[0]:
+        usable &= conf > 0.0
+    if usable.sum() < _MIN_FIT_FRAMES:
+        return PlaneCameraFit(camera=None, focal_px=float("nan"),
+                              reprojection_px=float("inf"), realizable=False)
+    h_i2w = h_i2w[usable]
+    frames = frames[usable]
     h_w2i = np.linalg.inv(h_i2w)
     cx, cy = width / 2.0, height / 2.0
 

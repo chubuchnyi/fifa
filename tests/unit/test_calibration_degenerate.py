@@ -86,3 +86,50 @@ def test_an_all_good_calibration_keeps_every_confidence():
     c = _calib([np.eye(3)] * 3, conf)
     np.testing.assert_allclose(c.confidence, conf)
     assert c.degenerate_frames.size == 0
+
+
+# --- the same invariant, at the other call site -----------------------------------------
+# Fixing `world_to_image` was not enough: `camera_from_calibration` inverts the same matrices
+# itself, and the second fan-clip run died there instead. The guard belongs where the invariant
+# is, not at each call site — that is the whole lesson of #141.
+
+def test_camera_from_calibration_skips_degenerate_frames_instead_of_raising():
+    from pitch3d.core.scene.plane_camera import camera_from_calibration
+
+    c = _calib([np.eye(3)] * 6 + [SINGULAR])
+    fit = camera_from_calibration(c, width=1920, height=1080)   # must not raise
+    assert fit is not None
+    assert np.isfinite(fit.focal_px)
+
+
+def test_one_usable_frame_is_enough_to_fit():
+    """The guard must reject NOTHING, not demand a quorum. A first attempt required 4 solved
+    frames and broke 7 shipped tests, which fit a 3-frame synthetic scene."""
+    from pitch3d.core.scene.plane_camera import camera_from_calibration
+
+    c = _calib([np.eye(3)] + [SINGULAR] * 4)
+    assert camera_from_calibration(c, width=1920, height=1080) is not None
+
+
+def test_a_calibration_with_nothing_solved_refuses_rather_than_guessing():
+    from pitch3d.core.scene.plane_camera import camera_from_calibration
+
+    c = _calib([SINGULAR] * 5)
+    fit = camera_from_calibration(c, width=1920, height=1080)
+    assert fit.camera is None and fit.realizable is False
+
+
+def test_unsolved_frames_do_not_drag_the_focal():
+    """A carried homography is a plane the camera was never at; fitting through it is wrong."""
+    from pitch3d.core.scene.plane_camera import camera_from_calibration
+
+    good = [np.eye(3)] * 6
+    c_clean = _calib(good, conf=np.full(6, 0.5))
+    # same six, plus four frames explicitly marked unsolved (confidence 0)
+    c_mixed = _calib(good + [np.eye(3) * 3.0] * 4,
+                     conf=np.concatenate([np.full(6, 0.5), np.zeros(4)]))
+    a = camera_from_calibration(c_clean, width=1920, height=1080)
+    b = camera_from_calibration(c_mixed, width=1920, height=1080)
+    assert b.focal_px == pytest.approx(a.focal_px, rel=1e-6), (
+        "frames marked unsolved must not enter the fit"
+    )
