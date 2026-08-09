@@ -30,6 +30,12 @@ class ClipRef:
     width: int
     height: int
     fps: float
+    #: Optional ``(w, h, x, y)`` in source pixels that every decode of this clip is read through.
+    #: The pipeline measures it (``adapters.io.framing.measure_framing``) so a phone clip reaches
+    #: the calibrator framed like a broadcast, **without anyone cutting a new file by hand** — a
+    #: hand-cut mp4 is a per-clip artefact and the goal is any clip. ``None`` means the full frame,
+    #: which is what an already-broadcast clip measures to.
+    crop: tuple[int, int, int, int] | None = None
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int).reshape(-1)

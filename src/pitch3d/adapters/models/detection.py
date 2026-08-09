@@ -242,4 +242,4 @@ def _iter_frames(clip: ClipRef):  # pragma: no cover - heavy decode path (needs 
 
     Thin wrapper over the shared :func:`~pitch3d.adapters.io.frames.iter_clip_frames` decoder.
     """
-    return iter_clip_frames(clip.uri, clip.frames.tolist())
+    return iter_clip_frames(clip.uri, clip.frames.tolist(), crop=clip.crop)

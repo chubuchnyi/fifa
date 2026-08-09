@@ -129,6 +129,7 @@ def run_dry_run(
     motion_prior: str = "fake", camera_carry: int = 8,
     min_calib_confidence: float | None = None,
     stitch: bool = True, coherence: bool = False, handover: bool = False,
+    crop: str = "auto",
     physics: bool = False,
     physics_profile: str = "default", physics_config: str | None = None,
     player_profiles_dir: str | None = None, player_priors: str | None = None,
@@ -281,6 +282,33 @@ def run_dry_run(
                 print("== contact/momentum: SMPL-X model not found — probes skipped")
         except ImportError:
             print("== contact/momentum: SMPL-X provider unavailable — probes skipped")
+
+    # Framing is measured, not cut by hand. A phone clip from the stand is ~37 % grass and the
+    # calibrator solves 0 of 8; inside the measured crop it is 82-92 % and it solves. Doing that
+    # with ffmpeg outside the pipeline makes a per-clip artefact, which is the same mistake as a
+    # hand-fitted calib npz — the goal is any clip. `--crop off` keeps the raw frame.
+    if crop != "off" and episode.id in app._clips:
+        from ..adapters.io.framing import measure_framing, measure_segments
+
+        _c = app._clips[episode.id]
+        _fr = measure_framing(_c.uri, first=int(_c.frames[0]), last=int(_c.frames[-1]))
+        if _fr is None:
+            print("== framing: no row of the sampled frames reaches 25 % grass — keeping the full "
+                  "frame; the calibration will refuse on its own terms")
+        elif _fr.is_identity:
+            print(f"== framing: already broadcast-framed ({_fr.grass_before:.0%} grass) — no crop")
+        else:
+            segs = measure_segments(_c.uri, n_frames=int(_c.frames[-1]) + 1)
+            app._clips[episode.id] = replace(_c, crop=_fr.rect)
+            w, h, x, y = _fr.rect
+            print(f"== framing: crop {w}x{h}+{x}+{y} — grass {_fr.grass_before:.0%} → "
+                  f"{_fr.grass_after:.0%} of the frame the calibrator sees")
+            if len(segs) > 1:
+                print(f"   !! the framing MOVES: {len(segs)} segments in this clip "
+                      f"{[(a, b) for a, b, _ in segs]}. Each is a separate reconstruction — its "
+                      f"calibration belongs to its own pixels. This run applies ONE rect to all "
+                      f"of them, which is right for the segment it was measured on and wrong for "
+                      f"the rest. Restrict --frames to one segment, or accept that.")
 
     scene_id = app.run_reconstruction(
         episode.id, on_ground=_airborne_on_ground(n),
@@ -688,6 +716,12 @@ def main(argv: list[str] | None = None) -> int:
                              "MORE identity errors than 896 while finding more boxes. Measure a "
                              "new clip with scripts/dump_detections.py; the procedure is in the "
                              "config file")
+    parser.add_argument("--crop", choices=("auto", "off"), default="auto",
+                        help="measure the broadcast framing this clip needs and read every frame "
+                             "through it (default). A phone clip from the stand is ~37%% grass "
+                             "and the calibrator solves 0 of 8 frames; inside the measured crop "
+                             "it is 82-92%%. An already-broadcast clip measures to the identity "
+                             "and nothing changes. 'off' keeps the raw frame")
     parser.add_argument("--handover", action="store_true",
                         help="merge two ids that are one human: a subject whose measurements "
                              "stop mid-clip and another whose measurements start there, within "
@@ -773,6 +807,7 @@ def main(argv: list[str] | None = None) -> int:
         shot_guard=args.shot_guard,
         kit_split=args.kit_split,
         coherence=args.coherence,
+        crop=args.crop,
         handover=args.handover,
         physics=args.physics,
         physics_profile=args.physics_profile,

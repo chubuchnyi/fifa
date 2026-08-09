@@ -764,7 +764,7 @@ class LucasKanadeMotion:
 
         out: list[np.ndarray] = []
         prev: np.ndarray | None = None
-        for _, bgr in iter_clip_frames(clip.uri, clip.frames.tolist()):
+        for _, bgr in iter_clip_frames(clip.uri, clip.frames.tolist(), crop=clip.crop):
             gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
             if prev is not None:
                 out.append(self._between(cv2, prev, gray))

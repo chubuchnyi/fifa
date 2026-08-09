@@ -106,7 +106,7 @@ def make_hsv_appearance_provider(
         idx_to_feature: dict[int, np.ndarray] = {}
         want_set = set(int(f) for f in want)
         try:
-            for idx, bgr in iter_clip_frames(clip.uri, sorted(want_set)):
+            for idx, bgr in iter_clip_frames(clip.uri, sorted(want_set), crop=clip.crop):
                 # find box for this frame
                 row_positions = np.where(frames == idx)[0]
                 if row_positions.size == 0:

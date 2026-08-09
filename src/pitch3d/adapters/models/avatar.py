@@ -576,7 +576,7 @@ class SmplxTextureBackend:
             pose.body_pose[rows],
             pose.transl[rows],
         )
-        images = dict(iter_clip_frames(clip.uri, [int(f) for f in picks]))
+        images = dict(iter_clip_frames(clip.uri, [int(f) for f in picks], crop=clip.crop))
         frames: list[FrameObservation] = []
         for i, f in enumerate(picks):
             rgb = np.ascontiguousarray(images[int(f)][:, :, :3][:, :, ::-1])  # cv2 BGR -> RGB
