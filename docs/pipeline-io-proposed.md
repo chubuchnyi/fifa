@@ -275,7 +275,8 @@ they are what stops the pattern recurring.
 | **C ▲ one reconstruction entry point** | ~1 day | the `pod_real_e2e.sh` / `pod_make_video.sh` split produced two of the four cases. Hygiene — it reduces where drift can happen, it does not by itself prevent it |
 | **D ＋ clip class as an explicit input** | ~1 day | tripod and handheld are different contracts: 471 px against 13 607 px on the same code. Today one chain runs on both and emits a scene either way |
 | **E ＋ solvability gate before reconstruction** | ~1 day | the fan clip reconstructed and *then* refused 1976 subject-frames. `broadcast_crop.py` already measures the input; the gate is reading it in time |
-| **F ＋ verticality and foot contact** | unscoped | **three iterations untouched.** Root-Z 0.082 m against 0.23 m for a real player. Blocks on nothing above — start it in parallel |
+| ~~F ＋ verticality "we have no vertical DOF"~~ | — | **WITHDRAWN 2026-08-09.** The premise was a window mismatch: 0.082 m was a 60-frame *maximum*, 0.23 m a 1032-frame *median*. At matched windows the GT is 0.028 / 0.084 / 0.210 m, and our current 236-frame scene has median **0.160 m against the GT's 0.084** — nearly double. It survived four plan revisions unchecked |
+| **F′ ＋ the real vertical defect: a silent constant** | ~1 day | `pose.py` substitutes the nominal 0.92 m whenever the backend returns no `pelvis_above_foot`, and records nothing. **6 of 24 subjects** in the eye-label scene are exactly constant. 0 of 38 in the current one, so the path may already be fixed — verify before building. Same shape as #140 |
 | G ◆ three residuals (2 of 3 built) | half a day | the missing one is pitch paint by radius |
 | H ▲ distortion `k1` | ~1 day | **after** the jitter question — the 6.2 → 15.7 px ramp may be jitter, not optics |
 | I ＋ training-set export | ~1 day | after H |

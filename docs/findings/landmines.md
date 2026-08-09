@@ -86,6 +86,11 @@ Root-Z `max−min` grows with the window: GT medians are **0.028 / 0.085 / 0.204
 1032 frames. "0.082 m in a whole scene against 0.23 m for a real player" put a 60-frame **maximum**
 against a 1032-frame **median** — a 7× window mismatch that survived four plan revisions.
 · **Check:** same window, same statistic, both sides.
+· Reproduced 2026-08-09 on 25 GT clips: median root-Z range **0.028 / 0.084 / 0.210 m** at
+60 / 236 / 1032 frames. **And the conclusion reverses.** At the matched window our current scene
+`f236_res896` (236 frames, no constant-Z subjects) has median **0.160 m** against the GT's
+**0.084 m** — nearly double, not flat. The "we have no vertical DOF" item rested on a 60-frame
+maximum from a scene where a quarter of the subjects had the FK fallback firing.
 · [`vertical-motion-2026-08-09.md`](vertical-motion-2026-08-09.md)
 
 **The kit reader called the grass yellow.**
@@ -126,7 +131,8 @@ measurement two days later.
 labels were judged on — **6 of 24 subjects have exactly constant Z at 0.92 m**, per-frame `|dZ|`
 median 0.0000. Same shape as #140.
 · **Check:** `np.std(transl[:,2]) < 1e-9` per subject, or `bench_vertical_motion.py`.
-· **Live.**
+· **Live.** Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
+0.92 m; `f236_res896.json` **0 of 38**, so the current path does not hit it.
 
 **Grass fraction does not predict solvability.**
 On the fan clip the *worst*-cropped segment (82.4 % grass) solved **98 %** of its frames and the
