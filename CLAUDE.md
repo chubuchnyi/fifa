@@ -17,6 +17,7 @@ cold start; everything else is opened on demand.
 | Which file owns a subsystem | `docs/code-map.md` |
 | What happened on some past date | `docs/archive/status-log-2026-07.md` (verbatim log, 3.3k lines — grep it, don't read it) |
 | What we validated / refuted / never judged, across every thread | `docs/findings/research-ledger-2026-08-07.md` |
+| Traps that have already cost time — **add new ones here** | `docs/findings/landmines.md` |
 | What was tried and rejected, with numbers | `docs/adr/0012-rejected-approaches-log.md` |
 | Pipeline shape end to end | `docs/pipeline.md` |
 | Exact data contract: types, shapes, units, npz keys | `docs/pipeline-io.md` |
@@ -225,6 +226,15 @@ Watcher scripts: `pgrep -f batch.sh` over ssh matches the watcher **itself** —
 grep the log for `BATCH_FINISH_OK`.
 
 ## Gotchas that cost a session before
+
+**The full register is [`docs/findings/landmines.md`](docs/findings/landmines.md), and it is the
+one place these go.** Hit a new one — a thing that made a run wrong, a number wrong, or a session
+expensive, and that the code in front of you did not predict — **add a line there in the same
+session, before moving on**. Not a new findings doc, not a comment, not only a commit message.
+Scattering them is what produced #141: six instances in two days of a fact being written down and
+not found at the moment of need, four of them by a reader who had already read the warning.
+
+The few below are the ones worth carrying in the cold start.
 
 - **The solved camera is 180° rolled** relative to raw video. Any raw-pixel consumer must rotate the
   frame first (auto-detect: `-R[1][2] < 0`).

@@ -108,6 +108,11 @@ so a null label removes a constraint rather than adding one.
 **`FieldCalibration`** — `homographies: (T, 3, 3) float` (image → world plane), `frames: (T,) int`,
 `confidence: (T,) float` in `[0, 1]`, `keypoints: dict | None` (adapter-defined).
 
+**A singular or non-finite homography is marked unsolved at construction** (2026-08-09): its
+`confidence` is set to 0, `degenerate_frames` lists it, `world_to_image` returns NaN rather than
+raising, and `camera_from_calibration` fits only over solved frames. Before that it raised
+`LinAlgError` and killed two 236-frame runs from two different call sites.
+
 Direction is **image px → world pitch plane in metres**: `[x, y, 1]ᵀ ~ H @ [u, v, 1]ᵀ` with Z = 0.
 Helpers `image_to_world(frame, uv)` and `world_to_image(frame, xy)` are on the type.
 
@@ -309,6 +314,7 @@ real one. This table is the difference.
 | thing | when it is real | what you get otherwise |
 |---|---|---|
 | Detections | `--detector rfdetr` | `FakeDetector` |
+| Detector input square | `config/detector_resolution.yaml`, per clip by file name → `--detector-resolution` → the file's `default` (896) | RF-DETR's own 560 |
 | Camera | `--calibrator keypoints` + PnLCalib weights | `FakeFieldCalibrator`: world = (pixel − centre) × 30 m / width. **Affine, no perspective at all** |
 | Pose | `--pose gvhmr` + a real backend | `FakePoseEstimator`: `body_pose = zeros`, a T-pose on every frame |
 | `Scene.camera` | `camera_from_calibration` returns `realizable=True` | an **invented** 772 px @ 1280×720 fallback, principal point dead centre — see below |

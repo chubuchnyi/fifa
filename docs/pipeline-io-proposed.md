@@ -271,6 +271,7 @@ they are what stops the pattern recurring.
 |---|---|---|
 | **A ＋ capability manifest in `scene.json`** | hours | generalise `CameraTrack.source` to every stage. "Was this scene built with X" becomes a field read instead of half a day of archaeology. **Highest leverage** |
 | **B ▲ no silent `or` between measured and fallback** | hours | mark or refuse, everywhere. R-6 applied to ourselves. `CameraTrack.source` (done) is one instance of it |
+| **A-bis ▲ a number carries the window it is valid in** · **DONE** | hours | the manifest covers artefacts; this covers *measurements*. A metric read outside its domain cost a day: `smooth_residual` fits a cubic over the span and is honest to ~2 s, and its bare `jitter` was quoted over 7.9 s as 60.4 px — 120× the real swim. Not a framework: the pattern `apply_rigid_camera.py` already uses (refuse, and name the range you cover), applied where a value escapes as a string |
 | **C ▲ one reconstruction entry point** | ~1 day | the `pod_real_e2e.sh` / `pod_make_video.sh` split produced two of the four cases. Hygiene — it reduces where drift can happen, it does not by itself prevent it |
 | **D ＋ clip class as an explicit input** | ~1 day | tripod and handheld are different contracts: 471 px against 13 607 px on the same code. Today one chain runs on both and emits a scene either way |
 | **E ＋ solvability gate before reconstruction** | ~1 day | the fan clip reconstructed and *then* refused 1976 subject-frames. `broadcast_crop.py` already measures the input; the gate is reading it in time |
@@ -284,5 +285,12 @@ they are what stops the pattern recurring.
 camera translation (0.000 m in 89/89 broadcast clips), synthetic calibration GT (WorldPose is real
 footage with GT distortion, already local).
 
-**Done**: `CameraTrack.source` + fit numbers (`794fd46`), `RIGID_CAMERA` wired into the e2e script
-(`400e400`), singular homographies marked unsolved instead of crashing a run (`dfc1075`).
+**Done**: `CameraTrack.source` + fit numbers (`794fd46`) · `RIGID_CAMERA` wired into the e2e
+script (`400e400`) · singular homographies marked unsolved instead of crashing a run (`dfc1075`,
+and again at the second call site `976fcf9`) · **A-bis**, a metric that carries its own validity
+window (`f94a32e`) · the landmine register and the rule to add to it
+([`findings/landmines.md`](findings/landmines.md)).
+
+**Still live from #141**, i.e. capabilities that exist and do not reach a run: the per-segment crop
+contract in `broadcast_crop.py`; two reconstruction entry points that apply different fixes; and
+`calib/<clip>.npz` being a hand-made per-clip artefact with no automatic path for a new clip.
