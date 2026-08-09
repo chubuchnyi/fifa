@@ -133,6 +133,12 @@ median / 3.67 m max, i.e. it is not predictive — and #136 now gates on it.
 `body_pose: (T, J, 3)` axis-angle, `transl: (T, 3)` **world metres**,
 `left_hand_pose` / `right_hand_pose` / `jaw_pose` optional, `provenance: (T,)`.
 
+**`root_z_source`** — `measured` | `nominal`. `nominal` means the pose backend returned no
+foot→pelvis offset and a **constant** stand-in height was used for the whole track: XY is measured,
+Z is invented. Added 2026-08-09 (#142) because it was silent, and 6 of 24 subjects in the scene the
+#135 eye labels were judged on carry an exactly constant Z of 0.92 m. `GVHMRPoseEstimator`
+also lists the affected track ids in `nominal_root_z`, and the CLI prints them.
+
 **`provenance`** is the honesty channel, and criteria #135 rest on it:
 
 | value | meaning |
@@ -319,6 +325,7 @@ real one. This table is the difference.
 | Pose | `--pose gvhmr` + a real backend | `FakePoseEstimator`: `body_pose = zeros`, a T-pose on every frame |
 | `Scene.camera` | `camera_from_calibration` returns `realizable=True` | an **invented** 772 px @ 1280×720 fallback, principal point dead centre — see below |
 | Role | Roboflow sports weights | everyone is `player` |
+| Root **Z** | the backend returns `pelvis_above_foot` (needs SMPL-X FK) | a **constant** `pelvis_height_m` for the whole track — marked `root_z_source = nominal` since 2026-08-09 |
 | Team | kit k-means over the sampled torso | `None`, which downstream treats as a wildcard |
 
 ### The camera fallback is not hypothetical — measured 2026-08-08

@@ -131,7 +131,9 @@ measurement two days later.
 labels were judged on — **6 of 24 subjects have exactly constant Z at 0.92 m**, per-frame `|dZ|`
 median 0.0000. Same shape as #140.
 · **Check:** `np.std(transl[:,2]) < 1e-9` per subject, or `bench_vertical_motion.py`.
-· **Live.** Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
+· **Marked 2026-08-09** (`PoseSequence.root_z_source`, `GVHMRPoseEstimator.nominal_root_z`, and a
+CLI line). The substitution still happens — that is legitimate without SMPL-X FK — it is no longer
+silent. Independently reproduced 2026-08-09: `scene_off.json` 6 of 24 constant at exactly
 0.92 m; `f236_res896.json` **0 of 38**, so the current path does not hit it.
 
 **Grass fraction does not predict solvability.**

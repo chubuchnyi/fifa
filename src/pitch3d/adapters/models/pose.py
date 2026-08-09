@@ -35,7 +35,7 @@ from ...core.ports.io import ClipRef
 from ...core.ports.perception import Tracklet, Tracks
 from ...core.ports.pose import PoseEstimator
 from ...core.scene.field import MIN_SOLVED_CONFIDENCE, FieldCalibration
-from ...core.scene.motion import PoseSequence, SmplxShape, SubjectMotion
+from ...core.scene.motion import PoseSequence, RootZSource, SmplxShape, SubjectMotion
 from ...core.scene.provenance import Backend, ModelInfo
 from ...core.scene.units import FieldDimensions
 
@@ -178,6 +178,10 @@ class GVHMRPoseEstimator(PoseEstimator):
     dropped_frames: int = field(default=0, init=False)
     dropped_offpitch: int = field(default=0, init=False)
     dropped_subjects: list[int] = field(default_factory=list, init=False)
+    #: Track ids whose root **Z** is a constant stand-in, not a measurement (#142). Populated
+    #: whenever the backend returns no ``pelvis_above_foot``. Read it before quoting any vertical
+    #: statistic: a constant is not a small excursion, and it used to be invisible.
+    nominal_root_z: list[int] = field(default_factory=list, init=False)
 
     def _on_pitch(self, world_xy: np.ndarray) -> np.ndarray:
         """Mask of world XY that could be a player: on the pitch, plus a generous margin."""
@@ -200,6 +204,7 @@ class GVHMRPoseEstimator(PoseEstimator):
         bodies = self._backend().estimate_bodies(clip, tracks)
         out: dict[int, SubjectMotion] = {}
         self.dropped_frames, self.dropped_offpitch, self.dropped_subjects = 0, 0, []
+        self.nominal_root_z = []
         for tl in tracks.tracklets:
             if tl.cls == "ball":
                 continue  # the ball has its own BallTracker; HMR is for people only
@@ -247,7 +252,14 @@ class GVHMRPoseEstimator(PoseEstimator):
                 global_orient=raw.global_orient[rows],
                 body_pose=raw.body_pose[rows],
                 transl=transl,
+                # Mark, never hide (#142). `height is None` means the backend gave no measured
+                # foot->pelvis offset and `_ground_root` filled Z with `pelvis_height_m` for the
+                # whole track. XY stays measured; only the height is a stand-in.
+                root_z_source=(RootZSource.MEASURED if height is not None
+                               else RootZSource.NOMINAL),
             )
+            if height is None:
+                self.nominal_root_z.append(int(tl.track_id))
             out[tl.track_id] = SubjectMotion(shape=SmplxShape(betas=raw.betas), pose=pose)
         return out
 

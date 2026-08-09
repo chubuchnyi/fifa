@@ -40,7 +40,7 @@ _CLASSES: list[type] = [
     # motion
     motion.SmplxShape, motion.PoseSequence, motion.SubjectMotion, motion.BallTrack,
     motion.Ball2DTrack, motion.VectorCurve, motion.BodyModel,
-    motion.Provenance, motion.BallMode,
+    motion.Provenance, motion.BallMode, motion.RootZSource,
     # subject
     subject.Team, subject.Subject, subject.Role,
     # layers

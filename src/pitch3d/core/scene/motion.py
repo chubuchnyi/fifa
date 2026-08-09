@@ -34,6 +34,19 @@ class Provenance(str, Enum):
     IMPUTED = "imputed"            # no anchor on one side: coasted, held, or otherwise inferred
 
 
+class RootZSource(str, Enum):
+    """Whether a track's root height was measured or filled with a constant (#142).
+
+    R-6 applied to the vertical axis. The substitution is legitimate — a pose backend without
+    SMPL-X forward kinematics cannot say how far the pelvis is above the foot — but it must not be
+    indistinguishable from a measurement, because a constant Z is not a small excursion, it is no
+    excursion, and it drags every aggregate that reads it.
+    """
+
+    MEASURED = "measured"        # a per-frame foot->pelvis offset came from the backend
+    NOMINAL = "nominal"          # a single stand-in height was used for the whole track
+
+
 class BallMode(str, Enum):
     """Ball height regime. Replaces a bare ``on_ground`` bool, which conflated two facts.
 
@@ -116,6 +129,12 @@ class PoseSequence:
     right_hand_pose: np.ndarray | None = None
     jaw_pose: np.ndarray | None = None
     provenance: np.ndarray | None = None
+    #: Where root **Z** came from. `NOMINAL` means the pose backend returned no measured
+    #: foot→pelvis offset and a constant stand-in was substituted for the whole track — the XY is
+    #: still measured, only the height is invented. Recorded because it used to be silent: 6 of 24
+    #: subjects in the scene the #135 eye labels were judged on carry an exactly constant Z of
+    #: 0.92 m, which made the scene look like it had no vertical degree of freedom at all (#142).
+    root_z_source: RootZSource = RootZSource.MEASURED
 
     def __post_init__(self) -> None:
         self.frames = np.asarray(self.frames, dtype=int).reshape(-1)

@@ -323,6 +323,12 @@ def run_dry_run(
               f"extended {cr.extended_frames} edge frame(s) across "
               f"{cr.subjects_extended}/{cr.n_subjects} subject(s), "
               f"+{cr.corrections_added} auto-smoothing correction(s)")
+    _nominal = getattr(getattr(app.ports, "pose", None), "nominal_root_z", None)
+    if _nominal:
+        print(f"== root Z: {len(_nominal)} subject(s) have a CONSTANT stand-in height, not a "
+              f"measurement — the pose backend returned no foot-to-pelvis offset: {_nominal[:12]}"
+              f"{' …' if len(_nominal) > 12 else ''}. Any vertical statistic over this scene is "
+              f"about those constants as much as about the players (#142).")
     hr = app.handover_report(scene_id)
     if hr is not None:
         print(f"== handover: {hr.n_in}→{hr.n_out} subjects, {len(hr.merges)} merge(s) "
