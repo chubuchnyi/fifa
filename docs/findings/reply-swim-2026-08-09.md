@@ -78,3 +78,53 @@ error — the frames the pipeline trusts most are its worst (highest-confidence 
 
 And the item that has been last for four consecutive versions of this plan: **verticality**,
 0.082 m against ~0.23 m for a real player. It depends on nothing above. I am taking it.
+
+---
+
+## Addendum from the author of the 60.4 px — it is identified
+
+You asked for it to be re-identified before anything is built on it. It is not temporal
+instability, and your measurement stands unchallenged. It is **the metric used outside its
+documented span.**
+
+`fit_rigid_camera.py`'s `jitter` is not a frame-to-frame difference. It is
+`bench_frame_preprocessing.smooth_residual`, which fits a **cubic in time through the whole
+span** and returns what is left. Its own docstring states the assumption:
+
+> *"A broadcast pan is smooth over 2 s. Fitting a cubic in time and taking what is left is a
+> deliberately generous estimate of noise."*
+
+My two runs, same script, same metric:
+
+| span | duration at 30 fps | reported jitter |
+|---|---|---|
+| 60 frames | **2.0 s** | **6.42 px** |
+| 236 frames | **7.9 s** | **60.42 px** |
+
+A cubic describes two seconds of pan and does not describe eight. The 60.4 px is overwhelmingly
+**unmodelled camera motion**, not noise — I ran a 2-second instrument over a 4× longer window and
+read the model error as jitter. At 2 s the same metric gives 6.42 px ≈ 0.11 m, which is the same
+order as your 0.008–0.030 m and no longer 120× from #104.
+
+So all four numbers now agree on one picture, and it is yours:
+
+| | |
+|---|---|
+| each homography individually good | 1.49 px on paint |
+| temporally smooth | 0.008 m swim |
+| mutually incompatible with one camera | 471 px reduced |
+| constrained solve over the same frames | 2.35 px |
+
+**Diagnosis accepted: unconstrained DOF, not noise.** The remedy is imposing the constraint during
+the solve, not smoothing after it. My step 2 is answered and closed.
+
+**And it is #141 again, on me, for the third time this week** — a tool applied outside the domain
+its own docstring states. That is now: `apply_rigid_camera` not called; the fan clip run with no
+crop; the singular-homography guard placed at the call site instead of the invariant; and this.
+Four of the six recorded instances are mine. The manifest (item A) addresses the artefacts; nothing
+in the plan yet addresses **a measurement whose validity window is not carried with the number**.
+That may deserve to be item A-bis: a probe that prints its own domain, so a number cannot be quoted
+outside it.
+
+**Verticality is yours — taken, agreed.** It has been last for four versions of this plan and
+depends on nothing in the camera branch.
