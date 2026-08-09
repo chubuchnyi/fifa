@@ -33,6 +33,14 @@ import sys
 import numpy as np
 
 GT_GLOB = "WorldPose/poses/*.npz"
+
+#: WorldPose is uniformly 50 fps (checked: 89/89 clips); our broadcast clip is 29.97. Both a
+#: per-frame step and a fixed-length window mean different things at different rates, so every
+#: comparison below is normalised to OUR rate. Getting this wrong understates GT by 1.67x — it
+#: did, in the first version of this bench.
+GT_FPS = 50.0
+OUR_FPS = 29.97
+RATE = GT_FPS / OUR_FPS
 DEFAULT_SCENES = (
     "out/cue/scene_off.json",
     "out/res_ab236/f236_res896.json",
@@ -55,28 +63,33 @@ def gt_tracks() -> list[np.ndarray]:
     return out
 
 
-def table_excursion(gt: list[np.ndarray], windows=(60, 236, 1032)) -> dict[int, float]:
-    """Excursion is window-dependent, which is what makes the headline comparison unsound."""
+def table_excursion(gt: list[np.ndarray], seconds=(2.0, 7.87, 20.0)) -> dict[float, float]:
+    """Excursion is window-dependent, which is what makes the headline comparison unsound.
+
+    Windows are in SECONDS, not frames: 60 of our frames is 2.0 s and 60 GT frames is 1.2 s.
+    """
     print(f"\n== 1. Real players: root-Z excursion depends on the window ({len(gt)} tracks) ==")
-    print(f"{'window (frames)':<18s}{'p05':>9s}{'median':>10s}{'p90':>9s}{'p99':>9s}")
+    print(f"{'window':<18s}{'GT frames':>10s}{'p05':>9s}{'median':>10s}{'p90':>9s}{'p99':>9s}")
     med = {}
-    for w in windows:
-        v = [np.ptp(t[s : s + w]) for t in gt for s in range(0, len(t) - w + 1, w)]
-        v = np.asarray(v)
-        med[w] = float(np.percentile(v, 50))
+    for sec in seconds:
+        w = int(round(sec * GT_FPS))
+        v = np.asarray([np.ptp(t[s : s + w]) for t in gt for s in range(0, len(t) - w + 1, w)])
+        if not v.size:
+            continue
+        med[sec] = float(np.percentile(v, 50))
         print(
-            f"{w:<18d}{np.percentile(v, 5):9.3f}{med[w]:10.3f}"
+            f"{str(sec) + ' s':<18s}{w:>10d}{np.percentile(v, 5):9.3f}{med[sec]:10.3f}"
             f"{np.percentile(v, 90):9.3f}{np.percentile(v, 99):9.3f}"
         )
-    print("  A 60-frame max against a 1032-frame median is a 7x window mismatch, not a defect.")
+    print("  A 60-frame max against a 1032-frame median is a window AND a statistic mismatch.")
     return med
 
 
 def table_step(gt: list[np.ndarray]) -> float:
     """Per-frame step separates real crouching (smooth) from noise (spiky)."""
-    d = np.concatenate([np.abs(np.diff(t)) for t in gt])
+    d = np.concatenate([np.abs(np.diff(t)) for t in gt]) * RATE  # -> our frame interval
     p90 = float(np.percentile(d, 90))
-    print("\n== 2. Real players: per-frame |dZ| ==")
+    print(f"\n== 2. Real players: per-frame |dZ|, rescaled to {OUR_FPS} fps ==")
     print(f"  median {np.median(d):.4f} m   p90 {p90:.4f} m   p99 {np.percentile(d, 99):.4f} m")
     print("  Real vertical motion is built from small steps. Anything spikier is not football.")
     return p90
@@ -111,12 +124,13 @@ def report_scene(path: str, gt_med: dict[int, float], gt_p90: float) -> None:
 
     exc_ = np.asarray(exc_)
     steps = np.concatenate(steps) if steps else np.array([0.0])
-    w = min(gt_med, key=lambda k: abs(k - n_frames))
+    dur = n_frames / OUR_FPS
+    w = min(gt_med, key=lambda k: abs(k - dur))
     ratio = np.median(exc_) / gt_med[w]
 
-    print(f"\n  {path}   {len(exc_)} subjects, {n_frames} frames")
+    print(f"\n  {path}   {len(exc_)} subjects, {n_frames} frames = {n_frames / OUR_FPS:.1f} s")
     print(
-        f"    excursion  median {np.median(exc_):.3f} m  vs GT@{w} {gt_med[w]:.3f} m"
+        f"    excursion  median {np.median(exc_):.3f} m  vs GT@{w}s {gt_med[w]:.3f} m"
         f"   -> {ratio:.1f}x {'OVER' if ratio > 1 else 'under'}"
     )
     print(f"    per-frame  median {np.median(steps):.4f}  p90 {np.percentile(steps, 90):.4f}"

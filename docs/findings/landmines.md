@@ -81,6 +81,15 @@ It fits a cubic across the whole span. The same clip reads **6.42 px over 60 fra
 after temporal instability that does not exist.
 · **Check:** the printed value now carries `OUT OF DOMAIN` past 90 frames (`f94a32e`).
 
+**WorldPose GT is 50 fps and our broadcast clip is 29.97 — nothing warns you.**
+Any per-frame delta and any fixed-length window mean different things at different rates. 60 GT
+frames is 1.2 s against our 2.0 s, so comparing "60 frames" to "60 frames" understates GT by
+**1.67×**. It inverted a verticality conclusion for several hours: pose jitter read as 2.3× GT and
+is 1.37×, and the 2-second excursion deficit read as 3.5× and is 5.5×.
+· **Check:** `ffprobe -show_entries stream=r_frame_rate`. Compare in **seconds**, and rescale
+per-frame steps by `gt_fps / our_fps`. `bench_vertical_motion.py` now does both.
+· Fixed in that bench; **live** for any new GT comparison.
+
 **Excursion statistics are window-dependent, and the board compared two of them.**
 Root-Z `max−min` grows with the window: GT medians are **0.028 / 0.085 / 0.204 m** at 60 / 236 /
 1032 frames. "0.082 m in a whole scene against 0.23 m for a real player" put a 60-frame **maximum**
