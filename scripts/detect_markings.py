@@ -101,12 +101,21 @@ MERGE_ANGLE_DEG = 4.0
 MERGE_OFFSET_PX = 6.0
 MERGE_MAX_GAP_PX = 40.0
 
-#: The goal is a mesh and the markings are not. A net puts a few hundred ridge pixels into a
-#: 31x31 window; an ordinary painted line puts about 28. Dilating that region reaches the
-#: posts and crossbar, which are not themselves mesh but bound it.
-#: This is the only cue here that does not need a camera. The honest alternative -- "the goal
-#: frame is above the ground plane" -- is unavailable by construction: this script never forms
-#: a camera, so it cannot ask what is on the plane.
+#: The net is a mesh and the markings are not. A net puts a few hundred ridge pixels into a
+#: 31x31 window (measured: p99 = 250) where an ordinary painted line puts about 28. The 41 px
+#: growth then reaches a little past the weave, which is usually enough to take the post or
+#: crossbar beside it.
+#:
+#: **This keys on the net, not on the goal.** Rendered on a fan frame, the >90 core is two
+#: blobs covering the densest part of the weave -- 0.45 % of the frame, 1.38 % after growth --
+#: not the goal outline. A goal with no net, or a net too fine or too motion-blurred to
+#: resolve, leaves its posts detected. The growth is also a fixed pixel distance, so it does
+#: not scale with how large the goal appears.
+#:
+#: The physically correct test -- "the goal frame is above the ground plane, the paint is on
+#: it" -- is unavailable by construction: this script never forms a camera, so it cannot ask
+#: what is on the plane. Mesh density is a proxy for it and should be replaced if this ever
+#: gets a camera.
 NET_WINDOW = 31
 NET_DENSITY = 90
 NET_GROW = 41
