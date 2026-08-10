@@ -287,6 +287,13 @@ against the file it replaced.
 **ruff is pinned in four places.** `[dev]`, `.pre-commit-config.yaml`, `.github/workflows/ci.yml`,
 `requirements-dev.txt`. The fourth was missed once and CI checked a different rule set.
 
+**`lint_changed.py` lies in two directions, and neither looks like an error.**
+The hook is `entry: python scripts/lint_changed.py`, `language: system` — a shell with only
+`python3` on PATH aborts the commit with *"Executable `python` not found"*, which reads as a lint
+failure and is not. And run by hand **before** `git add`, the script prints *"no Python files
+changed"* — it reads the index, so an unstaged edit reads as clean.
+· **Check:** `PATH="$PWD/.venv/bin:$PATH" git commit …`, and stage before you trust the verdict.
+
 **`pgrep -f batch.sh` over ssh matches the watcher itself.** Use `[b]atch.sh`, or grep the log for
 `BATCH_FINISH_OK`.
 
