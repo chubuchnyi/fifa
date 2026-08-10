@@ -67,6 +67,33 @@ the same code. The difference is **translation** — WorldPose GT says broadcast
 per-frame effect. Positions survive (the pitch is a plane); a novel view does not exist.
 · [`architecture-brief-2026-08-09.md`](architecture-brief-2026-08-09.md)
 
+**`--crop auto` moves the homographies into the crop rect; the camera fit is still told the full
+frame size.** `cli.py` does `replace(_c, crop=_fr.rect)` and leaves `ClipRef.width/height` at the
+source size. Every adapter decodes through the crop (`adapters/io/frames.py:iter_clip_frames`), so
+PnLCalib saw **1080×608**, while `controller.py:709` hands `camera_from_calibration`
+`width=clip.width, height=clip.height` = **1080×1920** — a principal point placed 656 px outside an
+image 608 px tall. **The 12 382 px quoted for the fan clip all week is measured in the wrong
+space**; at the correct 1080×608 the same call returns 18 313 px, focal 2099 px. Both refuse, so no
+verdict flips, but the number and the stored `fit_focal_px` are wrong. Settled at the same time:
+this clip has **no** 180° roll — that roll is a property of the solved `CameraTrack`, not of every
+calibration.
+· **Check:** score the projected markings against the paint in each candidate space and compare
+the **sample count** as well as the median — a wrong space projects most markings off-surface where
+they go unscored, and posts a flattering median on the survivors (full 1080×1920 scored 30.59 px on
+n=36 against the crop's 9.47 px on n=1271).
+· **Live.** [`m1-handheld-centre-2026-08-10.md`](m1-handheld-centre-2026-08-10.md)
+
+**Near-degenerate homographies pass every guard we have, including confidence.**
+Fan clip frames 115 and 117 measure *mirrored* while the other 118 do not — which
+`fit_rigid_camera.load_world_to_image` asserts is impossible. Not a mid-clip frame change:
+`|det|` is **1.0e-6** and **5.3e-8** against a clip median of **3.4e-3**. The plane has collapsed
+toward a line and the handedness test reads the wrong sign off it. Both clear
+`plane_camera._SINGULAR_DET = 1e-12` by six orders of magnitude, and both carry ordinary confidence
+— **0.475 and 0.394** against a clip median near 0.45.
+· **Check:** relative, not absolute — `|det| < 1e-3 * median(|det|)` over the clip. An absolute
+threshold cannot work; the scale of `|det|` depends on image size and world units.
+· **Live.** No pipeline guard does this today.
+
 **PnLCalib already computed a full camera per frame, and we throw it away in three lines.**
 `_PnLCalibBackend.calibrate_frames` (`pnlcalib_backend.py:237`) returns `cam_params` with
 `x_focal_length`, `principal_point`, `position_meters`, `rotation_matrix` — a complete pinhole.
