@@ -67,6 +67,34 @@ the same code. The difference is **translation** — WorldPose GT says broadcast
 per-frame effect. Positions survive (the pitch is a plane); a novel view does not exist.
 · [`architecture-brief-2026-08-09.md`](architecture-brief-2026-08-09.md)
 
+**PnLCalib already computed a full camera per frame, and we throw it away in three lines.**
+`_PnLCalibBackend.calibrate_frames` (`pnlcalib_backend.py:237`) returns `cam_params` with
+`x_focal_length`, `principal_point`, `position_meters`, `rotation_matrix` — a complete pinhole.
+`image_to_world_from_cam_params` (`calibration.py:623-657`) builds `K·[R|t]`, **drops the Z column,
+inverts, and keeps only the 3×3 plane homography.** Downstream, 231 lines of `plane_camera.py` and
+544 of `fit_rigid_camera.py` try to guess those same numbers back. Worse, the only consumer of that
+path, `CameraModuleFieldCalibrator` (`calibration.py:661`), is **unreachable from `wiring.py`**,
+which accepts `"fake"` and `"keypoints"` only — it is reachable solely via
+`scripts/run_calib_eval.py --solver camera`. Caveat before over-reading this: a per-frame PnLCalib
+camera is still free per frame, so it does not fix the swim by itself — but it is a far better
+initialisation than a homography, and it gives a direct per-frame focal, which is what a zooming
+clip needs.
+· **Check:** `grep -n "\[0, 1, 3\]" src/pitch3d/adapters/models/calibration.py`
+· **Live.** Found 2026-08-10 while scoping [`camlab-spec.md`](../camlab-spec.md).
+
+**The phone clip's storm: 79 % of measured steps are physically impossible, and 83 % of it is the
+ground.** Measured 2026-08-09 on `out/fan_auto`, consecutive frame pairs where *both* ends are
+`measured`, split into a per-frame common-mode median vector across all subjects versus each
+subject's residual. Fan clip: 0.832 m/frame median step against a 0.35 m/frame human limit, p95
+4.177 m, worst 11.568 m (347 m/s); common mode 0.899 m/frame median. Broadcast control: 0.072
+median, 1.1 % over the limit, common mode 0.042. **The camera-carry remedy was already on** —
+`--camera-carry` defaults to 8 at all three layers (`cli.py:690`, `cli.py:129`, `wiring.py:114`),
+so `pod_real_e2e.sh` not setting it leaves the default, not off. It removes 92 % of swim on the
+tripod clip and does not touch this.
+· **Check:** decompose into common mode before attributing swim to per-player error — 83 % of it is
+not the players. Do not ask for an eye verdict on a scene until the common mode is under ~0.1 m.
+· **Live.** This is what [`camlab-spec.md`](../camlab-spec.md) exists to attack.
+
 **PnLCalib solves 8 free DOF per frame with nothing tying frames to one camera.**
 Each homography is individually good (1.49 px on paint) and temporally smooth (0.008 m swim), and
 the family is mutually incompatible with any single camera (471 px). Not noise — surplus DOF.
