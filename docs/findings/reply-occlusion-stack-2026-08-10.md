@@ -168,14 +168,57 @@ measured Cutie cost that is **686 s GPU → ~85 s**, 4.2 h CPU → ~30 min.
 
 ### Two limits the probe names itself
 
-- **It is blind to births.** 29 of 78 events had no recorded row for that track at all — a birth has
-  no prior row to be ambiguous in. The probe takes `np.partition(a, 1, axis=1)`, i.e. best and
-  second-best **per row = per track**. The symmetric **column** margin — per *detection* — is the
-  birth-side signal and has never been measured. That is a ~10-line change to the same probe and it
-  would say whether SMP's trigger can see 37 % of our events at all.
+- **It was blind to births — measured 2026-08-10, and the column side sees them.** See below.
 - **W5's verdict is "cost, not quality", and on its own terms it is right.** The thing being
   dispatched is our mask cue, whose measured ceiling is **14 %** (mid-pitch events 28 → 24 against
   a 96 % availability ceiling). Running a 14 % cue 5× more cheaply buys compute, not output.
+
+### The birth side, measured — and one surprise
+
+The row margin is blind to births by construction: `np.partition(a, 1, axis=1)` takes best and
+second-best **per row = per track**, and a track being born has no prior row. That was 29 of our 78
+events. The symmetric **column** margin — per *detection* — is the birth-side signal, and
+`bench_assignment_margin.py` now measures it. **All 40 mid-pitch births matched their own column at
+IoU ≥ 0.5, none missing**, so the test is complete rather than sampled.
+
+One methodological trap, hit and fixed before reading anything into the numbers: a symmetric ±2
+window reaches **past** the birth, and at *f*+1 the newborn track exists and matches its own
+detection perfectly. That reports a confident column for every birth and understates the signal.
+SMP dispatches at *f*, so only `g <= f` is admissible. Both readings below; the strict one is the
+birth frame alone.
+
+| | births | all columns |
+|---|---|---|
+| column margin, median (`g <= f`, window 2) | **0.079** | 0.705 |
+| column margin, median (birth frame only) | **0.125** | 0.705 |
+
+**(a) Fire when two tracks compete for the detection — the rule SMP specifies:**
+
+| margin < | catches of births | columns fired | lift (window 2) | lift (frame only) |
+|---|---|---|---|---|
+| 0.05 | 47.5 % / 30.0 % | 12.4 % | **3.82×** | 2.41× |
+| 0.10 | 52.5 % / 45.0 % | 15.0 % | 3.50× | **3.00×** |
+| 0.20 | 62.5 % / 52.5 % | 19.1 % | 3.28× | 2.75× |
+| 0.40 | 77.5 % / 75.0 % | 26.6 % | 2.92× | 2.82× |
+
+So the trigger **does** reach the 37 % of events the row side cannot, at roughly half the row
+side's lift (3.0× against 5.3×). SMP's dispatch is not structurally blind to our dominant event
+type. That answers the question this section opened with.
+
+**(b) Fire when no track claims the detection — measured 0.0 %, and that is the surprise.**
+
+I expected this rule to be near-tautological: ByteTrack births a track precisely because nothing
+cleared the match threshold. It fires on **none** of our 40 births at any threshold from 0.60 up.
+The reason is in the medians — a mid-pitch birth's detection has an entirely ordinary best cost,
+**0.176–0.221 against 0.250 for every column in the clip**.
+
+**Our mid-pitch births are contested, not orphaned.** A perfectly good candidate track existed for
+that detection and the Hungarian assignment gave it to a competitor. That is the same fact as
+#133's *"96 % of mid-pitch identity events have an unclaimed detection a median 6–23 px away"*,
+seen from inside the cost matrix rather than from the output — and it is a stronger statement,
+because it says the failure is in **allocation**, not in the evidence. Nothing about detection,
+resolution, or embedding quality changes an allocation that had the right answer available and
+picked the other one.
 
 ### Where I think W5 is nonetheless incomplete
 

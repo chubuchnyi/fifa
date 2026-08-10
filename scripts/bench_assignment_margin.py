@@ -22,6 +22,13 @@ So this measures the premise before anything is built, and it needs no GPU and n
 
     PYTHONPATH=src .venv/bin/python scripts/bench_assignment_margin.py
     PYTHONPATH=src .venv/bin/python scripts/bench_assignment_margin.py --frames 236
+
+**Extended 2026-08-10 with the column side.** The row margin can only speak for a track that
+already exists, so it is blind to births by construction — 29 of our 78 events had no row at all.
+A birth is an unmatched *detection*, i.e. a column. Measured: the column margin does see them
+(births median 0.079-0.125 against 0.705 for every column, lift 2.4-3.8x), and the rival rule
+"fire when no track claims the detection" measures **0.0 %** — our mid-pitch births are contested,
+not orphaned. Findings: docs/findings/reply-occlusion-stack-2026-08-10.md
 """
 from __future__ import annotations
 
@@ -85,6 +92,14 @@ per_frame: dict[int, list[float]] = {}
 rows_seen: dict[int, int] = {}
 #: (frame, track_id) -> that track's OWN margin — the per-track test, not the per-frame proxy
 by_track: dict[tuple[int, int], float] = {}
+#: frame -> [(detection box, COLUMN margin, best cost)] — the birth-side signal (added 2026-08-10)
+#:
+#: The row margin above can only speak for a track that already exists, so it is structurally blind
+#: to births: 29 of our 78 events had no row for that track at all. A birth is an unmatched
+#: *detection*, i.e. a **column**. Two candidate signals live there and they are not the same thing:
+#: the column margin (two tracks compete for one detection) and the column's best cost (no track
+#: claims it at all). Record both; the tables at the bottom score them against their own base rate.
+by_det: dict[int, list[tuple[np.ndarray, float, float]]] = {}
 
 
 class MarginRecorder:
@@ -111,6 +126,19 @@ class MarginRecorder:
                         key = (f, int(tid))
                         m = float(second[i] - best[i])
                         by_track[key] = min(by_track.get(key, 1e9), m)
+            # --- column side. One row means there is no second-best: the margin is undefined and
+            # recording 0 there would manufacture ambiguity out of a matrix that has none.
+            bx = np.asarray(boxes, dtype=float).reshape(-1, 4)
+            if bx.shape[0] == a.shape[1]:
+                if a.shape[0] >= 2:
+                    pc = np.partition(a, 1, axis=0)
+                    cbest, csecond = pc[0, :], pc[1, :]
+                else:
+                    cbest, csecond = a[0, :], np.full(a.shape[1], np.inf)
+                for j in range(a.shape[1]):
+                    by_det.setdefault(f, []).append(
+                        (bx[j], float(csecond[j] - cbest[j]), float(cbest[j]))
+                    )
         return cost                      # unchanged: this must not alter the tracking it measures
 
 
@@ -145,6 +173,7 @@ def at_edge(b):
 
 
 events: list[tuple[int, int, str]] = []          # (frame, track_id, 'born'|'died')
+births: list[tuple[int, int, np.ndarray]] = []   # (frame, track_id, first plausible box)
 for t in tls:
     fr = np.asarray(t.frames, dtype=int).reshape(-1)
     bx = np.asarray(t.bboxes_xyxy, dtype=float).reshape(-1, 4)
@@ -154,6 +183,7 @@ for t in tls:
     fr, bx = fr[keep], bx[keep]
     if fr.min() > 2 and not at_edge(bx[0]):
         events.append((int(fr.min()), int(t.track_id), 'born'))
+        births.append((int(fr.min()), int(t.track_id), bx[0].copy()))
     if fr.max() < args.frames - 3 and not at_edge(bx[-1]):
         events.append((int(fr.max()), int(t.track_id), 'died'))
 
@@ -236,3 +266,70 @@ if own.size:
         base = 100.0 * float((allv < thr).mean())
         print(f'  margin < {thr:.2f}: catches {rec:5.1f} % of breaking tracks · '
               f'{base:5.1f} % of all rows fire  ->  lift {rec / max(base, 1e-9):.2f}x')
+
+
+# ---------------------------------------------------------------- the birth side (COLUMN margin)
+#
+# Everything above scores rows, and a row belongs to a track that already exists. A birth is an
+# unmatched *detection* — a column — so the row margin cannot see one even in principle. This asks
+# whether the column carries a usable signal instead, and scores both candidates the same way the
+# row table is scored: against the base rate of the same rule firing on every column.
+def _iou(a: np.ndarray, b: np.ndarray) -> float:
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+print('\n== per-DETECTION: can a COLUMN signal see a birth, which no row can? ==')
+# The window must NOT reach past the birth. At f+1 the newborn track exists and matches its own
+# detection perfectly, so a symmetric window measures the moment *after* the decision and reports a
+# confident column for every birth. SMP dispatches at f, so only g <= f is admissible. Within the
+# window a box can appear in both association rounds; take the MINIMUM of each statistic, which is
+# the reading least favourable to the signal.
+hits: list[tuple[float, float]] = []          # (column margin, best cost) at each birth
+no_column = 0
+for f, _tid, box in births:
+    ms, cs = [], []
+    for g in range(f - args.window, f + 1):
+        for cb, m, c in by_det.get(g, ()):
+            if _iou(box, cb) >= 0.5:
+                ms.append(m)
+                cs.append(c)
+    if ms:
+        hits.append((min(ms), min(cs)))
+    else:
+        no_column += 1
+
+cols = [(m, c) for v in by_det.values() for (_b, m, c) in v]
+print(f'  {len(births)} births of {len(events)} events · {len(cols)} detection columns recorded')
+print(f'  {len(hits)} births matched to their own column (IoU >= 0.5, g <= f), {no_column} not '
+      f'found')
+if hits and cols:
+    bm = np.array([m for m, _c in hits])
+    bc = np.array([c for _m, c in hits])
+    am = np.array([m for m, _c in cols])
+    ac = np.array([c for _m, c in cols])
+    print(f'  column MARGIN   births median {np.median(bm[np.isfinite(bm)]):.3f} · '
+          f'all columns {np.median(am[np.isfinite(am)]):.3f}')
+    print(f'  column BEST     births median {np.median(bc):.3f} · all columns {np.median(ac):.3f}')
+    print('\n  a) fire when two tracks compete for the detection (the SMP-faithful rule):')
+    for thr in (0.05, 0.10, 0.20, 0.40):
+        rec = 100.0 * float((bm < thr).mean())
+        base = 100.0 * float((am < thr).mean())
+        print(f'     margin < {thr:.2f}: catches {rec:5.1f} % of births · {base:5.1f} % of columns'
+              f' fire  ->  lift {rec / max(base, 1e-9):.2f}x')
+    print('\n  b) fire when NO track claims the detection (an orphan, not an ambiguity):')
+    for thr in (0.60, 0.80, 0.90, 0.95):
+        rec = 100.0 * float((bc > thr).mean())
+        base = 100.0 * float((ac > thr).mean())
+        print(f'     best    > {thr:.2f}: catches {rec:5.1f} % of births · {base:5.1f} % of columns'
+              f' fire  ->  lift {rec / max(base, 1e-9):.2f}x')
+    print('\n  Rule (b) was expected to be near-tautological — ByteTrack births a track exactly')
+    print('  because no match cleared the threshold. It measures 0.0 %, and that is a finding:')
+    print('  a mid-pitch birth\'s detection has a perfectly ordinary best cost (median 0.18-0.22')
+    print('  against 0.25 for every column). Our births are CONTESTED, not orphaned — a good')
+    print('  candidate track existed and the assignment gave it to a competitor. Same fact as')
+    print('  "96 % of events have an unclaimed detection 6-23 px away", seen from the matrix.')
+    print('  Rule (a) is the one SMP specifies, and it is the one that carries signal.')
