@@ -20,11 +20,23 @@ is the win in the expansion, or in the appearance features?
 
 Scored the way #132 scores everything: identities before and after the stitcher, plus the seam
 speed of every merge the expansion enables, because a wrong merge teleports a body.
+
+Two properties of this path a reader would otherwise have to assume, both measured 2026-08-10
+after the table below was read as confounded:
+
+  * **Kit labels are present and the cue binds.** 0 of 56 player tracks are ``team_id=None`` here,
+    and ``require_same_team`` costs 3 identities (36 vs 33). ``preflight()`` prints both, because
+    ``StitchConfig.require_same_team`` treats ``None`` as a wildcard — a run whose tracker failed
+    to label teams measures the geometry with the only 28-px-proof appearance cue switched off.
+  * **There is no run noise.** Three independent runs at ``scale=1.0`` give 56 / 36 / 14 every
+    time. So spread across the scale column is a deterministic non-monotonic response, not
+    scatter, and must not be excused as noise.
 """
 from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -109,6 +121,21 @@ def seam_speeds(tracks: Tracks, merges: list[list[int]]) -> np.ndarray:
     return np.array(out)
 
 
+def preflight(clip: ClipRef, dets: Detections) -> None:
+    """Show that the kit cue is present and binding, so the sweep cannot be read as confounded."""
+    tracks = ByteTrackTracker(device='cpu', min_track_frames=4, kit_split=True).track(clip, dets)
+    players = [t for t in tracks.tracklets if t.cls == 'player']
+    blank = sum(1 for t in players if t.team_id is None)
+    print(f'  kit labels {dict(Counter(str(t.team_id) for t in players))} '
+          f'-- unlabelled {blank}/{len(players)}')
+    for req in (True, False):
+        merged, report = stitch_tracks_with_report(tracks, StitchConfig(require_same_team=req))
+        n = len([t for t in merged.tracklets if t.cls == 'player'])
+        print(f'  require_same_team={str(req):<5} -> {n:2d} ids, {len(report.merges)} merges')
+    print('  Equal rows would mean the kit cue is idle and the sweep below measures geometry '
+          'alone.\n')
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -136,6 +163,7 @@ def main() -> None:
 
     print(f'{sum(len(f.items) for f in dets.frames)} detections over {len(dets.frames)} frames')
     print('kit_split on, the #132 scoreboard configuration.\n')
+    preflight(clip, dets)
     print('  expand   player ids   after stitch   merges   seam speed px/f (median / max)')
 
     for scale in args.scales:

@@ -168,6 +168,13 @@ reached a committed file.
 The bench says so itself: an anchor displaced 10 m scores `swim 0.0000 m`. A calibration can be
 perfectly smooth and uniformly wrong.
 
+**Quote a findings doc by commit hash — ours get corrected within the hour.**
+`occlusion-stack-review-2026-08-07.md` was revised 69 minutes after it was first committed
+(`06d3f00` 19:21 → `1250585` 20:30, +48 lines). A reply written against the first copy spent two
+of its four objections on text the doc already contained. #141 in its purest form: written down,
+did not reach the reader.
+· **Check:** cite `path@hash` when a doc leaves this repo in a message.
+
 ## Pipeline wiring
 
 **Two reconstruction entry points apply different fixes.**
@@ -238,6 +245,14 @@ track it cleaned, so 23 of 27 subjects became universally stitchable.
 **`clip_hash` hashes only the first frame, the last frame and the count.**
 Two different frame subsets with the same endpoints and length share a cache key.
 · **Live.**
+
+**The tracker→stitcher path has zero run noise, so a "band" of results is signal, not scatter.**
+Three independent runs of `bench_expansion_iou.py` at `scale=1.0` give **56 / 36 / 14** every time.
+A sweep that wanders 33–38 across parameter values is a deterministic **non-monotonic** response —
+a small change to the cost matrix reshuffles which merges the stitcher then makes. Calling it
+noise (I did, in the §5 correction) excuses a result that actually needs explaining.
+· **Check:** run the same config twice before attributing spread to noise.
+· [`reply-occlusion-stack-2026-08-10.md`](reply-occlusion-stack-2026-08-10.md)
 
 ## Fakes and tests
 

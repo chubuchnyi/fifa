@@ -6,8 +6,15 @@ right and independently matches what we measured on 2026-08-06. This doc records
 verification, what our own subject size rules out, and the one thing we measured today.
 
 **The short version.** The survey's diagnosis is correct and already ours. Its prescription is
-mostly aimed at people 3–11× larger than ours, and the two most cited methods carry the authors'
-own warning about small instances. The parts that transfer are the two *offline, geometric* ones.
+mostly aimed at people 3–11× larger than ours. The parts that transfer are the two *offline,
+geometric* ones.
+
+> **Softened 2026-08-10.** This line used to read *"the two most cited methods carry the authors'
+> own warning about small instances"*, which is harder than the source. BMPv2's warning is about
+> the **refinement loop** (BMPv2+ vs BMPv2) and costs 0.7 AP on a COCO whose small instances are
+> 30 % — a soft penalty, never measured at 28 px, not a disqualification. What actually rules BMP
+> out is **GPL-3.0 on code *and* weights** (§6), which needs no extrapolation. §3 and §8 already
+> said "BMPv2+"; only this summary generalised it.
 
 ---
 
@@ -135,9 +142,16 @@ outside:
   with stitching it removes none. The tracker is holding exactly the crossings the stitcher was
   joining anyway. Those two readings make different predictions and only the second is supported.
 * **The measurement has almost no power.** The identity ceiling is **≥28** distinct humans and the
-  baseline is 36, so the entire measurable headroom is ~8 identities over 236 frames, against a
-  band that already wobbles 33–38 between runs. A change worth 3 identities is indistinguishable
-  from noise here. "No trend" is weak evidence of no effect, not evidence of no effect.
+  baseline is 36, so the entire measurable headroom is ~8 identities over 236 frames. "No trend"
+  is weak evidence of no effect, not evidence of no effect.
+
+  > **The reason above was wrong, corrected 2026-08-10.** This bullet used to say the 33–38 band
+  > *"wobbles between runs"* and that a 3-identity change is *"indistinguishable from noise"*.
+  > Measured: three independent runs at `scale=1.0` give **56 / 36 / 14 every time** — the path is
+  > deterministic and there is **no run noise at all**. So a 3-identity change would be perfectly
+  > *visible*; what it would not be is *attributable*. The band is a deterministic **non-monotonic**
+  > response — a small change in the cost matrix reshuffles which merges the stitcher then makes.
+  > The conclusion (weak evidence) survives; the stated mechanism (noise) did not exist.
 
 **What this does not test.** A single fixed scale, both sides inflated, is *not* Deep-EIoU: the
 published method iterates the scale-up over rounds and pairs it with a sports-fine-tuned OSNet
