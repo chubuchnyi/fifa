@@ -82,6 +82,67 @@ against a distortion model's 2–5, with a measurement already available for one
 falls when `cx, cy` are freed, the growth was never distortion and a distortion model fitted first
 would have absorbed the error into the wrong term and looked like it worked.
 
+### Tested the same day — and the hypothesis is refuted
+
+`scripts/bench_principal_point.py`, 60 frames, ~19 000 paint residuals. It patches
+`fit_rigid_camera.kmat` so the principal point becomes a held constant and *everything else is
+refitted* at each candidate — the fit itself is byte-identical.
+
+**`cy` carries no information.** Swept ±900 px, wider than the image is tall:
+
+| cy | −360 | −60 | 240 | **540** | 840 | 1140 | 1440 |
+|---|---|---|---|---|---|---|---|
+| paint px | 1.443 | 1.440 | 1.426 | **1.420** | 1.415 | 1.418 | 1.425 |
+
+A 2 % spread. The vertical principal point is simply unidentifiable from this data.
+
+**`cx` has a minimum, and it is in an impossible place.**
+
+| cx | 60 | 360 | 660 | **960** | 1260 | 1560 | 1860 |
+|---|---|---|---|---|---|---|---|
+| paint px | 2.068 | 1.799 | 1.615 | **1.420** | 1.211 | **1.053** | 1.061 |
+| focal px | 4318 | 4263 | 4219 | **4180** | 4148 | 4126 | 4099 |
+
+The optimum sits at **+600 px — 81 % of the way across a 1920-wide frame** — and the focal walks
+with it monotonically over the whole sweep. That is a valley in *(cx, focal)*, not a measurement of
+where the lens axis is. (The earlier ±60 grid showed only monotone improvement and no minimum,
+which is the same fact seen through too small a window.)
+
+### And the growth it was invoked to explain is not radial
+
+The decisive control was the cheapest one and I added it late. Binning the same residuals by each
+axis separately instead of by radius:
+
+| | | | | |
+|---|---|---|---|---|
+| `\|u−cx\|` | 0–235: **1.17** | 235–470: 1.09 | 470–705: 1.21 | 705–939: **2.54** |
+| `\|v−cy\|` | 0–114: **1.12** | 114–228: **2.54** | 228–341: 1.26 | 341–455: **1.08** |
+
+`|v−cy|` peaks in the *second* bin and then **falls** toward the edge. **No lens does that.** The
+apparent centre-to-edge rise (0.75 → 2.97 px) is one localised band of bad paint that radial
+binning smears into a slope.
+
+### Which redirects #140's open item
+
+Both residuals, on the same camera (`fx = 4169`, `plane_fit`, `res896_rigid.json`):
+
+| radius | paint (pitch lines vs painted pixels) | overlay (subject root vs box) |
+|---|---|---|
+| inner | 0.75 | 6.2 |
+| … | 1.44 / 1.02 / 1.45 | 5.4 / 8.2 |
+| outer | **2.97** | **15.7** |
+
+The paint *is* the camera measured on the ground plane, and at the outer radius it is **2.97 px
+while the overlay reads 15.7**. A camera that draws the pitch to 3 px cannot displace a player by
+16 px at the same place. And `bench_overlay_residual`'s own split says the same thing:
+**scatter 9.9 px against common-mode 5.9 px** — per-player spread, which its legend attributes to
+*grounding or association*, not to a shared camera error.
+
+**So the remaining centre-to-edge growth is most likely not distortion and not the lens.** Three
+independent reasons: the paint is five times better at the same radius, the paint's own growth is
+not radial, and the overlay's error is dominated by scatter rather than common mode. The next
+instrument is the grounding path, not a distortion model.
+
 ## 5. For camlab specifically — a capability that cannot land
 
 `docs/camlab-spec.md` §5.4 specifies the numeric panel as *«`X Y Z` (м), `yaw / pitch / roll` (°),

@@ -167,9 +167,19 @@ reached a committed file.
 **The principal point is assumed, not measured — and it is written out as if it were.**
 `fit_rigid_camera.kmat()` hardcodes `cx, cy = W/2, H/2`, and `apply_rigid_camera.py:138` writes
 that into every scene's `CameraIntrinsics` beside a genuinely fitted focal. PnLCalib *returns* a
-`principal_point`; the fit that consumes its output drops it. Any residual that grows toward the
-image edge has this as a candidate cause before distortion does.
+`principal_point`; the fit that consumes its output drops it.
+· **Measured 2026-08-10 and it is not identifiable here, so do not free it:** `cy` is flat over
+±900 px (1.415–1.443 px) and `cx`'s minimum sits at **+600 px, 81 % across the frame**, with the
+focal walking monotonically alongside it — a valley in *(cx, focal)*, not a measurement.
 · [`camera-parameters-dropped-2026-08-10.md`](camera-parameters-dropped-2026-08-10.md)
+
+**Radial binning invents a slope out of a localised band.**
+The paint residual read 0.75 → 2.97 px centre-to-edge and looked like a lens. Binned by each axis
+instead, `|v−cy|` goes 1.12 / **2.54** / 1.26 / **1.08** — it peaks near the middle and falls
+toward the edge, which no lens can do. Before attributing a centre-to-edge rise to optics, bin
+`|u−cx|` and `|v−cy|` separately; it costs one extra loop.
+· And when sweeping a parameter that the radius is measured *from*, the slope is not comparable
+between candidates — moving the centre re-bins the samples and flattens a profile for free.
 
 **The render camera cannot roll, and has no `cx`/`cy` or `fov_y`.**
 `core/scene/cameras.py` builds its basis as `right = cross(fwd, world_up)`, so the horizon is
