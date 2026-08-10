@@ -120,8 +120,82 @@ and it lands somewhere we have already cut twice:
   new weights, no fork of a validated tracker.
 
 So the honest description of SMP's cost for us is **a probe at an existing seam**, not an
-integration. That is a materially different item from the one §8 listed, and it is now the
-cheapest thing on the list that has not already been measured null.
+integration. That is a materially different item from the one §8 listed.
+
+> **Wrong, and corrected within the hour of writing it.** This paragraph originally ended *"and it
+> is now the cheapest thing on the list that has not already been measured null."* **It had already
+> been measured.** `scripts/bench_assignment_margin.py` exists, `docs/STATUS.md` **W5** carries the
+> verdict, and I wrote a landmine about exactly this failure mode **one commit earlier** in this
+> same session. Seventh recorded instance of #141, and mine. The numbers are below; they change the
+> item's position again, and not in the direction I claimed.
+
+### It is measured, and the premise splits in two
+
+Re-run today, `PYTHONPATH=src .venv/bin/python scripts/bench_assignment_margin.py` — 62 tracklets,
+235 cost matrices, 78 mid-pitch identity events:
+
+**Per frame the margin is worthless.** Against a random trigger drawn to the same size, 200 draws:
+
+| margin < | rows fired | of all rows | event frames hit | random would hit | lift |
+|---|---|---|---|---|---|
+| 0.02 | 37 | 0.4 % | 11/65 | 10.0 | 1.10× |
+| 0.05 | 91 | 1.0 % | 22/65 | 22.0 | **1.00×** |
+| 0.10 | 200 | 2.3 % | 34/65 | 38.6 | 0.88× |
+| 0.20 | 566 | 6.4 % | 52/65 | 60.4 | 0.86× |
+| 0.40 | 1012 | 11.4 % | 60/65 | 64.5 | 0.93× |
+
+The reason is in the null: **73 % of rows already sit within ±2 frames of an event.** On a frame
+holding 22 players something is always ambiguous, so "was this frame ambiguous" carries no
+information.
+
+**Per track it is strong.** The sharper question — was the *breaking track's own row* ambiguous —
+separates cleanly:
+
+| | n | p10 | p25 | median |
+|---|---|---|---|---|
+| breaking tracks | 49 | 0.021 | 0.072 | **0.127** |
+| every (frame, track) | 4580 | 0.162 | 0.502 | **0.739** |
+
+| margin < | catches of breaking tracks | rows fired | lift |
+|---|---|---|---|
+| 0.05 | 22.4 % | 2.0 % | **11.30×** |
+| 0.10 | 30.6 % | 4.4 % | 7.01× |
+| 0.20 | **65.3 %** | 12.3 % | **5.32×** |
+| 0.40 | 85.7 % | 21.1 % | 4.06× |
+
+So the dispatch signal is real: firing on 12 % of the work catches two thirds of the breaks. On our
+measured Cutie cost that is **686 s GPU → ~85 s**, 4.2 h CPU → ~30 min.
+
+### Two limits the probe names itself
+
+- **It is blind to births.** 29 of 78 events had no recorded row for that track at all — a birth has
+  no prior row to be ambiguous in. The probe takes `np.partition(a, 1, axis=1)`, i.e. best and
+  second-best **per row = per track**. The symmetric **column** margin — per *detection* — is the
+  birth-side signal and has never been measured. That is a ~10-line change to the same probe and it
+  would say whether SMP's trigger can see 37 % of our events at all.
+- **W5's verdict is "cost, not quality", and on its own terms it is right.** The thing being
+  dispatched is our mask cue, whose measured ceiling is **14 %** (mid-pitch events 28 → 24 against
+  a 96 % availability ceiling). Running a 14 % cue 5× more cheaply buys compute, not output.
+
+### Where I think W5 is nonetheless incomplete
+
+W5 assumes the propagation is unchanged and only its *frequency* moves. SMP as published also
+changes **when the mask is seeded**, and seeding is the diagnosed cause of our cue's weakness.
+`human-physics-requirement-2026-08-06.md`, on why 14 % and not McByte's own margin:
+
+> *"masks are seeded from pass-1 tracks, which are the broken ones. A track already sitting on the
+> wrong player propagates a mask that follows the wrong player and then confidently confirms the
+> wrong pairing. McByte is online precisely because its masks are seeded as tracks are born."*
+
+Its own fix list, item 3: *"Go online: seed each track at birth inside the association loop."*
+**Firing the VOS at the ambiguous moment, from inside the association loop, is that item** — the
+mask is seeded from a track that was still good a frame ago, not from a completed pass whose tracks
+are already wrong.
+
+So the open question is not "is the dispatch signal real" (measured: yes, 5.3×) nor "does it save
+compute" (measured: yes, ~5×). It is **whether online seeding lifts the 14 % ceiling**, which
+neither W5 nor this doc has measured, and which is the only reason to build SMP rather than shelve
+it. That is a different experiment from the one already run, and it needs the GPU pass W5 avoided.
 
 Your calibration numbers are taken and are the right ones to hold it to: GTA over the same
 Deep-EIoU is 81.0 HOTA against SAM3-Deep-EIoU's 87.2, so the delta attributable to selective
@@ -163,7 +237,17 @@ that way.
 
 ---
 
-**Net effect on §8's order:** unchanged at the top (GTA-Link first, MIT, lowest friction), but item
-2 (SMP) is cheaper than listed — a probe on `_patch_matching`, not an integration — and item 3
-(expansion IoU at 1.4) is now explicitly kept for **seam safety only** (max seam 25.7 → 14.5 px/f),
-with its identity claim carrying the power caveat rather than a verdict.
+**Net effect on §8's order:** unchanged at the top (GTA-Link first, MIT, lowest friction). Item 2
+(SMP) is **already measured** — the dispatch signal is real per track (5.3× lift at 12 % of the
+work) and buys ~5× compute on a cue whose ceiling is 14 %, so W5 shelved it correctly *as a cost
+optimisation*. What is unmeasured is whether firing inside the association loop also fixes the
+seeding that caused the 14 %. Item 3 (expansion IoU at 1.4) is kept for **seam safety only**
+(max seam 25.7 → 14.5 px/f), with its identity claim carrying the power caveat rather than a
+verdict.
+
+**And the process note, since it is now the seventh instance.** I wrote the landmine *"quote a
+findings doc by commit hash — ours get corrected within the hour"* in commit `4258b16`, and in the
+commit **before** it asserted that SMP was unmeasured while `bench_assignment_margin.py` sat in
+`scripts/` and its verdict sat in `STATUS.md` line 67. The landmine addresses documents leaving the
+repo. It does not address **the repo's own status board not being read before a claim about what
+is unmeasured.** That is a different hole and it is the one that caught me.

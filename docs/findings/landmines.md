@@ -175,6 +175,15 @@ of its four objections on text the doc already contained. #141 in its purest for
 did not reach the reader.
 · **Check:** cite `path@hash` when a doc leaves this repo in a message.
 
+**Before writing "this has not been measured", grep `STATUS.md` and `scripts/`.**
+An hour after adding the landmine above, I wrote that selective mask propagation was *"the cheapest
+thing on the list that has not already been measured null"* — while `scripts/bench_assignment_margin.py`
+sat in the tree and `STATUS.md` **W5** carried its verdict (per-frame lift 0.86–1.10×, per-track
+5.32×, shelved as *cost, not quality*). Seventh instance of #141. The doc-hash rule covers documents
+leaving the repo; it does not cover **not reading our own board before a claim about what is
+unknown**.
+· **Check:** `grep -n "<topic>" docs/STATUS.md && ls scripts/ | grep -i <topic>` — two commands.
+
 ## Pipeline wiring
 
 **Two reconstruction entry points apply different fixes.**
