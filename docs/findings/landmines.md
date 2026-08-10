@@ -67,6 +67,17 @@ the same code. The difference is **translation** — WorldPose GT says broadcast
 per-frame effect. Positions survive (the pitch is a plane); a novel view does not exist.
 · [`architecture-brief-2026-08-09.md`](architecture-brief-2026-08-09.md)
 
+**A crop moves the principal point, and nothing here accounts for it.**
+The optical axis stays where the lens put it; the crop moves the image around it. Cutting
+`1080x608+0+1294` out of a 1080x1920 clip puts the axis at `cy = 1920/2 - 1294 = -334` — 638 px
+above the crop, further than the crop is tall — while `camera_from_calibration` takes `cx, cy` as
+the centre of whatever size it is handed. **Measured, not reasoned:** sweeping `cy` through
+image-to-image SIFT homographies, which know nothing about any crop, puts the minimum at
+**-334.0**, the arithmetic value to the decimal, against **2.4x worse** at the crop centre, in an
+instrument precise to 0.05. Every `--crop auto` run carries this.
+· **Check:** `source_height/2 - crop_y`, and compare with the `height/2` the fit was given.
+· **Live here.** Fixed in camlab (`ClipInfo.principal_point`); found while scoping M2 there.
+
 **`--crop auto` moves the homographies into the crop rect; the camera fit is still told the full
 frame size.** `cli.py` does `replace(_c, crop=_fr.rect)` and leaves `ClipRef.width/height` at the
 source size. Every adapter decodes through the crop (`adapters/io/frames.py:iter_clip_frames`), so
