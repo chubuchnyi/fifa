@@ -164,6 +164,19 @@ reached a committed file.
 · **Check:** point any colour threshold at a whole frame before trusting it.
 · Fixed, 15 tests (`classify_kit`, grass rejected before the median).
 
+**The principal point is assumed, not measured — and it is written out as if it were.**
+`fit_rigid_camera.kmat()` hardcodes `cx, cy = W/2, H/2`, and `apply_rigid_camera.py:138` writes
+that into every scene's `CameraIntrinsics` beside a genuinely fitted focal. PnLCalib *returns* a
+`principal_point`; the fit that consumes its output drops it. Any residual that grows toward the
+image edge has this as a candidate cause before distortion does.
+· [`camera-parameters-dropped-2026-08-10.md`](camera-parameters-dropped-2026-08-10.md)
+
+**The render camera cannot roll, and has no `cx`/`cy` or `fov_y`.**
+`core/scene/cameras.py` builds its basis as `right = cross(fwd, world_up)`, so the horizon is
+always level and there is no field a roll could live in. `blender_animate.py` sets
+`sensor_fit = "HORIZONTAL"`, so the vertical angle is a consequence of the render aspect. camlab's
+panel offers `roll` — it would be silently dropped downstream.
+
 **Swim measures temporal consistency, not accuracy.**
 The bench says so itself: an anchor displaced 10 m scores `swim 0.0000 m`. A calibration can be
 perfectly smooth and uniformly wrong.
