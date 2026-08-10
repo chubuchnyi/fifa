@@ -139,7 +139,39 @@ the family is mutually incompatible with any single camera (471 px). Not noise �
 Smoothing cannot fix it; constraining the solve can.
 · [`reply-swim-2026-08-09.md`](reply-swim-2026-08-09.md)
 
+**PnLCalib squashes any clip that is not 16:9, and the resize is unconditional.**
+`pnlcalib_backend.py:117` resizes whenever the width is not 960, and `:323` is
+`Resize((540, 960))` — a *fixed* size, not a scale. The current probe clip is 1080×1920
+portrait, so it reaches the net at 0.5× across and 0.28× down, an anamorphic squash it was
+never trained on. This is the same shape as the 560×560 pose-crop defect.
+· **Check:** letterbox to 16:9 before the resize, or measure on a 16:9 clip and say so.
+
+**PnLCalib computes a dense pitch-line map every frame and throws it away.**
+`pnlcalib_backend.py:124` is `get_line(heatmaps_l[:, :-1, :, :])`. The 23 kept channels are
+*not* dense lines — each is two Gaussian blobs at one segment's endpoints. Channel 24, the one
+being dropped, is the only dense pixelwise line map, already paid for. It carries no class
+labels (all 23 classes are summed into it), so it needs the world table to label it.
+
+**PnLCalib is GPL-2.0, version 2 only, and this repo is public.**
+Verified from the licence text, not the GitHub badge. It is imported by dotted path from
+`$PNLCALIB_REPO` and never vendored, which is the mitigation — **keep it that way.** Do not
+vendor it, do not copy code out of it. Separately, every calibration weight in this stack is
+SoccerNet-trained, and SoccerNet is research-only: *"Can I use the data from SoccerNet for
+commercial purposes? A: No."*
+
+**SoccerNet's class `'Goal left post left '` has a trailing space.**
+In the code, the README and every derived dict. A `.strip()`-normalising parser deletes the
+class silently. Our `pitch_plane_line_segments()` sidesteps it by carrying only the 17 straight
+plane lines; anything keying all 28 will hit it.
+
 ## Metrics quoted outside their window
+
+**Distance to a *sampled* model is not distance to the model.**
+`bench_markings_vs_camera.py` first scored detected lines against `pitch_polylines`' 0.5 m
+samples — tens of pixels apart in the near field — and charged a line up to half a sample
+spacing for lying exactly on the model. It read **precision 2.3 % against recall 92 %**, an
+impossible pair, which is the only reason it was caught. Rasterise and distance-transform the
+model side. Same family as "radial binning invents slopes".
 
 **`jitter` from `smooth_residual` is honest to about 2 seconds.**
 It fits a cubic across the whole span. The same clip reads **6.42 px over 60 frames** and
