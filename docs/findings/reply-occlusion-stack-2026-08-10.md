@@ -251,32 +251,49 @@ preprint, unreproduced. Worth a probe; not worth a plan.
 > *"Every move is about getting around 28 px. None attacks the pixel itself … on a portrait phone
 > clip this may cost less than everything else on the list."*
 
-That is §8a, written the same day, and it went further than proposing it. RF-DETR at
-**560 / 728 / 896 / 1064**, 60 frames of **both** clips including the portrait fan clip, on
-`demorig`:
+**You are right, and it is the strongest item in this entire exchange.** I first answered that §8a
+had measured it and retracted it — *"+0.9 players/frame, about 5 %, the default stays 560"*. That
+retraction was itself wrong, was corrected in this repo on **2026-08-08**, two days before I quoted
+it, and I quoted it anyway from a findings doc that `STATUS.md` had already superseded.
 
-| floor | gain | cost |
+The error in it was scoring a **tracking** intervention with a **detection** metric. "Players found
+per frame" says nothing about whether the boxes that already existed stay attached to the same
+person. Re-measured on mid-pitch identity events, 236 frames, both clips:
+
+| RF-DETR square | broadcast events | fan-clip events |
 |---|---|---|
-| 0.3 (the adapter's) | **+0.9 players/frame on both clips (~5 %)** — broadcast 19.1 → 19.9, fan 15.1 → 16.0 | 1.5–2× the time |
-| 0.1 | +18 % | which is the band we had already measured worthless downstream (doubling detections moved churn 26 → 28) |
+| 560 (the old default) | 89 | 90 |
+| **896** | **61** | **58** |
+| 1064 | 66 | 65 |
+| 1288 | 73 | 75 |
+| 1512 | **97** | — |
 
-Median box height does not grow; the extra finds are smaller, more distant people. **The default
-stays 560.** §8a also already separates GTATrack's 0.380 → 0.491 as coming from **small-target
-pseudo-labelling**, with 1280 px as the carrier — the resolution alone is measured here, and the
-resolution alone is not it.
+**−31 % and −36 %** for 1.5× the detector, raw tracklets 70 → 56 and 76 → 54. And it is a tuned
+optimum rather than "more is better": at 1512 the detector finds more boxes than at 560 and makes
+*more* identity errors. The value is a property of the clip, so it now lives in
+`config/detector_resolution.yaml` keyed by clip name (`--detector-resolution` overrides).
 
-**And there is a structural reason it was never going to move your wall.** RF-DETR's resize caps
-**detection**; it does not touch the crop. The 573 px of shirt is cut from the **original** frame
-at 28 × 72 regardless of what the detector ran at. Two different bottlenecks:
+Put against everything else this document measured:
+
+| intervention | identity events |
+|---|---|
+| **detector square 560 → 896** | **−31 % / −36 %** |
+| McByte mask cue (686 s GPU/pass) | −14 % (28 → 24) |
+| expansion IoU at any scale | 0 after stitching |
+| detector score threshold 0.30 → 0.10 | 0 (26 → 28, worse) |
+
+**Attacking the pixel is the largest identity win measured in this repo, and it is also the
+cheapest.** Your closing paragraph was the right call and the rest of the list was not.
+
+**One boundary that does still hold.** RF-DETR's resize caps **detection**; it does not touch the
+crop. The 573 px of shirt is cut from the **original** frame at 28 × 72 whatever the detector ran
+at. So the resolution knob buys *association* and leaves the *identity* wall exactly where §4 put
+it:
 
 | bottleneck | set by | movable by detector resolution |
 |---|---|---|
-| can the net *find* the player | 560² square resize | yes — measured, +5 % |
-| how much shirt the ReID/pose crop *contains* | source resolution, 28 × 72 | **no** |
-
-So "attack the pixel" is right as an instinct and has exactly one lever, and it is not ours: the
-source resolution of the footage. At 28 px the shirt is 573 pixels because the phone recorded it
-that way.
+| can the net find and hold the player | the square resize | **yes — 31–36 % of identity events** |
+| how much shirt the ReID crop contains | source resolution, 28 × 72 | **no** |
 
 ---
 

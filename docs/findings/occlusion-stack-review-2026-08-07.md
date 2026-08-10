@@ -251,9 +251,37 @@ worthless downstream (doubling detections there moved churn 26 → 28). Median b
 grow; the extra finds are smaller, more distant people, and there are few of them. **The default
 stays 560.** Full table and the honest retraction: [`../work-plan-2026-08.md`](../work-plan-2026-08.md) §W1.
 
+> ### ⚠ The paragraph above is wrong, and this section's conclusion reverses
+>
+> **Corrected 2026-08-08 (W1), re-checked 2026-08-10.** *"The payoff is not there"* was measured on
+> the wrong quantity — **players found per frame**, which is a detection statistic. Re-measured on
+> the thing this document is about, **mid-pitch identity events**, over 236 frames of both clips:
+>
+> | RF-DETR square | broadcast events | fan-clip events |
+> |---|---|---|
+> | 560 (the old default) | 89 | 90 |
+> | **896** | **61** | **58** |
+> | 1064 | 66 | 65 |
+> | 1288 | 73 | 75 |
+> | 1512 | 97 | — |
+>
+> **−31 % and −36 %**, for 1.5× the detector. Raw tracklets fall 70 → 56 and 76 → 54. And going
+> higher is *worse*: at 1512 the detector finds more boxes than at 560 and makes more identity
+> errors (97 vs 89), so this is a tuned optimum, not "more pixels are better".
+>
+> That makes **560 → 896 the largest identity improvement measured in this repo** — against the
+> mask cue's −14 % (28 → 24) and expansion IoU's zero. The best value is a property of the clip, so
+> it lives in `config/detector_resolution.yaml` keyed by clip name; override with
+> `--detector-resolution`.
+>
+> **So §8a's own instinct — attack the pixel — was right, and the retraction was the error.** What
+> misled it was scoring a *tracking* intervention with a *detection* metric: +5 % more boxes says
+> nothing about whether the boxes that already existed stay attached to the same person.
+
 This also separates two things this section had conflated: GTATrack's 0.380 → 0.491 came from
 **pseudo-labelling the detector on small targets**, with 1280 px input as the carrier. The
-resolution alone is measured here, and the resolution alone is not it.
+resolution alone is measured here — and, corrected above, the resolution alone **is** worth 31–36 %
+of our identity events even without the pseudo-labelling.
 
 ## 9. For social footage specifically — the honest part
 

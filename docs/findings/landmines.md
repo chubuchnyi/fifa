@@ -198,6 +198,21 @@ of its four objections on text the doc already contained. #141 in its purest for
 did not reach the reader.
 · **Check:** cite `path@hash` when a doc leaves this repo in a message.
 
+**A findings doc does not know it has been superseded — `STATUS.md` is the current state.**
+`occlusion-stack-review-2026-08-07.md` §8a says the detector-resolution knob was measured null and
+*"the default stays 560"*. It was re-measured on **2026-08-08** against identity instead of
+detection count, the conclusion **reversed** (896 beats 560 by 31–36 % of mid-pitch events), and
+the default moved into `config/detector_resolution.yaml` — while the findings doc kept its
+original sentence. I quoted that sentence to an outside reviewer two days after it stopped being
+true.
+· **Check:** before quoting a number out of `docs/findings/`, grep `STATUS.md` for the same topic.
+Findings are dated evidence; STATUS is the verdict.
+
+**Scoring a tracking change with a detection metric will retract a real win.**
+The same episode: "players found per frame" moved +5 % and the knob was dropped. Mid-pitch identity
+events moved −31 %. More boxes says nothing about whether the boxes already there stay on the same
+person.
+
 **Before writing "this has not been measured", grep `STATUS.md` and `scripts/`.**
 An hour after adding the landmine above, I wrote that selective mask propagation was *"the cheapest
 thing on the list that has not already been measured null"* — while `scripts/bench_assignment_margin.py`
