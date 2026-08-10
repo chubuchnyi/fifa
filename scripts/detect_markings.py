@@ -120,6 +120,14 @@ NET_WINDOW = 31
 NET_DENSITY = 90
 NET_GROW = 41
 
+#: A goal is small. If the "mesh" covers more of the frame than this, the ridge mask is noisy
+#: and the density test is measuring that noise, not a net -- so the filter refuses to act
+#: rather than delete the frame's markings. Measured over the nine sample clips: every clip
+#: the detector handles has a core of 0.00-0.75 % of frame, while the two it fails on read
+#: **12.3 % and 39.3 %**. Without this ceiling those two lost their only surviving segment to
+#: a "goal" covering 26 % and 43 % of the frame. 3 % is 4x the worst honest case.
+NET_MAX_FRAME = 0.03
+
 
 def _angle(seg: np.ndarray) -> np.ndarray:
     return np.degrees(np.arctan2(seg[:, 3] - seg[:, 1], seg[:, 2] - seg[:, 0])) % 180.0
@@ -170,8 +178,11 @@ def goal_mask(dist: np.ndarray) -> np.ndarray:
     """The goal structure: mesh density, grown to reach the posts and crossbar that bound it."""
     ridge = (dist == 0).astype(np.uint8)
     dens = cv2.boxFilter(ridge, -1, (NET_WINDOW, NET_WINDOW), normalize=False)
+    core = (dens > NET_DENSITY).astype(np.uint8)
+    if core.mean() > NET_MAX_FRAME:
+        return np.zeros_like(core)  # not a goal -- a noisy ridge mask. Refuse, do not delete.
     grow = np.ones((NET_GROW, NET_GROW), np.uint8)
-    return cv2.dilate((dens > NET_DENSITY).astype(np.uint8), grow)
+    return cv2.dilate(core, grow)
 
 
 def _on_mask(seg: np.ndarray, mask: np.ndarray) -> bool:
