@@ -54,6 +54,38 @@ contiguous 2 s block (f272-330) plus three short ones, all of them the goalmouth
 after the goal, where the playing surface drops from 51 % of the frame to 31 % and no marking
 is long enough to see. A detector that reported markings there would be inventing them.
 
+## Where this does not work
+
+Run against all nine sample clips, seven of which it was never tuned on. **It handles 5 of
+9**, and the two it was tuned on are both floodlit night matches:
+
+| clip | med. markings | frames with >=4 | verdict |
+|---|---|---|---|
+| 14604731 portrait *(tuned)* | 10 | 100 % | works |
+| 14604680 portrait | 9 | 100 % | works |
+| 14604660 portrait | 7 | 100 % | works |
+| 13386302 4K overhead | 26 | 75 % | works |
+| Colombia broadcast *(tuned)* | 10 | 67 % | works |
+| 11710897 daylight amateur | 0 | 0 % | **fails** |
+| 15449383 daylight stadium | 0 | 0 % | **fails** |
+| 15449387 daylight stadium | 1 | 0 % | **fails** |
+| 15750079 daylight amateur | 0 | 0 % | **fails** |
+
+The four failures are all daylight, and the failure is **upstream of anything in this
+file** — in `pitch_evidence._masks`. Two different shapes:
+
+- **fragmentation** (11710897): the paint mask is a healthy 8941 ridge px, the same as the
+  working fan clip's 8955, but the longest LSD segment is **50 px** against a 60 px floor.
+  The ridge arrives dotted, so no long line ever forms.
+- **noise** (15750079): **460 587** ridge px, 50x normal — 55 530 per megapixel against
+  3 384-8 744 on every clip that works. The mask is measuring turf texture, not paint, and
+  LSD cannot find a line in it.
+
+So `ridge px per megapixel` is a usable health signal: above ~10 000 the paint stage has
+failed and the output will be empty or nonsense, whatever this file does. Fixing those
+clips means the ridge filter's constants (`_RIDGE_CONTRAST`, `_RIDGE_MIN_V`, the hue band),
+which are tuned for floodlit night and are not touched here.
+
 Run:
     .venv/bin/python scripts/detect_markings.py --clip samples/video/<clip>.mp4 \
         --out out/markings.mp4 --json out/markings.json
