@@ -19,9 +19,27 @@ Three stages, each measured on two clips (broadcast 1920x1080, fan-phone portrai
                 3-8 %, because floodlit grass texture is full of short ridges. A marking is
                 long. The goal net is the clearest case -- the frame inside the net yields
                 1080 LSD segments and *not one* is 80 px long, so the length floor deletes it
-                whole while keeping every real marking.
+                whole while keeping every real marking. What length does not catch is the goal
+                *frame* -- posts and crossbar are genuinely long and straight -- so those go by
+                mesh density instead: a net puts a few hundred ridge pixels into a 31x31
+                window where a painted line puts about 28, and dilating that region reaches
+                the frame that bounds it. Worth 1.8 % of segments on both clips.
   3. carry      frames with no evidence keep the last measured markings, warped by pixel
                 motion, and are drawn dimmed and labelled. R-6: marked, never hidden.
+
+**There is no arc or circle detection here, and that is a deletion, not an omission.** A first
+version fitted ellipses to the ridge blobs the straight segments left over. Measured: **67
+ellipses on the fan clip and 0 on the broadcast clip** -- exactly backwards, because the fan
+clip is a goalmouth view with no centre circle in shot while the broadcast clip shows both the
+circle and a penalty D. Every one of the 67 was net mesh or a goalkeeper: median major axis
+**85 px, max 127**, where a real centre circle at this camera is many hundreds of pixels
+across. Recall 0, precision 0.
+
+It is not a threshold that was wrong, it is the shape of the algorithm. It looked for one big
+curved connected component, and a real arc never is one: players break it and the ridge spine
+is dotted, so it arrives as short, locally *straight* fragments -- which the straightness test
+then rejects on purpose. Detecting arcs properly means grouping fragments across gaps and
+fitting a conic to the group. That is a different algorithm and it is not written.
 
 **Coverage is not 100 % and the honest answer is that it should not be.** Measured over every
 frame of both clips:
@@ -83,13 +101,15 @@ MERGE_ANGLE_DEG = 4.0
 MERGE_OFFSET_PX = 6.0
 MERGE_MAX_GAP_PX = 40.0
 
-#: Leftover ridge blobs that are big, curved and *wide* are the centre circle or a penalty
-#: arc. Straightness is the thinness of the blob's own covariance. The size floors are what
-#: keep the goal net out: its mesh leaves large connected components, but none of them spans
-#: a circle's worth of frame.
-ARC_MIN_PX = 400
-ARC_MAX_STRAIGHTNESS = 0.95
-ARC_MIN_SPAN_PX = 90.0
+#: The goal is a mesh and the markings are not. A net puts a few hundred ridge pixels into a
+#: 31x31 window; an ordinary painted line puts about 28. Dilating that region reaches the
+#: posts and crossbar, which are not themselves mesh but bound it.
+#: This is the only cue here that does not need a camera. The honest alternative -- "the goal
+#: frame is above the ground plane" -- is unavailable by construction: this script never forms
+#: a camera, so it cannot ask what is on the plane.
+NET_WINDOW = 31
+NET_DENSITY = 90
+NET_GROW = 41
 
 
 def _angle(seg: np.ndarray) -> np.ndarray:
@@ -137,27 +157,21 @@ def merge_collinear(segs: np.ndarray) -> np.ndarray:
     return np.array(out)
 
 
-def find_arcs(band: np.ndarray, segs: np.ndarray) -> list[np.ndarray]:
-    """Ellipses fitted to ridge blobs that the straight segments do not explain."""
-    left = band.copy()
-    for x1, y1, x2, y2 in segs:
-        cv2.line(left, (int(x1), int(y1)), (int(x2), int(y2)), 0, 9)
-    count, labels, stats, _ = cv2.connectedComponentsWithStats(left, 8)
-    arcs = []
-    for k in range(1, count):
-        if stats[k, cv2.CC_STAT_AREA] < ARC_MIN_PX or stats[k, cv2.CC_STAT_WIDTH] < ARC_MIN_SPAN_PX:
-            continue
-        pts = np.argwhere(labels == k)[:, ::-1].astype(np.float32)
-        if len(pts) < 5:
-            continue
-        ev = np.linalg.eigvalsh(np.cov(pts.T))
-        if ev[1] <= 0 or np.sqrt(max(ev[1] - ev[0], 0) / ev[1]) > ARC_MAX_STRAIGHTNESS:
-            continue  # a straight leftover, not an arc
-        centre, axes, rot = cv2.fitEllipse(pts)
-        if min(axes) < ARC_MIN_SPAN_PX / 3.0:
-            continue  # a sliver the ellipse fitter collapsed onto -- net mesh, not a circle
-        arcs.append((centre, axes, rot))
-    return arcs
+def goal_mask(dist: np.ndarray) -> np.ndarray:
+    """The goal structure: mesh density, grown to reach the posts and crossbar that bound it."""
+    ridge = (dist == 0).astype(np.uint8)
+    dens = cv2.boxFilter(ridge, -1, (NET_WINDOW, NET_WINDOW), normalize=False)
+    grow = np.ones((NET_GROW, NET_GROW), np.uint8)
+    return cv2.dilate((dens > NET_DENSITY).astype(np.uint8), grow)
+
+
+def _on_mask(seg: np.ndarray, mask: np.ndarray) -> bool:
+    """Does most of this segment lie inside ``mask``?"""
+    t = np.linspace(0.0, 1.0, 24)[:, None]
+    along = seg[:2] * (1 - t) + seg[2:] * t
+    uu = np.clip(np.rint(along[:, 0]).astype(int), 0, mask.shape[1] - 1)
+    vv = np.clip(np.rint(along[:, 1]).astype(int), 0, mask.shape[0] - 1)
+    return bool(mask[vv, uu].mean() >= 0.5)
 
 
 def detect(bgr: np.ndarray, lsd: cv2.LineSegmentDetector) -> dict:
@@ -168,13 +182,19 @@ def detect(bgr: np.ndarray, lsd: cv2.LineSegmentDetector) -> dict:
     raw = np.zeros((0, 4)) if raw is None else raw.reshape(-1, 4)
     long_enough = raw[np.hypot(raw[:, 2] - raw[:, 0], raw[:, 3] - raw[:, 1]) >= MIN_LEN_PX]
     segs = merge_collinear(long_enough)
+    if len(segs):
+        goal = goal_mask(dist)
+        keep = np.array([not _on_mask(s, goal) for s in segs])
+        segs, dropped = segs[keep], int((~keep).sum())
+    else:
+        dropped = 0
     ang = _angle(segs) if len(segs) else np.zeros(0)
     return {
         "segments": segs,
-        "arcs": find_arcs(band, segs) if len(segs) else [],
         "families": int(len(np.unique((ang // 15).astype(int)))),
         "surface": float((surface > 0).mean()),
         "raw_segments": int(len(raw)),
+        "on_goal": dropped,
     }
 
 
@@ -206,9 +226,6 @@ def draw(bgr: np.ndarray, det: dict, carried: bool) -> np.ndarray:
     thick = 2 if carried else 3
     for x1, y1, x2, y2 in det["segments"]:
         cv2.line(out, (int(x1), int(y1)), (int(x2), int(y2)), colour, thick, cv2.LINE_AA)
-    for centre, axes, rot in det.get("arcs", []):
-        cv2.ellipse(out, tuple(map(int, centre)), (int(axes[0] / 2), int(axes[1] / 2)),
-                    rot, 0, 360, colour, thick, cv2.LINE_AA)
     n = len(det["segments"])
     if carried:
         txt = f"carried {n} markings - no evidence this frame"
@@ -262,7 +279,7 @@ def main() -> int:
         elif last is not None and not args.no_carry and prev_gray is not None:
             h = motion(prev_gray, gray)
             if h is not None:
-                last = {**last, "segments": warp_segments(last["segments"], h), "arcs": []}
+                last = {**last, "segments": warp_segments(last["segments"], h)}
                 det, carried = last, True
                 carried_n += 1
             else:

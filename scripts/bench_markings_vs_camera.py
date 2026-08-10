@@ -38,7 +38,7 @@ from poseannot.pitch_evidence import _masks  # noqa: E402
 from poseannot.video import read_frame  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from detect_markings import MIN_LEN_PX, merge_collinear  # noqa: E402
+from detect_markings import detect  # noqa: E402
 
 #: A detected segment is explained by the model if its midpoint and both ends sit this close
 #: to a projected marking. Wide enough to absorb the 12 cm paint width plus the fit's own
@@ -84,12 +84,11 @@ def main() -> int:
     for h, fi in zip(w2i, frames, strict=True):
         bgr = read_frame(args.clip, int(fi))
         hgt, wid = bgr.shape[:2]
+        # detect() and not a copy of its body: a bench that re-implements the thing it scores
+        # silently stops scoring it. This one did -- it went on reading 97.8/100.0 after the
+        # goal-structure filter landed, because the filter was only in detect().
         dist, surface = _masks(bgr)
-        band = (dist <= 1.0).astype(np.uint8) * 255
-        raw = lsd.detect(band)[0]
-        raw = np.zeros((0, 4)) if raw is None else raw.reshape(-1, 4)
-        ln = np.hypot(raw[:, 2] - raw[:, 0], raw[:, 3] - raw[:, 1])
-        segs = merge_collinear(raw[ln >= MIN_LEN_PX])
+        segs = detect(bgr, lsd)["segments"]
 
         # --- where the model says markings are: rasterised, then distance-transformed ---
         canvas = np.zeros((hgt, wid), np.uint8)
