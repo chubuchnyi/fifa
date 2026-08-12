@@ -516,6 +516,16 @@ class ByteTrackBackend:
                     (int(fd.frame), np.asarray(xyxy, dtype=float), id_to_cls[int(cid)])
                 )
 
+        return self._build_tracklets(clip, boxes)
+
+    def _build_tracklets(self, clip, boxes):  # pragma: no cover - heavy path (needs cv2 + media)
+        """``{track id: [(frame, box, cls)]}`` → sampled, sorted :class:`RawTracklet`\\ s.
+
+        Split out of :meth:`_associate_frames` so a second association algorithm reuses the
+        appearance sampling verbatim (:class:`~.botsort_backend.BotSortBackend`). Sharing this
+        is what makes the two backends an A/B of the *association* and nothing else: same
+        detections in, same torso-HSV feature out, one matching step apart.
+        """
         sampled = self._sample_appearance(clip, boxes)
         out: list[RawTracklet] = []
         for tid, seq in sorted(boxes.items()):

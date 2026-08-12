@@ -8,7 +8,10 @@ drove the work, so entries read as "#203 world scale → these files".
 ---
 
 - **Tracking / fragmentation (#202):** `src/pitch3d/adapters/models/tracking.py` (`ByteTrackTracker`,
-  `min_track_frames`, `ByteTrackBackend.associate`), `src/pitch3d/core/orchestration/pipeline.py`
+  `min_track_frames`, `ByteTrackBackend.associate`, `_build_tracklets` — shared assembly),
+  `src/pitch3d/adapters/models/botsort_backend.py` (`BotSortBackend` — BoT-SORT + camera-motion
+  compensation, injected via `--tracker-backend`; A/B'd by `scripts/bench_association.py`),
+  `src/pitch3d/core/orchestration/pipeline.py`
   (`stitch_cfg` gate), `src/pitch3d/core/orchestration/continuity.py` (`StitchConfig`,
   `stitch_tracks_with_report`), `src/pitch3d/core/orchestration/assemble.py` (one Subject per track_id),
   `src/pitch3d/app/cli.py` (`--no-stitch`, `run_dry_run`).

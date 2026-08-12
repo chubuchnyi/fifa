@@ -336,6 +336,14 @@ track it cleaned, so 23 of 27 subjects became universally stitchable.
 Two different frame subsets with the same endpoints and length share a cache key.
 · **Live.**
 
+**ultralytics track ids come off a CLASS-level counter, so a second run continues the first.**
+`BaseTrack._count` is shared by every tracker instance in the process. Constructing a fresh
+`BOTSORT` does not reset it: an A/B in one process gives the two arms disjoint id spaces, and any
+metric that keys on id compares two different numberings. `BotSortBackend.associate` calls
+`BaseTrack.reset_id()` before each run for exactly this reason — do the same in any script that
+drives an ultralytics tracker directly.
+· **Check:** the second arm's lowest track id should be the same as the first arm's.
+
 **The tracker→stitcher path has zero run noise, so a "band" of results is signal, not scatter.**
 Three independent runs of `bench_expansion_iou.py` at `scale=1.0` give **56 / 36 / 14** every time.
 A sweep that wanders 33–38 across parameter values is a deterministic **non-monotonic** response —

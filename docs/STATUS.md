@@ -71,6 +71,37 @@ what the plan assumed:
 | **W14** markings from pixels | **built and measured 2026-08-10** (`scripts/detect_markings.py`). The first thing here that draws markings **without a camera** — everything else projects the pitch model through the solve, so it can only agree with itself. Paint (`pitch_evidence._masks`, reused not re-implemented) → LSD over the ridge band → length floor. **224 ms/frame CPU, no GPU, no weights.** Coverage: **fan portrait 355/355 = 100 % measured**; broadcast 88 % measured + 12 % carried on pixel motion, 0 blind — and that 12 % is a **cut**, one contiguous 2 s goalmouth close-up where the surface drops 51 % → 31 %, not a detector failure. `MIN_LEN_PX` swept with the inside-the-net frame as the false-positive control (1080 LSD segments, all noise): 80 px zeroes the net but costs 25–31 % of real markings, so **60**. `scripts/bench_markings_vs_camera.py` closes the loop `bench_overlay_residual.py`'s header promised and never implemented — over all 60 calibrated frames, **recall 97.8 %, precision 100.0 %, zero unexplained detections**. ⚠ **What is missing is names:** the overlay says "a painted line is here", not "this is the goal line". [findings](findings/markings-from-pixels-2026-08-10.md) |
 | **#141 (new)** PnLCalib | **Three instances found while researching W14, all in our own file.** (1) `pnlcalib_backend.py:124` computes a **dense pitch-line map every frame and throws it away** — `get_line(heatmaps_l[:, :-1, :, :])` drops channel 24, the only dense pixelwise line output; the 23 kept channels are endpoint blobs, not lines. One array slice, zero extra compute, and `core/scene/pitch.py`'s 17-class world table can label it by reprojection. (2) `:323` is `Resize((540, 960))` **regardless of aspect ratio**, so the 1080×1920 portrait probe clip reaches the net anamorphically squashed — 0.5× across, 0.28× down. The 560×560 pose-crop defect again. (3) **PnLCalib is GPL-2.0, version 2 only** (read from the licence text, not the badge) and this repo is public; it is imported by dotted path and never vendored — **keep it that way**. Separately, every calibration weight in the stack is SoccerNet-trained and SoccerNet is research-only. **No permissive dense per-line-class model exists:** the two that are dense (SoccerNet baseline, TVCalib) carry no usable licence, the one that is MIT (soccersegcal) outputs regions not line classes. PnLCalib costs **4.2 s/frame on CPU** against 224 ms for the whole classical stack. [findings §4](findings/markings-from-pixels-2026-08-10.md) |
 
+**2026-08-12 — the association plateau moved, and the cause is the camera term.**
+
+#138 recorded five cheap association fixes hitting the same plateau. A sixth was tried today and
+did not: **BoT-SORT's camera-motion compensation (GMC)**, injected as a `TrackingBackend` by dotted
+path with **no wiring or core change** (`adapters/models/botsort_backend.py`). It runs on the
+detections we already have — ultralytics 8.3.40 was already a declared dep, so no new weights, no
+version bump, and YOLO26 is not involved. Same 4362 cached detections, same thresholds (match 0.8,
+activation 0.25, buffer 30 — `BotSortBackend` *inherits* them from `ByteTrackBackend` so the arms
+cannot drift), one association step apart:
+
+| arm | raw tracks | median track len | mid-pitch events |
+|---|---|---|---|
+| ByteTrack (control) | 47 | 57 | 48 |
+| BoT-SORT + `sparseOptFlow` GMC | 43 | 81 | **35 (−27 %)** |
+| BoT-SORT, GMC **off** | 46 | 59 | 45 (−3) |
+
+The third arm is what makes this a finding and not a swap: with the camera model off, BoT-SORT's
+other differences (fuse_score, proximity gate, its own Kalman tuning) buy **3** events — the
+remaining **10** are GMC. That matches the diagnosis: ByteTrack predicts in image coordinates with
+no camera model, so when the camera moves every prediction lands short at once and identities break
+together (#135 §8: one whip-pan at f38 breaks six identities simultaneously).
+Re-run: `PYTHONPATH=src .venv/bin/python scripts/bench_association.py` (3 arms, ~3 min, CPU).
+
+⚠ **Not the default, and not yet judged by eye.** Enable with
+`--tracker-backend pitch3d.adapters.models.botsort_backend:make`; `PITCH3D_GMC_METHOD=none` gives
+the control arm. Two honest limits: the numbers are **raw tracklets before stitching**, so whether
+this survives the stitcher and moves #138's 33–38 subject band is **unmeasured**; and nobody has
+looked at a scene built this way. Verified end to end on CPU (48 frames, real RF-DETR + injected
+backend → export, exit OK). BoT-SORT cannot carry the McByte mask cue — it does not go through
+supervision — and says so by raising rather than ignoring it (#141).
+
 **2026-08-09 — the fan clip reconstructed itself, and the scenes turned out to be half invented.**
 
 The pipeline now measures its own framing (`adapters/io/framing.py`, `--crop auto`) instead of
