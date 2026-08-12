@@ -111,12 +111,29 @@ is defined in frame coordinates, so scoring the portrait clip as 1920×1080 excu
 death and reports a flatteringly low number. `bench_assignment_margin.py` lost a run to exactly
 that (its own comment: "reported 0 events for exactly that reason").
 
-**Through the stitcher, the gain does not show up as a count.** Full CLI, 236 frames, same
-detections, one backend apart (`out/assoc_a` vs `out/assoc_b`): raw tracklets **47 → 43**, but
-post-stitch subjects **38 → 39**. That is a *sixth* intervention landing in #138's 33–38 band —
-the stitcher absorbs the difference, as it did for expansion-IoU. Count is not quality and this
-run's pose and calibration are fakes, so nothing here says the scene is better or worse; it says
-the subject count is not the instrument. **A real-backend run and the eye are what is owed.**
+**Through the stitcher the subject count does not move — and the count was the wrong instrument.**
+Locally (fake pose/calib): raw tracklets **47 → 43**, post-stitch subjects **38 → 39**, i.e. a
+sixth intervention landing in #138's 33–38 band. **On the pod with all five real backends**
+(RF-DETR · BoT-SORT · PnLCalib · SMPLest-X-H · WASB, 236 frames, `--coherence`, calibration
+236/236 measured in *both* arms so nothing else differs) the count is **39 in both arms** — and
+#135's criteria say the arms are not the same scene at all:
+
+| `track_quality.py` verdict | A ByteTrack | B BoT-SORT+GMC |
+|---|---|---|
+| **PHANTOM_HALF** (half a human — the mannequin the eye names) | **10** | **6** |
+| **OK** (complete track, no caveat) | **6** | **9** |
+| OK_OFF_FRAME (held because he left the picture — correct) | 18 | 20 |
+| OK_UNMEASURED (real, never measured — marked, R-6) | 5 | 4 |
+| total subjects | 39 | 39 |
+
+**Phantom halves −40 %, clean tracks +50 %, same 39 subjects.** Three of them flip by id:
+**t5, t18, t19 are PHANTOM_HALF in A and `OK · FULL` in B**, measured 225/212/218 of 236 frames —
+identities BoT-SORT simply did not break, so they never became two halves needing a merge.
+Coherence agrees from the other side: B bridges more gaps (193 vs 165) while extending **fewer**
+edge frames (4850 vs 4980) across fewer subjects (30 vs 33) — less coasting, more measurement.
+Scenes: `out/pod_ab/scene_{a,b}.json`. **⚠ Not judged by eye yet — that is the next step, and it
+is the verdict that counts.** Both scenes carry a synthetic camera (`CAMERA_NPZ` unset, and the
+#119 fit covers frames 0–59 while this runs 236), so judge identity in `/world`, not framing.
 
 **Found while measuring it: `--*-backend` swaps were silently ignored on a warm cache, and then
 so was the stage below.** Two defects, both #141:
