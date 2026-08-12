@@ -172,12 +172,27 @@ if [ "${DEMO_EDITS:-1}" = "0" ]; then COH_ARGS+=(--no-demo-edits); echo "== demo
 # HF-GATED (facebook/sam-3d-body-dinov3): accept the licence + `hf download` it first.
 POSE_BACKEND="${POSE_BACKEND:-pitch3d.adapters.models.smplestx_backend:make}"
 
+# TRACK backend is swappable the same way (both satisfy TrackingBackend, both return RawTracklet,
+# so they drop into the SAME ByteTrackTracker + team clustering + stitcher):
+#   A (default)  <unset>                                            — ByteTrack via supervision
+#   B            pitch3d.adapters.models.botsort_backend:make       — BoT-SORT + camera motion (GMC)
+# Measured on CPU over the cached detections (scripts/bench_association.py): mid-pitch identity
+# events 48 -> 35 on broadcast and 46 -> 32 on the fan clip, with the GMC-off control arm at -3
+# and 0. What that does to the SCENE, after the stitcher and with real poses, is what this runs.
+TRACKER_ARGS=()
+if [ -n "${TRACKER_BACKEND:-}" ]; then
+  TRACKER_ARGS=(--tracker-backend "$TRACKER_BACKEND")
+  echo "== tracker: backend $TRACKER_BACKEND (GMC=${PITCH3D_GMC_METHOD:-sparseOptFlow})"
+else
+  echo "== tracker: ByteTrack (default, no camera-motion model)"
+fi
+
 cd "$REPO"
-echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} pose=${POSE_BACKEND} =="
+echo "== pod real E2E :: frames=${FRAMES} out=${OUT} format=${FORMAT} clip=${CLIP} pose=${POSE_BACKEND} track=${TRACKER_BACKEND:-bytetrack} =="
 t0=$(date +%s)
 PYTHONPATH=src "$PY" -m pitch3d \
   --clip "$CLIP" --frames "$FRAMES" \
-  --detector rfdetr --tracker bytetrack --device cuda \
+  --detector rfdetr --tracker bytetrack "${TRACKER_ARGS[@]}" --device cuda \
   "${CALIB_ARGS[@]}" "${COH_ARGS[@]}" \
   --pose gvhmr --pose-backend "$POSE_BACKEND" \
   --ball tracknet --ball-backend pitch3d.adapters.models.wasb_backend:make \
