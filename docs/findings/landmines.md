@@ -166,6 +166,16 @@ plane lines; anything keying all 28 will hit it.
 
 ## Metrics quoted outside their window
 
+**Every "mid-pitch identity event" probe is defined in frame coordinates, so the wrong W/H
+silently reports a *better* number.** The metric excuses a birth or death within 6 % of an edge.
+Score the 1080×1920 portrait clip as 1920×1080 and every box is past the right edge, so every
+event is excused: `bench_assignment_margin.py` "reported 0 events for exactly that reason" (its
+own comment, line 65). A defaulted `--width/--height` is therefore not a convenience, it is a
+silent zero. `bench_association.py` now refuses when >1 % of detections fall outside the stated
+frame; the older probes do not.
+· **Check:** the reported event count should move when you change the arm. If it is 0, or flat
+across arms, suspect the frame size before believing the tracker.
+
 **Distance to a *sampled* model is not distance to the model.**
 `bench_markings_vs_camera.py` first scored detected lines against `pitch_polylines`' 0.5 m
 samples — tens of pixels apart in the near field — and charged a line up to half a sample

@@ -81,18 +81,35 @@ version bump, and YOLO26 is not involved. Same 4362 cached detections, same thre
 activation 0.25, buffer 30 — `BotSortBackend` *inherits* them from `ByteTrackBackend` so the arms
 cannot drift), one association step apart:
 
-| arm | raw tracks | median track len | mid-pitch events |
-|---|---|---|---|
-| ByteTrack (control) | 47 | 57 | 48 |
-| BoT-SORT + `sparseOptFlow` GMC | 43 | 81 | **35 (−27 %)** |
-| BoT-SORT, GMC **off** | 46 | 59 | 45 (−3) |
+| clip | arm | raw tracks | median track len | mid-pitch events |
+|---|---|---|---|---|
+| broadcast 1920×1080 | ByteTrack (control) | 47 | 57 | 48 |
+| | BoT-SORT + `sparseOptFlow` GMC | 43 | 81 | **35 (−27 %)** |
+| | BoT-SORT, GMC **off** | 46 | 59 | 45 (−3) |
+| fan 1080×1920 (r896) | ByteTrack (control) | 47 | 36 | 46 |
+| | BoT-SORT + `sparseOptFlow` GMC | 40 | 43 | **32 (−30 %)** |
+| | BoT-SORT, GMC **off** | 47 | 37 | 46 (**±0**) |
 
 The third arm is what makes this a finding and not a swap: with the camera model off, BoT-SORT's
-other differences (fuse_score, proximity gate, its own Kalman tuning) buy **3** events — the
-remaining **10** are GMC. That matches the diagnosis: ByteTrack predicts in image coordinates with
+other differences (fuse_score, proximity gate, its own Kalman tuning) buy **3** events on
+broadcast and **exactly 0** on the handheld clip — where it reproduces ByteTrack's 47 tracks and
+46 events. So the whole gain is the camera term, and it is *larger* on the clip with more camera
+motion. That is the diagnosis behaving as predicted: ByteTrack predicts in image coordinates with
 no camera model, so when the camera moves every prediction lands short at once and identities break
 together (#135 §8: one whip-pan at f38 breaks six identities simultaneously).
-Re-run: `PYTHONPATH=src .venv/bin/python scripts/bench_association.py` (3 arms, ~3 min, CPU).
+Re-run (~3 min/clip, CPU):
+
+```bash
+PYTHONPATH=src .venv/bin/python scripts/bench_association.py
+PYTHONPATH=src .venv/bin/python scripts/bench_association.py \
+  --dets out/dets_fan/dets_r896_0_236.npz --clip samples/video/14604731_1080_1920_30fps.mp4 \
+  --width 1080 --height 1920 --fps 30.0
+```
+
+⚠ The `--width/--height` are load-bearing and the script now **refuses** a mismatch: the edge test
+is defined in frame coordinates, so scoring the portrait clip as 1920×1080 excuses every birth and
+death and reports a flatteringly low number. `bench_assignment_margin.py` lost a run to exactly
+that (its own comment: "reported 0 events for exactly that reason").
 
 ⚠ **Not the default, and not yet judged by eye.** Enable with
 `--tracker-backend pitch3d.adapters.models.botsort_backend:make`; `PITCH3D_GMC_METHOD=none` gives

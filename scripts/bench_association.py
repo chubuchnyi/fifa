@@ -66,6 +66,29 @@ def load_detections(path: Path) -> tuple[Detections, int]:
     return Detections(frames=frames), len(frames)
 
 
+def check_frame_size(dets: Detections, width: int, height: int) -> None:
+    """Refuse to score detections that do not fit the stated frame.
+
+    ``at_edge`` is the whole metric, and it is defined in frame coordinates: run a portrait clip
+    under the default 1920x1080 and every box is "past the right edge", so every birth and death
+    is excused and the probe reports a suspiciously good number. `bench_assignment_margin.py`
+    already lost a run to exactly this (its comment: "run of this probe on the fan clip reported
+    0 events for exactly that reason"), so this one fails loudly instead.
+    """
+    boxes = np.array(
+        [d.bbox_xyxy for fd in dets.frames for d in fd.items], dtype=float
+    ).reshape(-1, 4)
+    if not boxes.size:
+        return
+    outside = int(((boxes[:, 2] > width + 1) | (boxes[:, 3] > height + 1)).sum())
+    if outside > 0.01 * len(boxes):
+        raise SystemExit(
+            f"{outside} of {len(boxes)} detections fall outside the stated {width}x{height} "
+            f"frame (max x {boxes[:, 2].max():.0f}, max y {boxes[:, 3].max():.0f}). "
+            "Pass --width/--height for THIS clip — the edge test is meaningless otherwise."
+        )
+
+
 def mid_pitch_events(tracklets, width: int, height: int, last_frame: int) -> dict[str, int]:
     """Births + deaths that neither the clip boundary nor the frame edge explains."""
     edge_x, edge_y = EDGE_FRAC * width, EDGE_FRAC * height
@@ -124,6 +147,7 @@ def main() -> int:
     args = p.parse_args()
 
     dets, n_frames = load_detections(REPO / args.dets)
+    check_frame_size(dets, args.width, args.height)
     frame_ids = np.array([fd.frame for fd in dets.frames], dtype=int)
     n_boxes = sum(len(fd.items) for fd in dets.frames)
     clip = ClipRef(
