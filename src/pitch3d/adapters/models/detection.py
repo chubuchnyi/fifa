@@ -25,7 +25,7 @@ import numpy as np
 
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import Detection, Detections, Detector, FrameDetections
-from ...core.scene.provenance import Backend, ModelInfo
+from ...core.scene.provenance import Backend, ModelInfo, impl_name
 from ..io.frames import iter_clip_frames
 
 #: roboflow/sports player-detection class ids → the project's detection vocabulary.
@@ -154,6 +154,7 @@ class RFDETRDetector(Detector):
                 "score_threshold": self.score_threshold,
                 "device": self.device,
                 "resolution": self.resolution,
+                "impl": impl_name(self.backend, "RFDETRBackend"),
             },
         )
 

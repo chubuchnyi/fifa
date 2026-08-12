@@ -277,6 +277,22 @@ unknown**.
 
 ## Pipeline wiring
 
+**The stage cache did not know which backend produced its entry, so `--*-backend` swaps were
+silently ignored.** Measured 2026-08-12: BoT-SORT requested into an out-dir already holding
+ByteTrack's `track-*.pkl` returned ByteTrack's tracks and reproduced its **38 subjects exactly** —
+same cache filename, different contents, no log line, no warning. The whole ADR-0006 injection
+mechanism (`--tracker-backend`, `--pose-backend`, `--calibrator-backend`, `--ball-backend`) was
+defeated by re-running into an existing out-dir, which is exactly how anyone runs an A/B.
+`ModelInfo.params` had been documented as "feeds the cache key" since it was written and nothing
+read it; the four injectable adapters also reported the same identity whichever backend was
+inside (`GVHMRPoseEstimator.info()` said `"GVHMR"` with SMPLest-X injected).
+· Fixed 2026-08-12: `ModelInfo.identity()` is folded into every stage's cache params and each
+adapter reports its `impl`. Regression test in `test_backend_injection.py`.
+· **Cost of the fix:** every cache key changed, so all existing `out/*/cache` and the pod's caches
+miss once. That is a re-run, not a loss.
+· **Check on any A/B:** the second arm must be a cache *miss*. If it finished suspiciously fast
+and matched the first arm's numbers, it did not run.
+
 **Two reconstruction entry points apply different fixes.**
 `pod_real_e2e.sh` and `pod_make_video.sh` both drive the controller and do not agree. That
 produced #140 (rigid camera never applied) and the vert137 crop collapse.

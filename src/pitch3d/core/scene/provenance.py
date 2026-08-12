@@ -39,6 +39,26 @@ class ModelInfo:
     est_cost_usd: float = 0.0
     params: dict = field(default_factory=dict)
 
+    def identity(self) -> str:
+        """Stable one-line identity of what would produce this artifact — the cache key input.
+
+        ``params`` has always been documented as feeding the cache key; until 2026-08-12 nothing
+        read it, so two runs that differed only in an injected backend shared a key and the
+        second silently returned the first one's result.
+        """
+        flat = ",".join(f"{k}={v}" for k, v in sorted(self.params.items()))
+        return f"{self.name}|{self.version}|{flat}"
+
+
+def impl_name(backend: object | None, default: str) -> str:
+    """Name the injected backend so ``ModelInfo.params`` can tell two runs apart.
+
+    An adapter that hides a swappable backend (``--tracker-backend``, ``--pose-backend``, …)
+    otherwise reports the same identity whichever backend is inside, which defeats both the
+    provenance record and the cache key.
+    """
+    return type(backend).__name__ if backend is not None else f"{default}(default)"
+
 
 @dataclass
 class RunRecord:

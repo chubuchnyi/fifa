@@ -111,6 +111,30 @@ is defined in frame coordinates, so scoring the portrait clip as 1920×1080 excu
 death and reports a flatteringly low number. `bench_assignment_margin.py` lost a run to exactly
 that (its own comment: "reported 0 events for exactly that reason").
 
+**Through the stitcher, the gain does not show up as a count.** Full CLI, 236 frames, same
+detections, one backend apart (`out/assoc_a` vs `out/assoc_b`): raw tracklets **47 → 43**, but
+post-stitch subjects **38 → 39**. That is a *sixth* intervention landing in #138's 33–38 band —
+the stitcher absorbs the difference, as it did for expansion-IoU. Count is not quality and this
+run's pose and calibration are fakes, so nothing here says the scene is better or worse; it says
+the subject count is not the instrument. **A real-backend run and the eye are what is owed.**
+
+**Found while measuring it: `--*-backend` swaps were silently ignored on a warm cache, and then
+so was the stage below.** Two defects, both #141:
+1. The stage cache key had no idea which backend produced its entry. BoT-SORT requested into an
+   out-dir holding ByteTrack's `track-*.pkl` returned ByteTrack's tracks and reproduced its
+   **38 subjects exactly** — no log line. `ModelInfo.params` was documented as "feeds the cache
+   key" and nothing read it; the four injectable adapters also all reported the same identity
+   whichever backend was inside (`GVHMRPoseEstimator.info()` said `"GVHMR"` with SMPLest-X in it).
+2. With that fixed, TRACK correctly re-ran — and the scene *still* carried 38, because **POSE is
+   keyed on the clip, not on the tracks it consumes**. A stage never invalidated when the stage
+   above it changed.
+
+Both fixed: `ModelInfo.identity()` + `impl_name()` go into every stage's params, and TRACK/POSE
+additionally key on their upstream entries, making the key a DAG hash. Proven end to end — arm B
+seeded with arm A's *entire* cache now yields 39, and still runs in 52 s because DETECT (which the
+tracker cannot affect) still hits. Regression test in `tests/unit/test_backend_injection.py`.
+⚠ **Every cache key changed**, so `out/*/cache` and the pod's caches miss once.
+
 ⚠ **Not the default, and not yet judged by eye.** Enable with
 `--tracker-backend pitch3d.adapters.models.botsort_backend:make`; `PITCH3D_GMC_METHOD=none` gives
 the control arm. Two honest limits: the numbers are **raw tracklets before stitching**, so whether

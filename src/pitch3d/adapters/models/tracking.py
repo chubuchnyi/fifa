@@ -28,7 +28,7 @@ import numpy as np
 
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import Detections, Tracker, Tracklet, Tracks
-from ...core.scene.provenance import Backend, ModelInfo
+from ...core.scene.provenance import Backend, ModelInfo, impl_name
 from ...core.scene.subject import Team
 
 #: Classes that belong to a team (referees are officials → no team).
@@ -324,7 +324,11 @@ class ByteTrackTracker(Tracker):
             name="ByteTrack+BoT-SORT",
             backend=Backend.LOCAL,
             license="MIT",
-            params={"n_teams": self.n_teams, "device": self.device},
+            params={
+                "n_teams": self.n_teams,
+                "device": self.device,
+                "impl": impl_name(self.backend, "ByteTrackBackend"),
+            },
         )
 
     def track(self, clip: ClipRef, detections: Detections) -> Tracks:

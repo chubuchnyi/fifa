@@ -27,7 +27,7 @@ import numpy as np
 from ...core.ports.io import ClipRef
 from ...core.ports.perception import FieldCalibrator
 from ...core.scene.field import FieldCalibration
-from ...core.scene.provenance import Backend, ModelInfo
+from ...core.scene.provenance import Backend, ModelInfo, impl_name
 
 
 @dataclass
@@ -513,6 +513,7 @@ class KeypointFieldCalibrator(FieldCalibrator):
                 "carry_window": self.carry_window if self.motion is not None else 0,
                 "ransac_threshold_m": self.ransac_threshold_m,
                 "device": self.device,
+                "impl": impl_name(self.backend, "PitchKeypointBackend"),
             },
         )
 

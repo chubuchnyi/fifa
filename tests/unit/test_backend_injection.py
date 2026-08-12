@@ -168,3 +168,46 @@ def test_injected_pose_backend_drives_a_real_reconstruction(tmp_path):
     transl = scene.subjects[0].proposal.pose.transl
     assert transl.shape[1] == 3
     assert np.isfinite(transl).all()  # roots grounded on the pitch, not NaN
+
+
+# --- the cache must not hide a backend swap (found 2026-08-12) ------------------------
+class _OtherStubHMRBackend(StubHMRBackend):
+    """Same contract, different class — the only thing that differs between the two runs."""
+
+
+def test_swapping_the_backend_invalidates_the_stage_cache(tmp_path):
+    """A second run with a different backend must not be served the first one's result.
+
+    Measured on the real pipeline before this was wired: BoT-SORT requested into an out-dir
+    holding ByteTrack's cache reproduced ByteTrack's 38 subjects exactly, and no log line said
+    the requested backend never ran. `ModelInfo.params` was always documented as feeding the
+    cache key; nothing read it.
+    """
+    from pitch3d.core.orchestration.pipeline import ReconstructionPipeline
+    from pitch3d.core.orchestration.stages import Stage
+
+    out = tmp_path / "out"
+    clip = ClipRef(
+        source_id="demo", uri="memory://demo.mp4", frames=np.arange(6),
+        width=1280, height=720, fps=25.0,
+    )
+
+    def pose_run(backend_path: str):
+        p = default_ports(
+            out_dir=out, n_subjects=3, pose="gvhmr", pose_backend=backend_path
+        )
+        pipeline = ReconstructionPipeline(
+            detector=p.detector, tracker=p.tracker, calibrator=p.calibrator,
+            pose=p.pose, ball=p.ball, cache=p.cache, queue=p.queue,
+        )
+        result = pipeline.run(clip)
+        run = next(r for r in result.runs if r.stage is Stage.POSE)
+        return run.key, run.cache_hit
+
+    key_a, _ = pose_run(f"{__name__}:StubHMRBackend")
+    key_b, hit_b = pose_run(f"{__name__}:_OtherStubHMRBackend")
+    assert key_a != key_b, "the two backends share a POSE cache key — a swap would be silent"
+    assert not hit_b, "the second backend was served the first one's cached result"
+
+    key_a2, hit_a2 = pose_run(f"{__name__}:StubHMRBackend")
+    assert (key_a2, hit_a2) == (key_a, True), "identical config must still hit the cache"

@@ -36,7 +36,7 @@ from ...core.ports.perception import Tracklet, Tracks
 from ...core.ports.pose import PoseEstimator
 from ...core.scene.field import MIN_SOLVED_CONFIDENCE, FieldCalibration
 from ...core.scene.motion import PoseSequence, RootZSource, SmplxShape, SubjectMotion
-from ...core.scene.provenance import Backend, ModelInfo
+from ...core.scene.provenance import Backend, ModelInfo, impl_name
 from ...core.scene.units import FieldDimensions
 
 #: Nominal SMPL-X pelvis height above the ground plane (m) — the mono Z anchor (R-4).
@@ -206,7 +206,12 @@ class GVHMRPoseEstimator(PoseEstimator):
             name="GVHMR",
             backend=Backend.LOCAL,
             license="see upstream (non-commercial SMPL-X)",
-            params={"pelvis_height_m": self.pelvis_height_m, "device": self.device},
+            params={
+                "pelvis_height_m": self.pelvis_height_m,
+                "device": self.device,
+                "impl": impl_name(self.backend, "GVHMRBackend"),
+                "occlusion": impl_name(self.occlusion_backend, "none"),
+            },
         )
 
     def estimate(

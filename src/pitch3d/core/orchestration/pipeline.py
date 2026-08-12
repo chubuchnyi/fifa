@@ -140,8 +140,27 @@ class ReconstructionPipeline:
         ih = clip_hash(clip)
         runs: list[StageRun] = []
 
-        def stage(s: Stage, thunk, *, extra_params: dict | None = None):
+        keys: dict[Stage, str] = {}
+
+        def stage(
+            s: Stage, thunk, *, provider=None, upstream=(), extra_params: dict | None = None
+        ):
             p = {**params.get(s, {}), **extra_params} if extra_params else params.get(s, {})
+            # A stage is keyed on the CLIP, not on what the stage before it produced. So a run
+            # that re-tracked but reused the pose cache got poses computed from the OLD tracks:
+            # measured 2026-08-12, BoT-SORT re-ran (new track-*.pkl appeared) and the scene still
+            # carried ByteTrack's 38 subjects because POSE hit. Naming the upstream entries makes
+            # the key a DAG hash instead of a per-stage one.
+            if upstream:
+                p = {**p, "upstream": list(upstream)}
+            # The adapter's own identity belongs in the key. `ModelInfo.params` has been
+            # documented as "feeds the cache key" since it was written, but nothing read it —
+            # so a run that differed ONLY in an injected backend (`--tracker-backend`,
+            # `--pose-backend`, …) hit the previous backend's entry and returned it silently.
+            # Measured 2026-08-12: BoT-SORT requested against a ByteTrack cache reproduced
+            # ByteTrack's 38 subjects exactly, and nothing in the log said the backend never ran.
+            if provider is not None:
+                p = {**p, "provider": provider.info().identity()}
             r = run_cached(
                 self.queue,
                 self.cache,
@@ -152,10 +171,14 @@ class ReconstructionPipeline:
                 model_version=self.model_version,
             )
             runs.append(r)
+            keys[s] = r.key
             return r.result
 
-        det = stage(Stage.DETECT, lambda: self.detector.detect(clip))
-        trk = stage(Stage.TRACK, lambda: self.tracker.track(clip, det))
+        det = stage(Stage.DETECT, lambda: self.detector.detect(clip), provider=self.detector)
+        trk = stage(
+            Stage.TRACK, lambda: self.tracker.track(clip, det),
+            provider=self.tracker, upstream=(keys[Stage.DETECT],),
+        )
 
         # Structural continuity: re-link fragmented tracklets BEFORE pose, so each identity
         # is posed once. Off by default. The config is folded into POSE's cache params so
@@ -177,12 +200,16 @@ class ReconstructionPipeline:
             pose_extra = pose_extra or {}
             pose_extra["identity"] = asdict(self.identity_cfg)
 
-        cal = stage(Stage.CALIBRATE, lambda: self.calibrator.calibrate(clip))
+        cal = stage(
+            Stage.CALIBRATE, lambda: self.calibrator.calibrate(clip), provider=self.calibrator
+        )
         require_solved_calibration(cal, min_solved=self.min_solved_frames)
         motions = stage(
-            Stage.POSE, lambda: self.pose.estimate(clip, trk, cal), extra_params=pose_extra
+            Stage.POSE, lambda: self.pose.estimate(clip, trk, cal),
+            provider=self.pose, extra_params=pose_extra,
+            upstream=(keys[Stage.TRACK], keys[Stage.CALIBRATE]),
         )
-        ball2d = stage(Stage.BALL, lambda: self.ball.track_ball(clip))
+        ball2d = stage(Stage.BALL, lambda: self.ball.track_ball(clip), provider=self.ball)
         ball3d = lift_ball_to_3d(
             ball2d, cal, on_ground=on_ground, motions=motions, fps=clip.fps
         )
