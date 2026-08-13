@@ -6,12 +6,22 @@ does the anchor path work* — is measured separately in
 [`anchor-from-labels-2026-08-13.md`](anchor-from-labels-2026-08-13.md) and it clears on four
 clips. This file is the other half: **can a model produce those names?**
 
-Answer: **not the names. But it produces the one thing camlab needs more, and it produces it
-cleanly.**
+Answer: **yes — but only once it is given close-ups. The instrument was the binding constraint, not
+the model.** Same clip, same frame, same question, same vocabulary:
 
-The labeller was a fresh agent with no access to this repo's context, given one image and the
-vocabulary. The answer key was built by projecting the pitch model through a camera camlab already
-believes, and the labeller never saw it.
+| | exact type | correct family | bar | end to end |
+|---|---|---|---|---|
+| `fan` f8, **full frame only** | 1 / 9 | 1 / 9 | FAIL | no camera found at all |
+| `fan` f8, **plus a contact sheet of close-ups** | **7 / 9** | **6 / 9** (3 + 3) | **PASS** | **0.88 px**, against 1.13 for camlab's own |
+
+The labeller was a fresh agent with no access to this repo's context. The answer key was built by
+projecting the pitch model through a camera camlab already believes, and the labeller never saw it.
+
+**The end-to-end line is the one that matters.** Those 7-of-9 labels went through
+`write_camlab_anchor.py` unedited and produced an anchor which, after camlab's own auto-fit, scores
+**median 0.88 px on 300 samples against the 1.13 px of `camera_smooth` f8** — the camera camlab
+currently believes for that frame. Two labels were wrong and it did not matter, because the
+enumeration and the refit absorb them.
 
 ---
 
@@ -66,25 +76,55 @@ So on `broadcast` neither the model nor the geometric split gives the family. Wh
 because **nothing has to**: camlab's `hypotheses()` enumerates the family swap and the
 order-preserving assignments itself. The family is a thing to enumerate, not to ask for.
 
+## What the close-ups changed, and why
+
+`prepare` now writes `crops.png` beside the overview: one upscaled tile per segment, with the
+segment drawn thin and **dashed** so the pixels underneath stay visible. On the re-run the labeller
+stopped inferring and started looking, and its notes say exactly that:
+
+> Tile 2: the dashes sit exactly on the junction between the grass and the dark 'PLAY WITH'
+> advertising boards, and a separate real white line runs parallel about 60-80 px below them on the
+> grass — so the dashes are on the hoarding base, not paint.
+
+> Tile 7: the dashes cross the goal at crossbar/net height and continue along the top edge of the
+> boards, well above the base of the posts.
+
+Both are correct, and they are the two segments camlab's `#14` uses as its standing example of the
+hoarding join. Its closing geometry check — *"1, 3, 4, 9 all run along the pitch's long axis; 2, 5,
+6, 7, 8 run across"* — is now **exactly** the key's family split, where the full-frame run had it
+backwards.
+
+**So the earlier "it cannot see the orientation" conclusion was wrong about the cause.** It could
+not see the *paint*, and with nothing to see it fell back on a geometric argument that happened to
+be inverted. Given the pixels, both halves came right at once.
+
 ## What this says the design should be
 
-Stop asking the model to name lines. Ask it the one question it answers well and no classical
-feature here has managed — **paint or not paint** — and let camlab do the rest:
+Ask for the type, and give the model close-ups to answer with. That is what the two scripts now do,
+and it needs **no change in camlab at all** — which was the constraint.
 
-1. **model**: is there white paint under this segment, or is it the hoarding join / a mow stripe /
-   an arc? (measured 3/3 on `broadcast`)
-2. **camlab**: family split and order-preserving enumeration over the survivors — its
-   `bootstrap_clip.py`, which already returns 1.0 px on `fan` f0 and abstains on five of six anchors
-   for exactly the reason step 1 removes;
-3. **camlab**: refit, then its paint decides.
+Two things stay true and are worth keeping as fallbacks rather than as the plan:
 
-That is a much smaller ask than an eight-class vocabulary, and it maps one-to-one onto this repo's
-own stated dependency: `#11` is blocked by `#14`.
+- **Paint-or-not-paint is the robust core.** It scored 3/3 on `broadcast` from the full frame alone
+  and 2/2 on `fan` with tiles, and camlab has measured what it alone is worth: feeding the
+  generator the seven real segments instead of nine moves the best hypothesis from **11.9 m to
+  3.7 m** and the focal from **28 % wrong to 2.1 %** (`11-is-blocked-by-14-2026-08-12.md`). If the
+  type labels degrade on a harder clip, this is the half to fall back to.
+- **Falling back to it would need the one camlab change**, because `bootstrap_clip.py` takes no
+  segment filter and is not on the HTTP surface. It is **not needed now** and should not be made
+  until a clip actually demands it.
 
-**And it is where the one camlab change becomes necessary.** `bootstrap_clip.py` takes no segment
-filter and is not on the HTTP surface. The change is small — accept a list of segment indices to
-keep — and its test is already stated: *does removing the false segments let the bootstrap solve
-the five anchors it currently abstains on?* Until that is run, nothing should be added to camlab.
+## The two labels it still got wrong, and why they did not matter
+
+Segment 4 (`penalty_area_side`, 1.2 px from its marking) was called `not_a_marking` — a false
+negative on a real line in the far field, where the labeller saw *"only a tone change from one
+mowing band to the next"*. Segment 9 (`goal_area_side`) was called `touchline` — wrong instance,
+**right family**, which is the cheap kind of error because `hypotheses()` enumerates instances
+within a family anyway.
+
+That is the robustness result stated precisely: **two of nine labels wrong, and the anchor still
+beat the seed.** The pool went from 40 candidates under perfect labels to 24 under these, and the
+top of the ranking is the same camera.
 
 ## Two defects in the instrument, both fixed
 
@@ -102,11 +142,11 @@ the five anchors it currently abstains on?* Until that is run, nothing should be
 
 ## What is not claimed
 
-- **That crops fix it.** The re-run with tiles was in flight when this was written; the paint/not-
-  paint score above is from the full frame alone.
-- **That one labeller is the labeller.** One agent, one prompt, two clips. A different prompt or a
-  model given the tiles may do better, and the `not_a_marking` result is 3 of 3 on one frame —
-  a promising number, not an established one.
+- **That this generalises.** One agent, one prompt, **one** frame with tiles. `broadcast` has not
+  been re-run with close-ups, and the seven clips camlab cannot start have not been touched — and
+  by construction no answer key can be built for them, so on those the only judge is camlab's paint.
+- **That 7/9 is the number.** It is one draw. The useful invariant is not the label score but the
+  end-to-end one: two wrong labels of nine still produced an anchor better than the seed.
 - **That the vocabulary is right.** It has no value for arcs, and the labeller had to work around
   that. `straight_markings()` excludes arcs too, so the pipeline is consistent, but
   `11-is-blocked-by-14` already notes that arcs are modelled for scoring and never fed to the
