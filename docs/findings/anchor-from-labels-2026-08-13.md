@@ -1,0 +1,141 @@
+# A first camera from named lines — the ceiling is measured, and it clears
+
+**2026-08-13.** Steps 1–2 of `camlab/docs/findings/automating-the-anchor-2026-08-13.md`, which
+proposes replacing the human who drags camlab's first camera into place with a labeller that names
+its detected line segments.
+
+Before asking *can a model name them*, this asks the cheaper question that cancels everything
+downstream if the answer is no: **given perfect names, does the rest of the path produce a camera
+camlab can use?**
+
+It does, by a wide margin. The rest of this file is that measurement and the four defects found
+getting to it — all four in the new AVATAR code, none in camlab, which was not modified.
+
+---
+
+## The result
+
+`broadcast` frame 0, camlab's own 9 detected segments, labels taken from the answer key
+(§"How the key is built"), ranked by camlab's own paint:
+
+| | median | worst line | scored samples | focal | position |
+|---|---|---|---|---|---|
+| **anchor from labels, after refit** | **0.84 px** | 5.4 px | 268 | 4279 | (5.11, 71.96, 17.19) |
+| its half-turn twin | 0.87 px | 4.0 px | 268 | 4478 | (−5.11, −71.96, 17.19) |
+| the camera camlab believes (`camera_smooth` f0) | 0.94 px | 3.42 px | 270 | 4251 | (−2.36, −68.00, 16.62) |
+| next-best wrong assignment | 18.12 px | 213.9 px | 237 | 3240 | (−14.27, −69.57, 20.83) |
+
+**The automatic anchor is not worse than the camera camlab currently believes for that frame**, and
+the separation from the first wrong answer is 20×. The whole pool is ten cameras, not twenty
+thousand.
+
+Reproduce::
+
+    cd ~/camlab && .venv/bin/python -m uvicorn camlab.server.app:app --port 8899 &
+    .venv/bin/python scripts/bench_line_labeller.py prepare --clip broadcast --frame 0
+    .venv/bin/python scripts/write_camlab_anchor.py --clip broadcast --frame 0 \
+        --labels out/labeller/broadcast_f0/labels_oracle.json --dry-run
+
+## Why this is the right thing to have measured first
+
+camlab's bootstrap fails on five of six anchors by **abstaining** — *"no plausible camera at all"* —
+and its own `bootstrap-progress.md` locates the failure precisely: the generator is right (4680
+physically plausible cameras in 12 s) and the chooser lands 113 m out. Names delete the chooser
+rather than improve it: `_homography_from_lines` needs four correspondences, two per parallel
+family, and a label says which world line each detected segment may be.
+
+So the value of a labeller is bounded above by whether four correct names are enough. They are.
+
+## How the key is built, and why it needs no hand labelling
+
+camlab already has clips whose camera it believes. Project the pitch model through that camera and
+every detected segment gets its true class for free — `is-a-model-worth-training.md`'s
+self-labelling idea run backwards: instead of making training data, it makes an **answer key**.
+
+`scripts/bench_line_labeller.py prepare` fetches camlab's own segments and its own projected model
+from `GET /api/run/{clip}/lines/{n}`, assigns each segment its nearest projected marking within
+`EXPLAIN_PX = 12.0`, and writes the key beside a numbered image the labeller sees instead.
+
+Two checks that it is a key and not an artefact of our own assignment rule:
+
+- on `broadcast` f0 the six explained segments sit **0.09–1.14 px** from their markings — there is
+  no ambiguity to resolve;
+- on `fan` f8 it independently reproduces camlab's own count: **7 of 9 explained, 2 not**, against
+  `11-is-blocked-by-14-2026-08-12.md`'s *"two of nine detected segments are 55–60 px from any
+  marking, and both lie along the join between the grass and the advertising hoarding."*
+
+## The four defects, in the order they bit
+
+Each one presented as "no camera exists", which is also how camlab's own bootstrap fails — worth
+remembering before concluding that a search is hopeless.
+
+**1. A copied routine left its helper behind.** `homography_from_lines` was copied from camlab
+verbatim; `_line`, which normalises a homogeneous line to `|n| = 1`, was not. Image lines are built
+from coordinates of order 10³ and world lines from order 10¹, so the two sides entered the DLT six
+orders of magnitude apart and the SVD solved whichever rows were loudest. **All 384**
+label-consistent hypotheses came back 771–3221 px from reproducing their own homography. Nothing
+raised.
+
+**2. A reflected homography is a valid-looking camera.** A line correspondence is sign-free — `l`
+and `−l` are the same line — so a line-based DLT admits reflections, and `_decompose` orthogonalises
+`[r1, r2, r1×r2]` through an SVD, which turns a reflection into a *proper* rotation without
+complaint. `det(H)` cannot be the test, because `H → λH` scales the determinant by `λ³` and the sign
+is not scale-invariant. Reprojection can: a reflected solve does not reproduce its own homography.
+
+**3. …but measured over the whole model, that test rejects good cameras.** Near the horizon a
+tiny difference in H becomes hundreds of pixels, so the max over all 1446 model points read 771 px
+for a camera whose probe points land within 2–5 px in frame. Restrict it to points inside the
+frame, exactly as `camera_from_calibration` does with `_probe_points`.
+
+**4. Ranking raw aims by paint asks the wrong question.** A four-line fit through *detected*
+segments is an aim, not a solve. camlab documents the human's second click — *"aim it roughly, the
+solver finishes it. A rough aim at 445 px comes back at 4.7 px on `broadcast` frame 0"* — and the
+same is true here: **327.59 px worst / 6.07 median raw → 4.04 / 0.84 after `POST /refine/{n}`.**
+`refit._accept` takes the fit only if the worst offset fell and no correspondence was lost, so the
+refit can refuse but not damage.
+
+Two further traps inside the ranking itself, both worth stating because both looked like results:
+
+- `worst_line_px` is a max over markings, and on this frame it was set by an **arc scored on 14
+  samples** while the same camera's median was 6.07 px. Rank on the median, read the max.
+- "require support ≥ half the best candidate's" inverted the test: two candidates with the focal
+  pinned at the **300 px search floor** framed the whole pitch, scored **1087 samples** — four
+  times the true camera's support — and set a bar that excluded the right answer. The reference has
+  to be the seed camera's own support on that frame, and a focal sitting on a bound is rejected
+  outright. *A bound that is being hit is a finding, not a setting* (camlab, `inherited-claims.md`).
+
+## What camlab supplies, and what was changed in it
+
+**Nothing was changed in camlab.** The whole loop is its existing HTTP surface:
+
+| step | endpoint |
+|---|---|
+| the frame the labeller sees | `GET /api/run/{clip}/frame/{n}` |
+| **its own** detected segments + the projected model | `GET /api/run/{clip}/lines/{n}` |
+| the world markings, in camlab's frame | `GET /api/pitch` |
+| the principal point the camera was solved under | `GET /api/run/{clip}/camera` |
+| finish the aim | `POST /api/run/{clip}/refine/{n}` |
+| judge it | `GET /api/run/{clip}/residual/{n}` |
+| the anchor itself | written to `runs/<clip>/camera_manual.json`, the store `solve/hand.py` reads |
+
+Because `hand_candidates` *"refuses to rank by source"*, an anchor written by a script competes with
+the seed on the paint like any other, and `solve_carry.py` already prints when none of them won.
+Nothing had to be added for that to be safe.
+
+The one thing copied is the line-to-line DLT and its `_line` helper, with an origin header
+(ADR-0013 §5). The pitch model is **not** copied — it comes over the API, so no convention can
+drift between the repos. The principal point likewise: `fan`'s optical axis is at `cy = −334`, not
+304, and `plane_camera._measure_focal` and `_k_inv` already take `cx, cy` — only
+`camera_from_calibration` hardcodes the image centre, and this path does not go through it.
+
+## What is not claimed
+
+- **That a vision model can produce these labels.** Not measured here. This is the ceiling, and the
+  ceiling clearing is what makes the question worth asking.
+- **That the half-turn is solved.** It is not, and the two best cameras above are exactly each
+  other's negation, scoring 0.84 and 0.87 px. No paint metric will ever separate them; the script
+  detects the twin pair and says so instead of letting sort order look like a decision. It needs
+  the labeller's left/right call or camlab's `flip 180°`.
+- **That one frame of one clip generalises.** `fan` f8 has its key built and is not yet run through
+  the anchor writer, and the seven clips camlab cannot start have not been touched.
+- **That the labels used here are realistic.** They are perfect by construction.

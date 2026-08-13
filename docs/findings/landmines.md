@@ -18,6 +18,31 @@ needs more, write a findings doc and link it.
 
 ## Camera and calibration
 
+**A copied routine that leaves its helper behind changes the numbers instead of raising.**
+`homography_from_lines` was copied from camlab without `_line`, whose one job is normalising a
+homogeneous line to `|n| = 1`. Image lines are built from coordinates of order 10³ and world lines
+from order 10¹, so the SVD solved whichever rows were loudest: **all 384** label-consistent
+hypotheses on `broadcast` f0 came back 771–3221 px from reproducing their own homography, and the
+symptom was "no camera exists", not an error.
+· **Check:** copy the helpers too, and unit-test the copy on a synthetic case with a known answer.
+· Fixed in `scripts/write_camlab_anchor.py`; see `findings/anchor-from-labels-2026-08-13.md`.
+
+**A reflected homography decomposes into a proper rotation and a plausible position.**
+A line correspondence is sign-free (`l` and `−l` are the same line), so a line-based DLT admits
+reflected solutions; `_decompose` then orthogonalises `[r1, r2, r1×r2]` through an SVD, which turns
+the reflection into a valid rotation without complaint. `det(H)` cannot be the test — `H → λH`
+scales it by `λ³`, so the sign is not scale-invariant.
+· **Check:** does the decomposed camera reproduce its own homography? Same quantity `REALIZABLE_PX`
+gates on — but measure it over **in-frame** points only, or near-horizon points dominate the max.
+
+**A raw four-line aim is not a camera, and ranking aims by paint asks the wrong question.**
+On `broadcast` f0 with correct labels the aim scored 327.59 px worst / 6.07 px median; the same
+aim through camlab's own `POST /refine/{n}` scored **4.04 / 0.84 on 268 markings**, against
+3.42 / 0.94 for the camera camlab believes. Rank after the refit, never before.
+· **Check:** two more traps in the ranking itself — `worst_line_px` was set by an arc on 14 samples,
+and "support ≥ half the best" let a focal pinned at the 300 px search floor (1087 samples, four
+times the true camera's support) outrank the truth. A bound being hit is a finding, not a setting.
+
 **A scene can carry an invented camera and nothing on disk says so.**
 `fx = 772.02 @ 1280×720` is `_static_camera`'s synthetic broadcast view, substituted whenever
 `camera_from_calibration` refuses. Nine of nine scenes on disk carried it, including the one the
