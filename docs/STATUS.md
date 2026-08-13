@@ -381,6 +381,15 @@ remains blocked — but the poses alone settle constants we currently guess: the
   — camlab answers the camera on all clips (1.82 / 2.96 px) three days after being cut out;
   `playerlab` (identity + placement) is the next cut; **AVATAR's UI is frozen, not refactored**,
   and will be rebuilt from what the lab UIs prove works.
+- **Why camlab still places its anchor by hand, and what crosses each way:**
+  `camlab/docs/findings/reply-from-pitch3d-2026-08-13-the-first-camera.md` (written from here,
+  filed there with the rest of the exchange). PnLCalib emits **named** landmarks, so four
+  correspondences are a homography and there is no first frame to find — that is the whole of
+  what camlab lacks. Three items land back on **this** repo: `pnlcalib_backend.py:323` resizes
+  every frame to 540×960 regardless of aspect (the portrait clip reaches the net squashed
+  0.5 × 0.28); a one-frame **anchor generator** writing camlab's `camera_manual.json` is the
+  proposed hand-off; and camlab's schema 2 (a focal **per frame**) is ahead of our one-focal
+  rigid fit by 65 % of the accuracy on a zooming clip — that port runs towards us.
 - **Cross-thread research verdicts (validated / refuted / never judged / owed):**
   [`findings/research-ledger-2026-08-07.md`](findings/research-ledger-2026-08-07.md)
 - **How to work here (commands, rules, architecture):** [`../CLAUDE.md`](../CLAUDE.md)
