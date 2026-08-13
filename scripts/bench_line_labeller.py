@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import json
 import urllib.request
+from itertools import combinations
 from pathlib import Path
 
 import cv2
@@ -90,9 +91,51 @@ TYPE_FAMILY = {
 }
 
 
+#: Vanishing-point consensus tolerance for `split_families`. camlab's `VP_TOL_PX`.
+VP_TOL_PX = 60.0
+
+
 def fetch(url: str) -> bytes:
     with urllib.request.urlopen(url, timeout=300) as r:  # noqa: S310 - localhost only
         return r.read()
+
+
+def _line(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """Homogeneous line through two points, normalised so ``|n| = 1``. camlab `bootstrap._line`."""
+    line = np.cross(np.array([a[0], a[1], 1.0]), np.array([b[0], b[1], 1.0]))
+    n = float(np.linalg.norm(line[:2]))
+    return line / n if n > 1e-12 else line
+
+
+def split_families(segments: np.ndarray, tol_px: float = VP_TOL_PX) -> tuple[list[int], list[int]]:
+    """Split detected segments into the two world-parallel families, from the image alone.
+
+    Copied from camlab `src/camlab/solve/bootstrap.py:split_families` (ADR-0013 §5). Consensus on a
+    shared vanishing point, **not** clustering on angle — camlab measured one real family's image
+    directions spread across 22.1° to 32.5° against an 8° tolerance, while their vanishing point is
+    shared exactly.
+
+    It is here because the first blind labelling measured *this* as the thing a vision model gets
+    wrong. On `fan` f8 the labeller grouped the segments almost correctly and then assigned the
+    groups the wrong meaning — it called the across-pitch family "the long axis" — which flipped
+    six labels of nine. Geometry does this reliably and for free, so the model should never be
+    asked. What is left for it is the question no geometry here has answered: paint or not paint.
+    """
+    n = len(segments)
+    if n < 4:
+        return list(range(n)), []
+    lines = [_line(np.asarray(s[:2], float), np.asarray(s[2:], float)) for s in segments]
+
+    best: list[int] = []
+    for i, j in combinations(range(n), 2):
+        v = np.cross(lines[i], lines[j])
+        v = np.array([v[0], v[1], 0.0]) if abs(v[2]) < 1e-9 else v / v[2]
+        members = [k for k, line in enumerate(lines) if abs(float(line @ v)) < tol_px]
+        if len(members) > len(best):
+            best = members
+    a = best
+    b = [k for k in range(n) if k not in a]
+    return (a, b) if len(a) >= len(b) else (b, a)
 
 
 def point_to_polyline_px(pt: np.ndarray, poly: np.ndarray) -> float:
@@ -151,6 +194,54 @@ def draw(frame: np.ndarray, segments: np.ndarray) -> np.ndarray:
     return out
 
 
+def crops(frame: np.ndarray, segments: np.ndarray, tile: int = 384, cols: int = 3) -> np.ndarray:
+    """A contact sheet of one zoomed tile per segment — the instrument the labeller asked for.
+
+    **Built because two independent signals said the full frame is not enough.** The first two
+    labeller runs both stalled trying to crop the image themselves, and the one that finished said
+    in its own notes that its answer *"rests on a nesting argument rather than on directly readable
+    paint"* — i.e. it reasoned about geometry because it could not see whether there was white
+    paint under the line. On `fan` f8 (1080×608) that produced 1 correct label of 9.
+
+    Each tile is the segment's neighbourhood upscaled, with the segment drawn **thin and dashed**
+    so the paint underneath stays visible. A crop cannot answer "which marking is this" — that
+    needs the whole pitch — so this is supplementary to the overview, never a replacement.
+    """
+    tiles = []
+    for i, s in enumerate(segments, start=1):
+        cx_, cy_ = (s[0] + s[2]) / 2.0, (s[1] + s[3]) / 2.0
+        half = max(float(np.hypot(s[2] - s[0], s[3] - s[1])) * 0.75, 60.0)
+        x0, y0 = int(max(cx_ - half, 0)), int(max(cy_ - half, 0))
+        x1, y1 = int(min(cx_ + half, frame.shape[1])), int(min(cy_ + half, frame.shape[0]))
+        patch = frame[y0:y1, x0:x1].copy()
+        if patch.size == 0:
+            patch = np.zeros((10, 10, 3), np.uint8)
+        scale = tile / max(patch.shape[0], patch.shape[1])
+        patch = cv2.resize(patch, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+        p0 = (int((s[0] - x0) * scale), int((s[1] - y0) * scale))
+        p1 = (int((s[2] - x0) * scale), int((s[3] - y0) * scale))
+        # Dashed, so the paint the labeller is being asked about is not the paint we drew over.
+        n_dash = 24
+        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+        for d in range(0, n_dash, 2):
+            a = (int(p0[0] + dx * d / n_dash), int(p0[1] + dy * d / n_dash))
+            b = (int(p0[0] + dx * (d + 1) / n_dash), int(p0[1] + dy * (d + 1) / n_dash))
+            cv2.line(patch, a, b, (0, 245, 255), 2, cv2.LINE_AA)
+        canvas = np.zeros((tile + 40, tile, 3), np.uint8)
+        canvas[40:40 + patch.shape[0], :patch.shape[1]] = patch
+        cv2.putText(canvas, f"segment {i}", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
+                    (0, 245, 255), 2, cv2.LINE_AA)
+        tiles.append(canvas)
+
+    rows = []
+    for r in range(0, len(tiles), cols):
+        row = tiles[r:r + cols]
+        while len(row) < cols:
+            row.append(np.zeros_like(tiles[0]))
+        rows.append(np.hstack(row))
+    return np.vstack(rows)
+
+
 def prepare(args: argparse.Namespace) -> int:
     base = f"{args.server}/api/run/{args.clip}"
     data = json.loads(fetch(f"{base}/lines/{args.frame}?method={args.method}&which={args.which}"))
@@ -178,6 +269,7 @@ def prepare(args: argparse.Namespace) -> int:
     out_dir = Path(args.out) / f"{args.clip}_f{args.frame}"
     out_dir.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(out_dir / "numbered.png"), draw(frame, segments))
+    cv2.imwrite(str(out_dir / "crops.png"), crops(frame, segments))
     (out_dir / "key.json").write_text(json.dumps({
         "clip": args.clip, "frame": args.frame, "which": args.which, "method": args.method,
         "explain_px": EXPLAIN_PX, "summary": data["summary"], "key": key,
@@ -188,6 +280,7 @@ def prepare(args: argparse.Namespace) -> int:
     print(f"{args.clip} f{args.frame}: {len(segments)} segments, {named} explained by the camera "
           f"within {EXPLAIN_PX:.0f} px, {len(segments) - named} not")
     print(f"  labelling image: {out_dir / 'numbered.png'}")
+    print(f"  close-ups      : {out_dir / 'crops.png'}")
     print(f"  answer key     : {out_dir / 'key.json'}  (do not show this to the labeller)")
     return 0
 
