@@ -166,6 +166,17 @@ plane lines; anything keying all 28 will hit it.
 
 ## Metrics quoted outside their window
 
+**`root_z_source: measured` does not mean the world height was measured.** It means the pose
+backend reported `pelvis_above_foot` — the pelvis's height above its **own** foot. `_ground_root`
+(`adapters/models/pose.py:353`) then sets the world root Z **to** that number, pinning the foot to
+z = 0. So a scene where all 39 subjects read `measured` still **cannot represent a player leaving
+the ground**: root Z only rises if he extends his legs. The 9 cm measured on the f55 header is the
+take-off crouch, with ~40 cm of flight discarded. The same line drifts him away from the camera,
+because an airborne bbox bottom meets the ground plane beyond where he is.
+· **Check:** before quoting any vertical statistic, ask what the height is measured *from*.
+· playerlab `findings/the-jump-is-structurally-impossible-2026-08-13.md`
+
+
 **Every "mid-pitch identity event" probe is defined in frame coordinates, so the wrong W/H
 silently reports a *better* number.** The metric excuses a birth or death within 6 % of an edge.
 Score the 1080×1920 portrait clip as 1920×1080 and every box is past the right edge, so every
