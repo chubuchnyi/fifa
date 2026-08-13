@@ -126,6 +126,17 @@ sixth intervention landing in #138's 33–38 band. **On the pod with all five re
 | OK_UNMEASURED (real, never measured — marked, R-6) | 5 | 4 |
 | total subjects | 39 | 39 |
 
+⚠ **JUDGED BY EYE 2026-08-13 AND THE TABLE BELOW DID NOT SURVIVE IT.** The user watched both
+scenes track by track: **«равносильно херовые»**. 13 of 14 metrics prefer B, the eye sees no
+difference, and the reason is that B's whole gain is **1.4 pp of the imputed share** (54.1 % →
+52.7 %) reported per-track instead of per-frame. Also refuted en route: the missing jump is *not*
+an identity failure — the header is `measured` on every frame and peaks at 0.837 m root-Z, ~9 cm
+above baseline against a real ~40 cm, i.e. a grounding defect no tracker can reach. **BoT-SORT is
+NOT adopted as the default.** Full decomposition, the eye's six labelled defects, and what a
+criterion must do instead:
+[`findings/quality-criterion-2026-08-13.md`](findings/quality-criterion-2026-08-13.md).
+**Next work is the criterion, not the tracker.**
+
 **Phantom halves −40 %, clean tracks +50 %, same 39 subjects.** Three of them flip by id:
 **t5, t18, t19 are PHANTOM_HALF in A and `OK · FULL` in B**, measured 225/212/218 of 236 frames —
 identities BoT-SORT simply did not break, so they never became two halves needing a merge.
