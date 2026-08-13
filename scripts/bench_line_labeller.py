@@ -172,6 +172,7 @@ def draw(frame: np.ndarray, segments: np.ndarray) -> np.ndarray:
     camlab detected and nothing that would leak the answer.
     """
     out = frame.copy()
+    placed: list[tuple[int, int]] = []
     for i, s in enumerate(segments, start=1):
         p0 = (int(round(s[0])), int(round(s[1])))
         p1 = (int(round(s[2])), int(round(s[3])))
@@ -183,6 +184,18 @@ def draw(frame: np.ndarray, segments: np.ndarray) -> np.ndarray:
         n = np.array([-d[1], d[0]])
         n = n / max(float(np.linalg.norm(n)), 1e-6) * 44.0
         anchor = (int(mid[0] + n[0]), int(mid[1] + n[1]))
+        # And keep it clear of labels already drawn. Measured: on `broadcast` f0 boxes 4 and 5
+        # landed 23 px apart at the left edge, box 5 covered box 4, and the labeller reported
+        # "there is no number 4 anywhere in the frame" — one segment silently dropped from the run.
+        for _ in range(12):
+            clash = next((q for q in placed if abs(q[0] - anchor[0]) < 46
+                          and abs(q[1] - anchor[1]) < 40), None)
+            if clash is None:
+                break
+            anchor = (anchor[0], anchor[1] + 44 if anchor[1] >= clash[1] else anchor[1] - 44)
+        anchor = (int(np.clip(anchor[0], 30, out.shape[1] - 30)),
+                  int(np.clip(anchor[1], 30, out.shape[0] - 30)))
+        placed.append(anchor)
         text = str(i)
         (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 4)
         tl = (anchor[0] - tw // 2 - 10, anchor[1] - th // 2 - 10)

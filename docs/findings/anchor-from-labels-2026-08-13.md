@@ -29,22 +29,40 @@ getting to it — all four in the new AVATAR code, none in camlab, which was not
 the separation from the first wrong answer is 20×. The whole pool is ten cameras, not twenty
 thousand.
 
-And on the second clip, `fan` frame 8 — 1080×608, a phone in the stands at a floodlit night match,
-the frame whose two hoarding-join segments are `#14`'s standing example:
+### All four clips where a key can be built
 
-| | median | worst line | scored samples | focal | position |
-|---|---|---|---|---|---|
-| **anchor from labels, after refit** | **0.72 px** | 1.6 px | 299 | 3093 | (1.00, −78.17, 24.51) |
-| the camera camlab believes (`camera_smooth` f8) | 1.13 px | — | 304 | — | — |
+An answer key needs a camera camlab already believes, so only its solved clips are testable — and
+those are also the easy ones. Every number is the median against camlab's paint, after its own
+refit:
 
-Here **eleven of the twelve** shortlisted assignments land between 0.72 and 1.78 px, at essentially
-the same camera (position within ~2 m, focal 3093–3457). That is not the pitch being degenerate —
-their raw aims were already 1.5–8.7 px, and camlab's refit pulls all of them into the same basin.
-It is the useful robustness result: **the labels do not have to be exactly right**, because several
-different label-consistent assignments funnel to one answer.
+| clip, frame | anchor from labels | camera camlab believes | verdict |
+|---|---|---|---|
+| `broadcast` f0 — 1920×1080, professional | **0.84 px** / 268 | 0.94 px / 270 | better |
+| `fan` f8 — 1080×608, phone in the stands, floodlit night | **0.72 px** / 299 | 1.13 px / 304 | better |
+| `CRO_MOR_194948` f0 — the clip solved from an operator's own anchor | **1.30 px** / 317 | 1.33 px / 319 | equal |
+| `NET_ARG_225042` f25 | 2.06 px / 622 | 1.34 px / 620 | worse, well inside the 20 px band |
+
+On `fan`, **eleven of the twelve** shortlisted assignments land between 0.72 and 1.78 px at
+essentially the same camera (position within ~2 m, focal 3093–3457), from raw aims of 1.5–8.7 px.
+That is not degeneracy — it is the useful robustness result: **the labels do not have to be exactly
+right**, because several different label-consistent assignments funnel into one basin under the
+refit.
 
 No half-turn twin appears in `fan`'s shortlist, unlike `broadcast`'s. Not investigated; do not read
-it as the degeneracy being weaker on this clip.
+it as the degeneracy being weaker on that clip.
+
+### Two frames where it cannot work at all, and the rule that follows
+
+- **`NET_ARG_225042` f0** — nine segments, six of them real markings, and **five in one family
+  against one in the other**. A homography needs two correspondences per family, so no labelling
+  however perfect can seed this frame. Not a defect: the frame simply shows one line along the
+  pitch's long axis.
+- **`g15449383` f0** — five segments, **one** of which is a marking. camlab's own STATUS already
+  refuses to call this clip solved (2 markings, 21 % of frames with no paint across).
+
+**So scan frames; do not fix on frame 0.** The anchor is needed on *one* frame of a clip, and on
+`NET_ARG` the family balance goes 1+5 at f0, **2+3 at f10, 3+5 at f25**, 1+3 at f40. Frame 0 is a
+convention, not a requirement, and choosing it cost this clip its anchor until the scan was run.
 
 Reproduce::
 
