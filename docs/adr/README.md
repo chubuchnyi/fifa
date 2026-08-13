@@ -18,3 +18,4 @@ Format follows [MADR](https://adr.github.io/madr/)-style headers; all are **Acce
 | [0010](0010-live-blender-edit-bridge.md) | Live Blender edits become `Correction`s over a socket; the host owns the scene, human ≡ LLM | C2, FR-14/21/22a, ADR-0008 |
 | [0011](0011-deliverable-video-path-contract-and-virtual-operator.md) | Deliverable video path: package CLI + versioned export manifest + virtual-operator cameras | R-6, eye-verdict 2026-07-03, ADR-0003 |
 | [0012](0012-rejected-approaches-log.md) | Rejected approaches, tiered by evidence; every entry records what would re-open it | R-6, roadmap R8, v2 §9 |
+| [0013](0013-subproject-split-and-per-lab-ui.md) | Split by measurable question into separate repos (camlab, playerlab, AVATAR = assembly); each owns its own UI, no shared viewer | camlab 2026-08-11..13, #140/#141, user 2026-08-13 |

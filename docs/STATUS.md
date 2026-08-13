@@ -376,6 +376,11 @@ remains blocked — but the poses alone settle constants we currently guess: the
 
 ## 6. Key references
 
+- **How the work is split into repos, and why each subproject builds its own UI:**
+  [`adr/0013-subproject-split-and-per-lab-ui.md`](adr/0013-subproject-split-and-per-lab-ui.md)
+  — camlab answers the camera on all clips (1.82 / 2.96 px) three days after being cut out;
+  `playerlab` (identity + placement) is the next cut; **AVATAR's UI is frozen, not refactored**,
+  and will be rebuilt from what the lab UIs prove works.
 - **Cross-thread research verdicts (validated / refuted / never judged / owed):**
   [`findings/research-ledger-2026-08-07.md`](findings/research-ledger-2026-08-07.md)
 - **How to work here (commands, rules, architecture):** [`../CLAUDE.md`](../CLAUDE.md)
