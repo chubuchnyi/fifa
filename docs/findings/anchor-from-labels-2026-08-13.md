@@ -29,6 +29,23 @@ getting to it — all four in the new AVATAR code, none in camlab, which was not
 the separation from the first wrong answer is 20×. The whole pool is ten cameras, not twenty
 thousand.
 
+And on the second clip, `fan` frame 8 — 1080×608, a phone in the stands at a floodlit night match,
+the frame whose two hoarding-join segments are `#14`'s standing example:
+
+| | median | worst line | scored samples | focal | position |
+|---|---|---|---|---|---|
+| **anchor from labels, after refit** | **0.72 px** | 1.6 px | 299 | 3093 | (1.00, −78.17, 24.51) |
+| the camera camlab believes (`camera_smooth` f8) | 1.13 px | — | 304 | — | — |
+
+Here **eleven of the twelve** shortlisted assignments land between 0.72 and 1.78 px, at essentially
+the same camera (position within ~2 m, focal 3093–3457). That is not the pitch being degenerate —
+their raw aims were already 1.5–8.7 px, and camlab's refit pulls all of them into the same basin.
+It is the useful robustness result: **the labels do not have to be exactly right**, because several
+different label-consistent assignments funnel to one answer.
+
+No half-turn twin appears in `fan`'s shortlist, unlike `broadcast`'s. Not investigated; do not read
+it as the degeneracy being weaker on this clip.
+
 Reproduce::
 
     cd ~/camlab && .venv/bin/python -m uvicorn camlab.server.app:app --port 8899 &
@@ -136,6 +153,7 @@ drift between the repos. The principal point likewise: `fan`'s optical axis is a
   other's negation, scoring 0.84 and 0.87 px. No paint metric will ever separate them; the script
   detects the twin pair and says so instead of letting sort order look like a decision. It needs
   the labeller's left/right call or camlab's `flip 180°`.
-- **That one frame of one clip generalises.** `fan` f8 has its key built and is not yet run through
-  the anchor writer, and the seven clips camlab cannot start have not been touched.
+- **That two frames of two clips generalise.** Both are clips camlab has already solved, which is
+  what makes an answer key possible and also what makes them the easy cases. The seven clips camlab
+  cannot start have not been touched, and by construction no key can be built for them.
 - **That the labels used here are realistic.** They are perfect by construction.
