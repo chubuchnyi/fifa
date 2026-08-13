@@ -5,6 +5,10 @@ Lives here until the repository is cut, then moves with it and this file becomes
 lab — item 1 is "state the question in one sentence, and the check that falsifies it from the clip
 alone", and nothing should be cut before that exists.
 
+Item 2 of the same checklist is `PROBLEM.md`: [`playerlab-problem.md`](playerlab-problem.md) — the
+problem stated for someone who has not seen this repo, and **nine objections to this spec** in its
+"Remarks on the founding spec" section. Read them before acting on §2, §6, §7 or §8 below.
+
 ---
 
 ## 1. The question
