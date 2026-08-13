@@ -76,6 +76,14 @@ box we call (SMPLest-X); association and placement are one metric seen from two 
 posed body lie on its own pixels in every frame. camlab's 2 px camera is what first makes that
 metric mean anything; before it, camera error swamped placement error.
 
+> ⚠ **Amended 2026-08-13, the same day.** The #135 claim this paragraph rests on is **refuted**:
+> t19 is `measured` on every frame f44–57 through a header, on a good crop, and the pose is flat —
+> peak root-Z 0.837 m, ~9 cm above his own baseline against a real jump's ~40 cm. So
+> pose-on-a-good-crop is not a black box that works; it has a measured failure mode. Whether that
+> failure is *grounding* (already playerlab's) or the *pose backend* (outside it) is separable by
+> measurement and **has not been separated** — see [`playerlab-spec.md`](../playerlab-spec.md) §7.
+> The one-repository decision stands provisionally; the boundary is what is in question.
+
 ### 3. Every subproject owns its UI, and the UIs are deliberately not shared
 
 This is the part that overrides ordinary good practice, and it is a user decision.
