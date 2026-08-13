@@ -135,3 +135,42 @@ Not a proposal to build yet — the constraints the evidence imposes.
 measurably does not change what the eye sees (§2). It stays available behind
 `--tracker-backend pitch3d.adapters.models.botsort_backend:make`, and the honest summary of it is
 "1.4 pp more of the scene is measured".
+
+---
+
+## 6. First mechanical criterion: humans smeared across ids (2026-08-13)
+
+`scripts/find_duplicate_tracks.py`. **No labels needed.** Two ids that are never measured on the
+same frame, stay within 0.15 m, and alternate carrying the detection are one human — because there
+is only ever one detection to give, and two standing humans' pelvises cannot be 15 cm apart.
+
+Two corrections were forced by the data before it worked:
+
+1. **The unit is the (pair, interval), not the pair.** The first version judged each pair over its
+   whole overlap and missed the very case the eye named: t3 and t62 are one human for 14 frames
+   (f33–46, alternating, 0.11 m) and then genuinely two for the next hundred (co-measured, walking
+   to 5.6 m). Averaged together, the defect vanishes. The eye had said the same thing — *"correct
+   until frame 39, then it became t62"* — a transition, not a property.
+2. **0.15 m, not 0.5 m.** At 0.20 m the pair the eye described as *«16 с 18 толкаются»* — two
+   players in contact — leaks in; at 0.50 m half the scene does. 0.15 m is a bound on human bodies,
+   not a fitted number.
+
+Result on the two arms:
+
+| | A ByteTrack | B BoT-SORT |
+|---|---|---|
+| ids | 39 | 39 |
+| **distinct humans** | **33** | **35** |
+| humans smeared over several ids | 3 | 1 |
+| subject-frames carried by a duplicate id | 56 | 40 |
+| **the referee t3 is split across** | **5 ids** (t3+t62+t147+t149+t151) | **5 ids** (t3+t184+t188+t190+t192) |
+
+**The referee is the dominant victim in both arms, split five ways in each.** Both defects the eye
+described independently involved him. He is a single, concrete target — and the fact that the two
+arms wreck him identically is the sharpest available statement of why they look the same.
+
+Scored against the labels we have — the eye's six observations — it is **4 for 4**: it catches
+t3/t184 (B) and t3/t62 (A), and it rejects t16/t18 and t16/t19, which the eye called two players in
+contact. That is a start, not a validation. What it does **not** yet do is decide which id is the
+real one; that is the merge policy (keep the parent's trajectory, take the fragment's pose) and it
+needs the eye.
