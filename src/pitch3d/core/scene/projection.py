@@ -62,7 +62,10 @@ def project_world_points_with_depth(
     z = cam[:, 2]
     in_front = z > 1e-6
     safe_z = np.where(in_front, z, 1.0)
-    k = camera.intrinsics
+    # Per-frame, not the track's shared intrinsics: on a clip that zooms, one focal costs
+    # 1.65 -> 4.56 px against the paint (camlab, `fan`, 1.59x). `intrinsics_at` returns the shared
+    # ones unchanged when the track has a single focal, so this is free where there is no zoom.
+    k = camera.intrinsics_at(frame_index)
     u = k.fx * cam[:, 0] / safe_z + k.cx
     v = k.fy * cam[:, 1] / safe_z + k.cy
     on_image = (u >= 0) & (u < k.width) & (v >= 0) & (v < k.height)

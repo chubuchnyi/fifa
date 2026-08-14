@@ -73,6 +73,28 @@ _INPUT_H = 540
 # PnLCalib keypoint ids are 1-based: ids 1..57 index the main table, ids ≥58 the aux table.
 _N_MAIN = 57
 
+
+def _unletterbox_point(d: dict, scale: float, pad_x: int, pad_y: int,
+                       w_orig: int, h_orig: int) -> bool:
+    """Map one decoded ``{"x","y"}`` back to the ORIGINAL frame in place; False if it is outside.
+
+    The heads see a padded, aspect-preserved copy, and `complete_keypoints(normalize=True)` divides
+    by the *input* size — so a point comes back normalised against the padded image. Undo the pad
+    and the scale, then renormalise against the original, after which every consumer that
+    multiplies by ``w_orig`` is correct without knowing any of this happened.
+
+    A point landing in the padding is dropped rather than clamped: it is outside the picture, and a
+    clamped landmark is a correspondence to a place the camera never saw.
+    """
+    if "x" not in d or "y" not in d:
+        return True
+    x = (float(d["x"]) * _INPUT_W - pad_x) / scale
+    y = (float(d["y"]) * _INPUT_H - pad_y) / scale
+    if not (0.0 <= x <= w_orig and 0.0 <= y <= h_orig):
+        return False
+    d["x"], d["y"] = x / w_orig, y / h_orig
+    return True
+
 # SoccerNet line class → world ``(a, b, c)``, ``a² + b² = 1``. PnLCalib's line head emits SoccerNet
 # class names, so a detection keys straight into this; unknown names (circles, goal frames) are
 # dropped because they do not constrain a planar homography.
@@ -114,9 +136,22 @@ class _PnLCalibBackend:
         h_orig, w_orig = bgr.shape[:2]
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         tensor = s["to_tensor"](Image.fromarray(rgb)).float().unsqueeze(0)
-        if tensor.shape[-1] != _INPUT_W:
-            tensor = s["resize"](tensor)
-        tensor = tensor.to(self.device)
+
+        # LETTERBOX, not stretch. `transforms.Resize((540, 960))` squashes whatever it is given
+        # into 16:9, so a 1080x1920 portrait clip reached the heads at 0.5x across and 0.28x down —
+        # a body of evidence the network was never trained on, and every number produced from a
+        # portrait clip was under that handicap. Fit inside the input instead and pad; on a 16:9
+        # clip `scale` fits exactly and both pads are 0, so the broadcast path is bit-unchanged.
+        scale = min(_INPUT_W / w_orig, _INPUT_H / h_orig)
+        new_w, new_h = max(1, round(w_orig * scale)), max(1, round(h_orig * scale))
+        pad_x, pad_y = (_INPUT_W - new_w) // 2, (_INPUT_H - new_h) // 2
+        if (new_w, new_h) != (w_orig, h_orig):
+            tensor = torch.nn.functional.interpolate(
+                tensor, size=(new_h, new_w), mode="bilinear", align_corners=False)
+        canvas = torch.zeros((1, tensor.shape[1], _INPUT_H, _INPUT_W), dtype=tensor.dtype)
+        canvas[:, :, pad_y:pad_y + new_h, pad_x:pad_x + new_w] = tensor
+        tensor = canvas.to(self.device)
+
         with torch.no_grad():
             heatmaps = s["model"](tensor)
             heatmaps_l = s["model_l"](tensor)
@@ -127,6 +162,17 @@ class _PnLCalibBackend:
         kp_dict, lines_dict = s["complete"](
             kp_list[0], line_list[0], w=_INPUT_W, h=_INPUT_H, normalize=True
         )
+        # Undo the letterbox HERE, so the dicts are normalised against the ORIGINAL frame — which
+        # is what this method's docstring already promised and what every consumer below assumes
+        # when it multiplies by `w_orig` or hands them to a `denormalize=True` camera.
+        box = (scale, pad_x, pad_y, w_orig, h_orig)
+        for kid in [k for k, d in kp_dict.items()
+                    if isinstance(d, dict) and not _unletterbox_point(d, *box)]:
+            kp_dict.pop(kid, None)
+        for name, pts in list(lines_dict.items()):
+            if isinstance(pts, (list, tuple)):
+                lines_dict[name] = [d for d in pts if isinstance(d, dict)
+                                    and _unletterbox_point(d, *box)]
         return kp_dict, lines_dict, int(w_orig), int(h_orig)
 
     def _line_observations(

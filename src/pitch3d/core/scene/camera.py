@@ -108,6 +108,18 @@ class CameraTrack:
     translation: np.ndarray
     estimated: bool = True
     raw_frame_aligned: bool = False
+    #: Per-frame focal length in px, shape ``(T,)`` — the operator's zoom. ``None`` means the
+    #: track has one focal for its whole span, which is what every solve here produced until
+    #: camlab's schema 2 arrived.
+    #:
+    #: **This is the "future refinement" the class docstring promised, and it is not cosmetic.**
+    #: Collapsing a zooming clip to one focal is measured, by camlab, against the paint:
+    #: `fan` zooms 1.59x and goes 1.65 px -> **4.56 px**, dropping 2 of 12 frames out of the 20 px
+    #: band; `broadcast` zooms 1.03x and goes 2.29 -> 4.16. So one focal is honest on a clip that
+    #: does not zoom and misreports by 3x on one that does.
+    #:
+    #: Position needed nothing: ``translation`` was already per frame.
+    focal_px: np.ndarray | None = None
     #: How this camera was obtained (#140). Defaults to ``PLANE_FIT`` so an old scene decodes,
     #: but the controller always sets it explicitly.
     source: CameraSource = CameraSource.PLANE_FIT
@@ -152,4 +164,33 @@ class CameraTrack:
         """
         if factor == 1.0:
             return self
-        return replace(self, intrinsics=self.intrinsics.scaled(factor))
+        scale = self.intrinsics.scaled(factor)
+        focal = None if self.focal_px is None else np.asarray(self.focal_px, float) * factor
+        return replace(self, intrinsics=scale, focal_px=focal)
+
+    def intrinsics_at(self, frame_index: int) -> CameraIntrinsics:
+        """The intrinsics **at one frame** — per-frame focal when the track carries the zoom.
+
+        Every consumer that projects a point must go through this rather than reading
+        ``.intrinsics`` directly, or a zooming clip is rendered through whichever single focal the
+        track happened to be built with. Falls back to the shared intrinsics when ``focal_px`` is
+        ``None``, so a track that genuinely has one focal costs nothing and every caller is safe.
+        """
+        if self.focal_px is None:
+            return self.intrinsics
+        row = int(np.argmin(np.abs(np.asarray(self.frames) - int(frame_index))))
+        f = float(np.asarray(self.focal_px)[row])
+        return replace(self.intrinsics, fx=f, fy=f)
+
+    def zoom_ratio(self) -> float:
+        """Largest focal over smallest, or 1.0 when the track has a single focal.
+
+        Reported rather than assumed: camlab's schema 2 carries it so that "does this clip zoom"
+        needs no arithmetic, and it is the number that says whether one focal would have been
+        honest here.
+        """
+        if self.focal_px is None:
+            return 1.0
+        f = np.asarray(self.focal_px, float)
+        lo = float(f.min())
+        return float(f.max() / lo) if lo > 0 else float("inf")

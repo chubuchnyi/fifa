@@ -18,6 +18,23 @@ needs more, write a findings doc and link it.
 
 ## Camera and calibration
 
+**Frame 0 is a convention, and on a real clip it is often the worst frame there is.**
+`14604680`: PnLCalib returns **1** named landmark on frame 0 and **19** on frame 630. Same clip,
+same crop, same weights. camlab's `NET_ARG_225042` says it the other way round — f0 splits its
+segments 1+5 across the two parallel families where a homography needs 2+2, and f25 splits 3+5.
+Both cost a round before the probe existed.
+· **Check:** sample the source and rank frames by landmark count and spread before ingesting
+anything. `scripts/new_clip_anchor.py` does it in step 2; ~3 s of CPU per sampled frame.
+
+**PnLCalib squashed every frame to 540×960 regardless of aspect — and letterboxing it is worse.**
+The stretch fed a 1080×1920 portrait clip in at 0.5× across and 0.28× down. Replacing it with an
+aspect-preserving letterbox is geometrically right and **resolution-fatal**: the pitch becomes a
+narrow strip at 0.28 scale and the heads return **zero** keypoints. The fix that works is neither —
+**crop to the pitch first** (`measure_framing`, 42 % grass → 94 %), after which the crop is ~16:9,
+the letterbox is a no-op, and the same clip returns 16 landmarks.
+· **Check:** on any clip that is not 16:9, crop before inference and confirm the landmark count is
+non-zero. A 16:9 clip is bit-unchanged by the letterbox, so `broadcast` cannot catch this.
+
 **A copied routine that leaves its helper behind changes the numbers instead of raising.**
 `homography_from_lines` was copied from camlab without `_line`, whose one job is normalising a
 homogeneous line to `|n| = 1`. Image lines are built from coordinates of order 10³ and world lines
