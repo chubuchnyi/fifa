@@ -432,6 +432,16 @@ claim about the suite survived unchallenged.
 
 ## Front end
 
+**camlab answers 404 for at least three different things, and the status code names none of them.**
+A frame outside the clip, a camera file that clip does not have, and a frame that failed to decode
+all return 404 with the reason in the body. `labeller_ui.py` first reported only
+`HTTP Error 404: Not Found` and the real cause — the clip the dropdown opened on has *only*
+`camera_start.json`, while the form asked for a hard-coded `camera_smooth.json` — took a
+diagnosis round to find.
+· **Check:** read `detail` from the body and pass it through; and bound the form by what exists
+(`n_frames`, the clip's actual `camera_*.json`) so an impossible request cannot be made.
+· Fixed 2026-08-14 in `scripts/labeller_ui.py`.
+
 **Alpine's `:style` as a template string clobbers `x-show`.**
 A string binding rewrites the whole style attribute, wiping the `display:none` that `x-show` wrote.
 The overlay reappeared on every frame change while its flag still read "hidden". Object bindings

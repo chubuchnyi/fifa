@@ -57,11 +57,24 @@ STATE: dict = {}
 
 
 def camlab_json(path: str) -> dict:
+    """GET from camlab, and **pass its own explanation through** rather than the status code.
+
+    The first version reported only `HTTP Error 404: Not Found`, which is true and useless:
+    camlab's routes answer 404 for at least three different things — a frame outside the clip, a
+    camera file that clip does not have, and a frame that failed to decode — and each says which in
+    the response body. Swallowing that turned a one-word fix into a debugging session.
+    """
     try:
         with urllib.request.urlopen(f"{CFG.camlab}{path}", timeout=300) as r:  # noqa: S310
             return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        try:
+            detail = json.loads(e.read()).get("detail", "")
+        except (ValueError, OSError):
+            detail = ""
+        raise HTTPException(502, f"camlab said: {detail or e.reason} ({path})") from e
     except urllib.error.URLError as e:
-        raise HTTPException(502, f"camlab at {CFG.camlab} did not answer: {e}") from e
+        raise HTTPException(502, f"camlab at {CFG.camlab} is not reachable: {e.reason}") from e
 
 
 def png(img: np.ndarray) -> Response:
@@ -73,7 +86,18 @@ def png(img: np.ndarray) -> Response:
 
 @app.get("/api/clips")
 def clips() -> JSONResponse:
-    return JSONResponse(camlab_json("/api/runs"))
+    """camlab's runs, plus the two things the form needs to stop offering impossible requests.
+
+    `n_frames` bounds the frame box, and the camera files each clip actually has replace a
+    hard-coded default — `camera_smooth.json` does not exist for every run, and asking for one that
+    is missing is one of the several things camlab answers 404 to.
+    """
+    runs = camlab_json("/api/runs")
+    for r in runs:
+        d = CFG.run_dir / str(r.get("clip_id", ""))
+        r["cameras"] = sorted(p.name for p in d.glob("camera_*.json")
+                              if p.name != "camera_manual.json") if d.is_dir() else []
+    return JSONResponse(runs)
 
 
 @app.post("/api/prepare")
@@ -224,13 +248,9 @@ padding:8px;max-width:96vw}dialog img{max-width:90vw;max-height:85vh;display:blo
   <h1>label review</h1>
   <select id="clip"></select>
   <label class="mut">frame
-    <input id="frame" type="number" value="0" min="0" style="width:80px"></label>
-  <input id="which" list="whichlist" value="camera_smooth.json" style="width:190px">
-  <datalist id="whichlist">
-    <option>camera_smooth.json</option><option>camera_fixed.json</option>
-    <option>camera_healed.json</option><option>camera_carry.json</option>
-    <option>camera_auto.json</option>
-  </datalist>
+    <input id="frame" type="number" value="0" min="0" style="width:78px">
+    <span id="frames" class="mut"></span></label>
+  <select id="which" style="width:200px"></select>
   <button id="go" class="p">prepare</button>
   <button id="rank">rank anchors</button>
   <span id="status" class="mut"></span>
@@ -259,8 +279,23 @@ async function jp(u,b){
    body:JSON.stringify(b)});
  if(!r.ok) throw new Error((await r.json()).detail||r.statusText);
  return r.json();}
-(async()=>{try{const cs=await (await fetch('/api/clips')).json();
- $('#clip').innerHTML=cs.map(c=>`<option>${c.clip_id}</option>`).join('');}
+let CLIPS=[];
+function onclip(){
+  const c=CLIPS.find(x=>x.clip_id===$('#clip').value); if(!c) return;
+  // The frame box is bounded by the clip, and `which` offers only cameras that exist. Both are
+  // things camlab answers 404 to, and an unanswerable form is a worse error message than any text.
+  $('#frame').max=Math.max(c.n_frames-1,0);
+  if(+$('#frame').value>c.n_frames-1) $('#frame').value=0;
+  $('#frames').textContent=`of 0..${c.n_frames-1}`;
+  const pref=['camera_smooth.json','camera_fixed.json','camera_healed.json'];
+  const best=pref.find(p=>c.cameras.includes(p))||c.cameras[0]||'';
+  $('#which').innerHTML=c.cameras.map(n=>
+    `<option${n===best?' selected':''}>${n}</option>`).join('')
+    || '<option value="">— this clip has no solved camera —</option>';
+}
+(async()=>{try{CLIPS=await (await fetch('/api/clips')).json();
+ $('#clip').innerHTML=CLIPS.map(c=>`<option>${c.clip_id}</option>`).join('');
+ $('#clip').onchange=onclip; onclip();}
  catch(e){say('camlab is not answering — is its server up on 8899?','msg err');}})();
 $('#go').onclick=async()=>{
   say('asking camlab for the frame and its segments…');
