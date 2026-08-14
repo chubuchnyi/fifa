@@ -207,6 +207,37 @@ def draw(frame: np.ndarray, segments: np.ndarray) -> np.ndarray:
     return out
 
 
+def crop_tile(frame: np.ndarray, seg: np.ndarray, index: int, tile: int = 384) -> np.ndarray:
+    """One segment's neighbourhood, upscaled, with the segment drawn thin and **dashed**.
+
+    Dashed on purpose: the question is whether there is white paint under the line, and a solid
+    overlay would be the only white the reader could see. Served one at a time by the review UI and
+    tiled into a contact sheet by `crops` for a model that reads whole images.
+    """
+    cx_, cy_ = (seg[0] + seg[2]) / 2.0, (seg[1] + seg[3]) / 2.0
+    half = max(float(np.hypot(seg[2] - seg[0], seg[3] - seg[1])) * 0.75, 60.0)
+    x0, y0 = int(max(cx_ - half, 0)), int(max(cy_ - half, 0))
+    x1, y1 = int(min(cx_ + half, frame.shape[1])), int(min(cy_ + half, frame.shape[0]))
+    patch = frame[y0:y1, x0:x1].copy()
+    if patch.size == 0:
+        patch = np.zeros((10, 10, 3), np.uint8)
+    scale = tile / max(patch.shape[0], patch.shape[1])
+    patch = cv2.resize(patch, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    p0 = (int((seg[0] - x0) * scale), int((seg[1] - y0) * scale))
+    p1 = (int((seg[2] - x0) * scale), int((seg[3] - y0) * scale))
+    n_dash = 24
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    for d in range(0, n_dash, 2):
+        a = (int(p0[0] + dx * d / n_dash), int(p0[1] + dy * d / n_dash))
+        b = (int(p0[0] + dx * (d + 1) / n_dash), int(p0[1] + dy * (d + 1) / n_dash))
+        cv2.line(patch, a, b, (0, 245, 255), 2, cv2.LINE_AA)
+    canvas = np.zeros((tile + 40, tile, 3), np.uint8)
+    canvas[40:40 + patch.shape[0], :patch.shape[1]] = patch
+    cv2.putText(canvas, f"segment {index}", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
+                (0, 245, 255), 2, cv2.LINE_AA)
+    return canvas
+
+
 def crops(frame: np.ndarray, segments: np.ndarray, tile: int = 384, cols: int = 3) -> np.ndarray:
     """A contact sheet of one zoomed tile per segment — the instrument the labeller asked for.
 
@@ -220,32 +251,7 @@ def crops(frame: np.ndarray, segments: np.ndarray, tile: int = 384, cols: int = 
     so the paint underneath stays visible. A crop cannot answer "which marking is this" — that
     needs the whole pitch — so this is supplementary to the overview, never a replacement.
     """
-    tiles = []
-    for i, s in enumerate(segments, start=1):
-        cx_, cy_ = (s[0] + s[2]) / 2.0, (s[1] + s[3]) / 2.0
-        half = max(float(np.hypot(s[2] - s[0], s[3] - s[1])) * 0.75, 60.0)
-        x0, y0 = int(max(cx_ - half, 0)), int(max(cy_ - half, 0))
-        x1, y1 = int(min(cx_ + half, frame.shape[1])), int(min(cy_ + half, frame.shape[0]))
-        patch = frame[y0:y1, x0:x1].copy()
-        if patch.size == 0:
-            patch = np.zeros((10, 10, 3), np.uint8)
-        scale = tile / max(patch.shape[0], patch.shape[1])
-        patch = cv2.resize(patch, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
-        p0 = (int((s[0] - x0) * scale), int((s[1] - y0) * scale))
-        p1 = (int((s[2] - x0) * scale), int((s[3] - y0) * scale))
-        # Dashed, so the paint the labeller is being asked about is not the paint we drew over.
-        n_dash = 24
-        dx, dy = p1[0] - p0[0], p1[1] - p0[1]
-        for d in range(0, n_dash, 2):
-            a = (int(p0[0] + dx * d / n_dash), int(p0[1] + dy * d / n_dash))
-            b = (int(p0[0] + dx * (d + 1) / n_dash), int(p0[1] + dy * (d + 1) / n_dash))
-            cv2.line(patch, a, b, (0, 245, 255), 2, cv2.LINE_AA)
-        canvas = np.zeros((tile + 40, tile, 3), np.uint8)
-        canvas[40:40 + patch.shape[0], :patch.shape[1]] = patch
-        cv2.putText(canvas, f"segment {i}", (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.9,
-                    (0, 245, 255), 2, cv2.LINE_AA)
-        tiles.append(canvas)
-
+    tiles = [crop_tile(frame, s, i, tile) for i, s in enumerate(segments, start=1)]
     rows = []
     for r in range(0, len(tiles), cols):
         row = tiles[r:r + cols]

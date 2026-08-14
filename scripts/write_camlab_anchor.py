@@ -328,6 +328,68 @@ def write_manual(run_dir: Path, which: str, frame: int, entry: dict) -> None:
     tmp.replace(path)
 
 
+def solve_anchor(server: str, clip: str, frame: int, which: str, method: str,
+                 labels: dict, run_dir: Path, opts: argparse.Namespace) -> dict:
+    """Rank label-consistent anchors for one frame and leave camlab's store exactly as it was.
+
+    Factored out of `main` so the review UI (`scripts/labeller_ui.py`) drives the identical path
+    rather than a second implementation of it — the failure mode ADR-0013 §4 is about, and the one
+    `#141` keeps producing.
+
+    Ranking writes each candidate into the manual store to score it, because camlab's residual
+    route reads the overlay from disk; the store is restored before returning, so **nothing is
+    committed here**. The caller commits with `write_manual`.
+    """
+    base = f"{server}/api/run/{clip}"
+    lines = get_json(f"{base}/lines/{frame}?method={method}&which={which}")
+    cam = get_json(f"{base}/camera?which={which}")
+    pitch = get_json(f"{server}/api/pitch")
+
+    segments = np.asarray(lines["segments"], float).reshape(-1, 4)
+    opts.cx, opts.cy = float(cam["cx"]), float(cam["cy"])
+    world = {k: np.asarray(pitch["markings"][k], float) for k in MARKING_TYPE}
+    out: dict = {"n_segments": len(segments), "cx": opts.cx, "cy": opts.cy,
+                 "width": int(lines["width"]), "height": int(lines["height"])}
+
+    pool = candidates(segments, labels, world, out["width"], out["height"], opts)
+    out["pool"] = len(pool)
+    out["baseline"] = baseline = get_json(f"{base}/residual/{frame}?which={which}")
+    if not pool:
+        out["scored"], out["twins"], out["floor"] = [], False, 0.0
+        return out
+
+    store = Path(run_dir) / clip / "camera_manual.json"
+    backup = store.read_text() if store.exists() else None
+    scored = []
+    try:
+        for c in pool[:opts.shortlist]:
+            write_manual(store.parent, which, frame, c)
+            c["raw_median_px"] = get_json(f"{base}/residual/{frame}?which={which}")["median_px"]
+            c["refine"] = refine(base, which, frame)
+            r = get_json(f"{base}/residual/{frame}?which={which}")
+            c["median_px"] = r["median_px"]
+            c["worst_line_px"] = r["worst_line_px"]
+            c["n_scored"] = r["n_scored"]
+            c["camera"] = json.loads(store.read_text())[which][str(frame)]
+            scored.append(c)
+    finally:
+        if backup is None:
+            store.unlink(missing_ok=True)
+        else:
+            store.write_text(backup)
+
+    floor = 0.5 * (baseline["n_scored"] or 0)
+    scored.sort(key=lambda c: (c["median_px"] if (c["n_scored"] or 0) >= floor and c["median_px"]
+                               else 1e9))
+    twins = False
+    if len(scored) > 1:
+        a = np.asarray(scored[0]["camera"]["position"], float)
+        b = np.asarray(scored[1]["camera"]["position"], float)
+        twins = float(np.linalg.norm(a[:2] + b[:2])) < 0.05 * float(np.linalg.norm(a[:2]))
+    out["scored"], out["twins"], out["floor"] = scored, twins, floor
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--clip", required=True)
@@ -352,59 +414,28 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true", help="rank only; leave the store untouched")
     args = ap.parse_args()
 
-    base = f"{args.server}/api/run/{args.clip}"
-    lines = get_json(f"{base}/lines/{args.frame}?method={args.method}&which={args.which}")
-    cam = get_json(f"{base}/camera?which={args.which}")
-    pitch = get_json(f"{args.server}/api/pitch")
-
-    segments = np.asarray(lines["segments"], float).reshape(-1, 4)
-    width, height = int(lines["width"]), int(lines["height"])
-    args.cx = float(cam["cx"])
-    args.cy = float(cam["cy"])
-    world = {k: np.asarray(pitch["markings"][k], float) for k in MARKING_TYPE}
-
-    raw = json.loads(Path(args.labels).read_text())
-    labels = {str(k): str(v) for k, v in raw.get("labels", raw).items()}
-
-    print(f"{args.clip} f{args.frame}: {len(segments)} segments, {len(labels)} labelled, "
-          f"principal point ({args.cx:.1f}, {args.cy:.1f}) from camlab")
-
-    pool = candidates(segments, labels, world, width, height, args)
-    if not pool:
-        print("  no label-consistent, physically plausible camera — nothing to write")
-        return 1
-    n_try = min(args.shortlist, len(pool))
-    print(f"  {len(pool)} label-consistent cameras; refitting the best {n_try} with camlab's own "
-          f"auto-fit and scoring them on its paint")
-
-    baseline = get_json(f"{base}/residual/{args.frame}?which={args.which}")
-    print(f"  seed camera on this frame: median {baseline['median_px']} px on "
-          f"{baseline['n_scored']} samples — the bar to beat, and the support reference")
-
-    run_dir = Path(args.run_dir) / args.clip
-    store = run_dir / "camera_manual.json"
-    backup = store.read_text() if store.exists() else None
-    scored = []
-    for c in pool[:n_try]:
-        write_manual(run_dir, args.which, args.frame, c)
-        raw = get_json(f"{base}/residual/{args.frame}?which={args.which}")
-        c["raw_median_px"] = raw["median_px"]
-        c["refine"] = refine(base, args.which, args.frame)
-        r = get_json(f"{base}/residual/{args.frame}?which={args.which}")
-        c["median_px"] = r["median_px"]
-        c["worst_line_px"] = r["worst_line_px"]
-        c["n_scored"] = r["n_scored"]
-        c["camera"] = json.loads(store.read_text())[args.which][str(args.frame)]
-        scored.append(c)
+    raw_labels = json.loads(Path(args.labels).read_text())
+    labels = {str(k): str(v) for k, v in raw_labels.get("labels", raw_labels).items()}
 
     # `n_scored` is not decoration: a camera that has run away projects almost everything somewhere
     # unscoreable and posts a flattering median on the survivors, so a median alone would reward
     # exactly the failure to avoid. The reference is the support the SEED camera gets on this
     # frame — how much of the pitch is scoreable is a property of the frame, not of the method,
     # and taking half the best candidate instead let a 300 px focal set the bar for everyone.
-    floor = 0.5 * (baseline["n_scored"] or 0)
-    scored.sort(key=lambda c: (c["median_px"] if (c["n_scored"] or 0) >= floor and c["median_px"]
-                               else 1e9))
+    res = solve_anchor(args.server, args.clip, args.frame, args.which, args.method,
+                       labels, Path(args.run_dir), args)
+    print(f"{args.clip} f{args.frame}: {res['n_segments']} segments, {len(labels)} labelled, "
+          f"principal point ({res['cx']:.1f}, {res['cy']:.1f}) from camlab")
+    if not res["scored"]:
+        print("  no label-consistent, physically plausible camera — nothing to write")
+        return 1
+
+    scored, baseline, floor = res["scored"], res["baseline"], res["floor"]
+    n_try = min(args.shortlist, res["pool"])
+    print(f"  {res['pool']} label-consistent cameras; refitting the best {n_try} with camlab's own "
+          f"auto-fit and scoring them on its paint")
+    print(f"  seed camera on this frame: median {baseline['median_px']} px on "
+          f"{baseline['n_scored']} samples — the bar to beat, and the support reference")
     print(f"\n  median  worst  n_scored   raw→   focal   position              segments→markings"
           f"   (support floor {floor:.0f})")
     for c in scored[:n_try]:
@@ -419,26 +450,20 @@ def main() -> int:
     # The pitch is exactly symmetric under a half-turn and camlab measures the twin as scoring
     # bit for bit the same, so when the top two are each other's negation the paint has not
     # chosen and cannot. Say so rather than let the sort order look like a decision.
-    if len(scored) > 1:
-        a = np.asarray(scored[0]["camera"]["position"], float)
-        b = np.asarray(scored[1]["camera"]["position"], float)
-        if float(np.linalg.norm(a[:2] + b[:2])) < 0.05 * float(np.linalg.norm(a[:2])):
-            print("\n  ! the top two are HALF-TURN TWINS — the paint scores both the same and\n"
-                  "    never will. Which end this is has to come from off the pitch: the\n"
-                  "    labeller's left/right call, or camlab's `flip 180` button.")
+    if res["twins"]:
+        print("\n  ! the top two are HALF-TURN TWINS — the paint scores both the same and\n"
+              "    never will. Which end this is has to come from off the pitch: the\n"
+              "    labeller's left/right call, or camlab's `flip 180` button.")
 
     best = scored[0]
     ok = (best["n_scored"] or 0) >= floor and best["median_px"] is not None
     if args.dry_run or not ok:
-        if backup is None:
-            store.unlink(missing_ok=True)
-        else:
-            store.write_text(backup)
         why = "dry run" if args.dry_run else f"best is unsupported ({best['n_scored']} scored)"
         print(f"\n  store left as it was ({why})")
         return 0 if args.dry_run else 2
 
-    write_manual(run_dir, args.which, args.frame, best["camera"])
+    store = Path(args.run_dir) / args.clip / "camera_manual.json"
+    write_manual(store.parent, args.which, args.frame, best["camera"])
     print(f"\n  wrote anchor f{args.frame} → {store}")
     print(f"  median {best['median_px']:.2f} px, worst line {best['worst_line_px']:.2f} px on "
           f"{best['n_scored']} scored samples; focal {best['camera']['focal_px']:.0f}, "
