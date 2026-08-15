@@ -47,6 +47,20 @@ from pitch3d.core.scene.plane_camera import _decompose, _k_inv, _measure_focal  
 RANSAC_THRESHOLD_M = 1.0
 RANSAC_ITERS = 400
 
+#: The focal is searched over these bounds (`plane_camera.FOCAL_BOUNDS`). A result sitting ON one
+#: of them is not a lens, it is the search giving up — *a bound that is being hit is a finding, not
+#: a setting* (camlab, `inherited-claims.md`). Seen on the uncropped `14604731` clip: 9 landmarks
+#: clustered in the stands gave focal 300 px at z = 0.03 m, a "camera" lying on the grass, and
+#: without this gate the page presented it as a result and offered to ship it.
+FOCAL_BOUNDS = (300.0, 20000.0)
+#: A broadcast or phone camera is above the pitch and off it. Deliberately wide — camlab's own
+#: bootstrap gate (5–45 m) rejects a phone held at 1.5 m, which its `pitch-level-clips` branch
+#: records as rejecting the *true* camera outright.
+HEIGHT_BOUNDS = (1.0, 80.0)
+#: camlab calls a frame solved under 20 px. Above it the anchor is still written — the eye is the
+#: judge and a bad anchor loses to the seed on the paint anyway — but the caller is told plainly.
+BAND_PX = 20.0
+
 
 def landmarks(clip_frames_dir: Path, frame: int, device: str) -> tuple[np.ndarray, np.ndarray,
                                                                       np.ndarray, dict]:
@@ -122,6 +136,17 @@ def main() -> int:
              "position": [float(v) for v in centre]}
     print(f"  camera: focal {focal:.0f} px, position {np.round(centre, 2).tolist()} m")
 
+    edge = 0.01 * (FOCAL_BOUNDS[1] - FOCAL_BOUNDS[0])
+    if not (FOCAL_BOUNDS[0] + edge < focal < FOCAL_BOUNDS[1] - edge):
+        print(f"  REFUSED: the focal came back at {focal:.0f} px, on the edge of the "
+              f"{FOCAL_BOUNDS[0]:.0f}–{FOCAL_BOUNDS[1]:.0f} px search range. That is the search "
+              f"giving up, not a lens — the landmarks do not pin a camera on this frame.")
+        return 3
+    if not (HEIGHT_BOUNDS[0] < centre[2] < HEIGHT_BOUNDS[1]):
+        print(f"  REFUSED: this puts the camera {centre[2]:.2f} m above the pitch, outside "
+              f"{HEIGHT_BOUNDS[0]:.0f}–{HEIGHT_BOUNDS[1]:.0f} m. Nobody filmed from there.")
+        return 3
+
     store = run / "camera_manual.json"
     backup = store.read_text() if store.exists() else None
     write_manual(run, args.which, args.frame, entry)
@@ -134,6 +159,11 @@ def main() -> int:
           f"on {got['n_scored']} samples  (moved={ref.get('moved')})")
     print(f"  final camera : focal {final['focal_px']:.0f} px, "
           f"position {np.round(final['position'], 2).tolist()} m")
+
+    median = got["median_px"]
+    if median is None or median > BAND_PX:
+        print(f"  ⚠ {median} px is outside camlab's {BAND_PX:.0f} px band — this camera is "
+              f"written, but look at the overlay before trusting it.")
 
     if args.dry_run:
         if backup is None:
