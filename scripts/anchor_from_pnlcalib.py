@@ -94,6 +94,14 @@ def landmarks(clip_frames_dir: Path, frame: int, device: str) -> tuple[np.ndarra
             {"uv": l_uv, "abc": l_abc, "conf": l_conf, "w": w_orig, "h": h_orig})
 
 
+def _restore(store: Path, backup: str | None) -> None:
+    """Put camlab's store back exactly as it was. A refusal must leave no trace."""
+    if backup is None:
+        store.unlink(missing_ok=True)
+    else:
+        store.write_text(backup)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--clip", required=True)
@@ -160,16 +168,34 @@ def main() -> int:
     print(f"  final camera : focal {final['focal_px']:.0f} px, "
           f"position {np.round(final['position'], 2).tolist()} m")
 
-    median = got["median_px"]
-    if median is None or median > BAND_PX:
-        print(f"  ⚠ {median} px is outside camlab's {BAND_PX:.0f} px band — this camera is "
-              f"written, but look at the overlay before trusting it.")
+    # camlab's own rule, which this script read and then did not apply: "worst_line_px first,
+    # because it is the verdict. A pooled median cannot show a camera sitting on one family of
+    # lines while the family parallel to it is metres off." On `MOR_POR_181952` f7 the median was
+    # 11.3 px and two of the five scored markings sat at 87 and 70 px — inside the band by the
+    # median, nowhere near a camera.
+    worst = got["worst_line_px"]
+    n_markings = len(got.get("per_line") or {})
+    print(f"  support      : {n_markings} markings scored, coverage {got.get('coverage')}")
+    if worst is None or worst > BAND_PX:
+        print(f"  REFUSED: worst line {worst} px is outside camlab's {BAND_PX:.0f} px band. The "
+              f"median ({got['median_px']} px) is not the verdict — a camera can sit on one family "
+              f"of lines and be metres off the family parallel to it.")
+        _restore(store, backup)
+        return 3
+
+    # And camlab's own acceptance test, which it reports and this script used to print in passing.
+    # `matched: false` means not one detected segment paired with a projected marking: the residual
+    # can still score, because it walks the model and looks for paint along the normal, but the
+    # solver cannot name a line. That is an aim too far out to build on, whatever the number says.
+    if not ref.get("matched", True) or ref.get("matched_after", 1) == 0:
+        print(f"  REFUSED: camlab's auto-fit matched {ref.get('matched_after')} of "
+              f"{ref.get('lines')} detected lines, and it needs {ref.get('min_matched')}. The aim "
+              f"is close enough to score and too far for the solver to pair lines with it.")
+        _restore(store, backup)
+        return 3
 
     if args.dry_run:
-        if backup is None:
-            store.unlink(missing_ok=True)
-        else:
-            store.write_text(backup)
+        _restore(store, backup)
         print("  store left as it was (dry run)")
     else:
         print(f"  wrote anchor f{args.frame} → {store}")
