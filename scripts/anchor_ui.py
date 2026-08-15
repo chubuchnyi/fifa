@@ -160,27 +160,53 @@ def _job(kind: str, ident: str) -> None:
             if best is None or (len(uv), spread) > (best[1], best[2]):
                 best = (f, len(uv), spread)
 
-        if best is None or best[1] < 6 or best[2] < 300.0:
-            got = f"{best[1]} landmarks spread over {best[2]:.0f} px" if best else "nothing"
+        ranked = sorted(checked, key=lambda c: (-c["n"], -c["spread"]))
+        usable = [c for c in ranked if c["n"] >= 6 and c["spread"] >= 300.0]
+        if not usable:
+            top = ranked[0] if ranked else {"frame": 0, "n": 0, "spread": 0}
             JOB.error = (
-                f"No frame of {clip} shows enough of the pitch. The best is frame "
-                f"{best[0] if best else 0} with {got}; a camera needs at least 6 landmarks "
-                f"spread over 300 px.\n\nWhat was found:\n"
+                f"No frame of {clip} shows enough of the pitch. The best is frame {top['frame']} "
+                f"with {top['n']} landmarks spread over {top['spread']} px; a camera needs at "
+                f"least 6 over 300 px.\n\nWhat was found:\n"
                 + "\n".join(f"  frame {c['frame']}: {c['n']} landmarks over {c['spread']} px"
                              for c in checked)
                 + "\n\nThis clip has to be aimed by hand in camlab's viewer.")
             return
 
-        _set("fitting the camera",
-             f"frame {best[0]} has {best[1]} landmarks — building the camera and letting "
-             f"camlab's own auto-fit finish it", 2)
-        r = run(["scripts/anchor_from_pnlcalib.py", "--clip", clip, "--frame", str(best[0]),
-                 "--which", "camera_start.json", "--server", CFG.camlab,
-                 "--run-dir", str(CFG.run_dir), "--device", CFG.device])
-        if r.returncode != 0:
-            JOB.error = (r.stdout + r.stderr).strip()[-600:]
+        # Try the best few and let the PAINT choose, instead of trusting the landmark count to
+        # predict which frame yields a camera. It does not: on `MOR_POR_181952` every frame
+        # returns 12-13 landmarks over ~915 px, and the worst line they produce runs from 88 px
+        # (refused) to 11 px (a good anchor). The difference is invisible before the fit.
+        tries, best_row = usable[:3], None
+        for k, c in enumerate(tries, start=1):
+            _set("fitting the camera",
+                 f"frame {c['frame']} ({c['n']} landmarks) — candidate {k} of {len(tries)}; "
+                 f"camlab scores each one against the paint it detected", 2)
+            r = run(["scripts/anchor_from_pnlcalib.py", "--clip", clip, "--frame",
+                     str(c["frame"]), "--which", "camera_start.json", "--server", CFG.camlab,
+                     "--run-dir", str(CFG.run_dir), "--device", CFG.device])
+            if r.returncode != 0:
+                JOB.detail = f"frame {c['frame']} refused"
+                continue
+            got = _score(clip, c["frame"], "camera_start.json", r.stdout.strip())
+            JOB.detail = f"frame {c['frame']}: worst line {got['worst_line_px']} px"
+            if best_row is None or (got["worst_line_px"] or 1e9) < (best_row["worst_line_px"]
+                                                                   or 1e9):
+                best_row = got
+        if best_row is None:
+            JOB.error = (
+                f"Every candidate frame of {clip} was refused — the landmarks are there but the "
+                f"camera they imply does not land on the paint.\n\n"
+                + (r.stdout + r.stderr).strip()[-500:])
             return
-        JOB.result = _score(clip, best[0], "camera_start.json", r.stdout.strip())
+        if best_row["frame"] != tries[0]["frame"]:
+            _set("fitting the camera", f"keeping frame {best_row['frame']}", 2)
+            run(["scripts/anchor_from_pnlcalib.py", "--clip", clip, "--frame",
+                 str(best_row["frame"]), "--which", "camera_start.json", "--server", CFG.camlab,
+                 "--run-dir", str(CFG.run_dir), "--device", CFG.device])
+        JOB.result = best_row
+        return
+
     except Exception as exc:  # noqa: BLE001 - a page must say what broke, not go blank
         JOB.error = f"{type(exc).__name__}: {exc}"
     finally:
