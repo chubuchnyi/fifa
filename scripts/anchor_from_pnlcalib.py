@@ -175,7 +175,34 @@ def main() -> int:
     # median, nowhere near a camera.
     worst = got["worst_line_px"]
     n_markings = len(got.get("per_line") or {})
-    print(f"  support      : {n_markings} markings scored, coverage {got.get('coverage')}")
+    spot, p90 = got.get("worst_place_px"), got.get("p90_px")
+    unmatched, projected = got.get("n_unmatched") or 0, got.get("n_projected") or 0
+    print(f"  worst line {worst} px · worst spot {spot} px · p90 {p90} px")
+    print(f"  support      : {n_markings} markings scored, {unmatched} projected with NO paint "
+          f"under them, coverage {got.get('coverage')}")
+
+    # camlab's landmine, applied at last: "A per-marking MEDIAN cannot be checked with a ruler. A
+    # ruler lands where a line is furthest out; the median lands in the middle. Report both or the
+    # human is right and the number is wrong every time." So report the spot and the p90 — and gate
+    # on the thing that actually separates the cases, which is not a threshold anyone had to pick.
+    #
+    # Measured over every anchor this script has produced plus two camlab believes:
+    #   ENG_FRA f88   line  3.07  spot 20.94  p90  3.76  unmatched  0
+    #   stadium_a f28 line  1.41  spot  5.69  p90  1.67  unmatched  0
+    #   14604680 f30  line  3.47  spot  6.24  p90  3.93  unmatched  0
+    #   fan f8        line  1.57  spot 14.63               unmatched  0
+    #   broadcast f0  line  3.42  spot 10.87               unmatched  0
+    #   MOR_POR f35   line 12.10  spot 75.84  p90 29.62  unmatched 24
+    # Every believable camera puts paint under every marking it projects. A worst-spot threshold
+    # would have to sit above 20.94 to keep ENG_FRA and below 75.84 to reject MOR_POR — a number
+    # chosen to fit two points. `unmatched` is 0 against 24.
+    if projected and unmatched > 0.05 * projected:
+        print(f"  REFUSED: {unmatched} of {projected} projected markings have no paint under them "
+              f"at all. The camera is being scored on the fraction of the pitch that happens to "
+              f"agree with it — camlab's own `g15449383` was called solved on 40 of 40 frames "
+              f"under 20 px on exactly this.")
+        _restore(store, backup)
+        return 3
     if worst is None or worst > BAND_PX:
         print(f"  REFUSED: worst line {worst} px is outside camlab's {BAND_PX:.0f} px band. The "
               f"median ({got['median_px']} px) is not the verdict — a camera can sit on one family "
