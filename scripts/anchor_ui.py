@@ -55,7 +55,7 @@ CFG = SimpleNamespace(camlab="http://127.0.0.1:8899", run_dir=Path("/home/chubuc
 #: on a thread and reports where it is. The first version did the work inside the request and put
 #: one line of text in a corner panel; the operator's reading of that was "nothing happens", which
 #: is the correct reading of a page that shows nothing for fifty seconds.
-JOB = SimpleNamespace(running=False, stage="", detail="", step=0, result=None, error=None)
+JOB = SimpleNamespace(running=False, stage="", detail="", step=0, result=None, error=None, what="")
 
 
 def _set(stage: str, detail: str = "", step: int = 0) -> None:
@@ -238,11 +238,16 @@ def _score(clip: str, frame: int, which: str, log: str) -> dict:
 
 @app.post("/api/go")
 def go(body: dict) -> JSONResponse:
-    """Start the whole thing for whatever is selected — a clip or a video, one button either way."""
-    if JOB.running:
-        raise HTTPException(409, "already working on one")
+    """Start the whole thing for whatever is selected — a clip or a video, one button either way.
+
+    One job at a time, and a second press **attaches** to the one already running rather than
+    being refused. The refusal read as "it is not computing" from the outside, which is the worst
+    thing a long job can say: it is computing, and the page just would not show it.
+    """
     kind, ident = str(body.get("kind", "clip")), str(body["id"])
-    JOB.running, JOB.result, JOB.error = True, None, None
+    if JOB.running:
+        return JSONResponse({"started": False, "attached": True, "working_on": JOB.what})
+    JOB.running, JOB.result, JOB.error, JOB.what = True, None, None, f"{kind}:{ident}"
     _set("starting", "", 1)
     threading.Thread(target=_job, args=(kind, ident), daemon=True).start()
     return JSONResponse({"started": True})
@@ -251,7 +256,8 @@ def go(body: dict) -> JSONResponse:
 @app.get("/api/progress")
 def progress() -> JSONResponse:
     return JSONResponse({"running": JOB.running, "stage": JOB.stage, "detail": JOB.detail,
-                         "step": JOB.step, "result": JOB.result, "error": JOB.error})
+                         "step": JOB.step, "result": JOB.result, "error": JOB.error,
+                         "what": JOB.what})
 
 
 @app.post("/api/solve")
@@ -401,14 +407,21 @@ async function load(){
     $('#pick').innerHTML=d.items.map(i=>
       `<option value="${i.kind}:${i.id}">${i.label}</option>`).join('');
   }catch(e){ stage('camlab is not answering on port 8899',
-      'start it, then reload this page', false); lock(true); }
+      'start it, then reload this page', false); lock(true); return; }
+  // A job may already be running — from another tab, or from before this reload. Show it instead
+  // of an idle page that then refuses the button.
+  try{ const p=await (await fetch('/api/progress')).json();
+    if(p.running){ lock(true); steps(p.step||1); stage(p.stage,p.detail,true); poll(); }
+  }catch(e){}
 }
 load();
 $('#go').onclick=async()=>{
   const [kind,...rest]=$('#pick').value.split(':'); const id=rest.join(':');
   lock(true); note(''); $('#log').textContent=''; $('#score').textContent='working…';
   steps(1); stage('starting…','',true);
-  try{ await jp('/api/go',{kind,id}); poll(); }
+  try{ const j=await jp('/api/go',{kind,id});
+    if(j.attached) note('one was already running ('+j.working_on+') — showing that one.','ok');
+    poll(); }
   catch(e){ lock(false); stage('could not start','',false); note(e.message,'err'); }
 };
 function poll(){
@@ -455,7 +468,10 @@ $('#solve').onclick=async()=>{
 
 @app.get("/", response_class=HTMLResponse)
 def index() -> HTMLResponse:
-    return HTMLResponse(PAGE)
+    # No-store, because this page is edited and the server restarted while a tab is open, and a
+    # cached copy of the previous build is indistinguishable from "it stopped working".
+    return HTMLResponse(PAGE, headers={"Cache-Control": "no-store, must-revalidate",
+                                       "Pragma": "no-cache"})
 
 
 def main() -> int:
