@@ -275,15 +275,23 @@ def prepare(args: argparse.Namespace) -> int:
         print(f"could not decode {base}/frame/{args.frame}")
         return 1
 
-    models = {int(e["marking"]): np.asarray(e["model"], float) for e in data["lines"]}
-    key = {}
-    for i, seg in enumerate(segments, start=1):
-        k, dist = segment_to_marking(seg, models)
-        key[str(i)] = {
-            "marking": k,
-            "type": MARKING_TYPE.get(k, "not_a_marking") if k is not None else "not_a_marking",
-            "distance_px": round(dist, 2),
-        }
+    # An answer key is the pitch model projected through a camera that is RIGHT. Through camlab's
+    # `hand_start_default` — a hardcoded (0, −75, 20) at 22° that never saw the clip — it is the
+    # default's error, not the truth. Measured on `demo_15449387` f0: all 12 segments come back
+    # `not_a_marking` at 275–536 px, which reads exactly like a labeller scoring 0 % and is not a
+    # measurement at all. So refuse to write one and say why (R-6: mark, never hide).
+    cam = json.loads(fetch(f"{base}/camera?which={args.which}"))
+    key: dict | None = None
+    if not cam.get("is_default"):
+        models = {int(e["marking"]): np.asarray(e["model"], float) for e in data["lines"]}
+        key = {}
+        for i, seg in enumerate(segments, start=1):
+            k, dist = segment_to_marking(seg, models)
+            key[str(i)] = {
+                "marking": k,
+                "type": MARKING_TYPE.get(k, "not_a_marking") if k is not None else "not_a_marking",
+                "distance_px": round(dist, 2),
+            }
 
     out_dir = Path(args.out) / f"{args.clip}_f{args.frame}"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -292,12 +300,20 @@ def prepare(args: argparse.Namespace) -> int:
     (out_dir / "key.json").write_text(json.dumps({
         "clip": args.clip, "frame": args.frame, "which": args.which, "method": args.method,
         "explain_px": EXPLAIN_PX, "summary": data["summary"], "key": key,
+        "no_key_because": None if key is not None else
+        f"{args.which} is camlab's {cam.get('model')} — a default, not a solve, so the pitch "
+        f"projected through it is the default's error and not an answer. Solve the clip first.",
     }, indent=2))
     (out_dir / "segments.json").write_text(json.dumps(segments.tolist(), indent=2))
 
-    named = sum(1 for v in key.values() if v["marking"] is not None)
-    print(f"{args.clip} f{args.frame}: {len(segments)} segments, {named} explained by the camera "
-          f"within {EXPLAIN_PX:.0f} px, {len(segments) - named} not")
+    if key is None:
+        print(f"{args.clip} f{args.frame}: {len(segments)} segments. NO ANSWER KEY — "
+              f"{args.which} is a default, not a solve, so there is nothing to score against. "
+              f"The images are still the labelling instrument; camlab's paint is the only judge.")
+    else:
+        named = sum(1 for v in key.values() if v["marking"] is not None)
+        print(f"{args.clip} f{args.frame}: {len(segments)} segments, {named} explained by the "
+              f"camera within {EXPLAIN_PX:.0f} px, {len(segments) - named} not")
     print(f"  labelling image: {out_dir / 'numbered.png'}")
     print(f"  close-ups      : {out_dir / 'crops.png'}")
     print(f"  answer key     : {out_dir / 'key.json'}  (do not show this to the labeller)")
@@ -306,7 +322,11 @@ def prepare(args: argparse.Namespace) -> int:
 
 def score(args: argparse.Namespace) -> int:
     d = Path(args.dir)
-    key = json.loads((d / "key.json").read_text())["key"]
+    blob = json.loads((d / "key.json").read_text())
+    key = blob["key"]
+    if key is None:
+        print(f"  no answer key: {blob.get('no_key_because')}")
+        return 1
     labels = json.loads(Path(args.labels).read_text())
     labels = labels.get("labels", labels)
 
