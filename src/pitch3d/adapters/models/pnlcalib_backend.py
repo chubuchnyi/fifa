@@ -74,8 +74,24 @@ _INPUT_H = 540
 _N_MAIN = 57
 
 
+#: PnLCalib's line-head class order. The head returns **integer ids**, 1-based into this list, and
+#: its own `FramebyFrameCalib.update` reads them that way. Copied from
+#: `PnLCalib/utils/utils_lines.py:LineKeypointsDB.lines_list` rather than imported, because that
+#: module pulls a dependency (`ellipse`) the inference path does not install — so `_load` asserts
+#: the length against the head's own channel count instead, and the copy cannot drift in silence.
+LINE_CLASSES = (
+    "Big rect. left bottom", "Big rect. left main", "Big rect. left top",
+    "Big rect. right bottom", "Big rect. right main", "Big rect. right top",
+    "Goal left crossbar", "Goal left post left ", "Goal left post right",
+    "Goal right crossbar", "Goal right post left", "Goal right post right",
+    "Middle line", "Side line bottom", "Side line left", "Side line right", "Side line top",
+    "Small rect. left bottom", "Small rect. left main", "Small rect. left top",
+    "Small rect. right bottom", "Small rect. right main", "Small rect. right top",
+)
+
+
 def _unletterbox_point(d: dict, scale: float, pad_x: int, pad_y: int,
-                       w_orig: int, h_orig: int) -> bool:
+                       w_orig: int, h_orig: int, kx: str = "x", ky: str = "y") -> bool:
     """Map one decoded ``{"x","y"}`` back to the ORIGINAL frame in place; False if it is outside.
 
     The heads see a padded, aspect-preserved copy, and `complete_keypoints(normalize=True)` divides
@@ -86,13 +102,13 @@ def _unletterbox_point(d: dict, scale: float, pad_x: int, pad_y: int,
     A point landing in the padding is dropped rather than clamped: it is outside the picture, and a
     clamped landmark is a correspondence to a place the camera never saw.
     """
-    if "x" not in d or "y" not in d:
+    if kx not in d or ky not in d:
         return True
-    x = (float(d["x"]) * _INPUT_W - pad_x) / scale
-    y = (float(d["y"]) * _INPUT_H - pad_y) / scale
+    x = (float(d[kx]) * _INPUT_W - pad_x) / scale
+    y = (float(d[ky]) * _INPUT_H - pad_y) / scale
     if not (0.0 <= x <= w_orig and 0.0 <= y <= h_orig):
         return False
-    d["x"], d["y"] = x / w_orig, y / h_orig
+    d[kx], d[ky] = x / w_orig, y / h_orig
     return True
 
 # SoccerNet line class → world ``(a, b, c)``, ``a² + b² = 1``. PnLCalib's line head emits SoccerNet
@@ -169,10 +185,12 @@ class _PnLCalibBackend:
         for kid in [k for k, d in kp_dict.items()
                     if isinstance(d, dict) and not _unletterbox_point(d, *box)]:
             kp_dict.pop(kid, None)
-        for name, pts in list(lines_dict.items()):
-            if isinstance(pts, (list, tuple)):
-                lines_dict[name] = [d for d in pts if isinstance(d, dict)
-                                    and _unletterbox_point(d, *box)]
+        for name, ends in list(lines_dict.items()):
+            if isinstance(ends, dict):
+                ok1 = _unletterbox_point(ends, *box, kx="x_1", ky="y_1")
+                ok2 = _unletterbox_point(ends, *box, kx="x_2", ky="y_2")
+                if not (ok1 and ok2):
+                    lines_dict.pop(name, None)
         return kp_dict, lines_dict, int(w_orig), int(h_orig)
 
     def _line_observations(
@@ -189,18 +207,26 @@ class _PnLCalibBackend:
         uv: list[list[float]] = []
         abc: list[np.ndarray] = []
         conf: list[float] = []
-        for name, pts in lines_dict.items():
-            line = _PITCH_LINES.get(str(name))
-            if line is None or not isinstance(pts, (list, tuple)):
+        for key, ends in lines_dict.items():
+            # The head keys by 1-based class id and gives ONE dict holding both endpoints. This
+            # used to look for SoccerNet class names and a list of `{x, y, p}`, so nothing ever
+            # matched and every clip reported zero point-on-line observations — for the whole life
+            # of this backend, at 55 % of its per-frame cost.
+            try:
+                cls = LINE_CLASSES[int(key) - 1]
+            except (TypeError, ValueError, IndexError):
                 continue
-            for d in pts:
+            line = _PITCH_LINES.get(cls)
+            if line is None or not isinstance(ends, dict):
+                continue  # circles are curved and goal frames sit at Z != 0: neither is planar
+            for sfx in ("_1", "_2"):
                 try:
-                    x, y = float(d["x"]), float(d["y"])
+                    x, y = float(ends[f"x{sfx}"]), float(ends[f"y{sfx}"])
                 except (TypeError, KeyError, ValueError):
                     continue
                 uv.append([x * w_orig, y * h_orig])  # normalised → original image px
                 abc.append(line)
-                conf.append(float(d.get("p", 1.0)) if isinstance(d, dict) else 1.0)
+                conf.append(float(ends.get(f"p{sfx}", 1.0)))
         return (
             np.asarray(uv, dtype=float).reshape(-1, 2),
             np.asarray(abc, dtype=float).reshape(-1, 3),

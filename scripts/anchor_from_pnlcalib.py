@@ -143,8 +143,10 @@ def main() -> int:
     print(f"{args.clip} f{args.frame}: PnLCalib returned {len(image_uv)} named keypoints "
           f"(mean conf {conf.mean():.2f} )" if len(image_uv) else
           f"{args.clip} f{args.frame}: PnLCalib returned NO keypoints")
-    print(f"  {len(lines['uv'])} point-on-line observations; principal point ({cx:.1f}, {cy:.1f}) "
-          f"from camlab")
+    n_lines = 0 if args.no_lines else len(lines["uv"])
+    print(f"  {n_lines} point-on-line rows used"
+          + (f" ({len(lines['uv'])} available, --no-lines)" if args.no_lines else "")
+          + f"; principal point ({cx:.1f}, {cy:.1f}) from camlab")
     if len(image_uv) < 4:
         print("  fewer than four named landmarks — no homography. Try another frame.")
         return 1
