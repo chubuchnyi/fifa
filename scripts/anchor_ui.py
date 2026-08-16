@@ -137,7 +137,7 @@ def _job(kind: str, ident: str) -> None:
                                 (r.stdout + r.stderr).strip())
             return
 
-        from anchor_from_pnlcalib import KNOWN_HARD  # noqa: PLC0415
+        from anchor_from_pnlcalib import KNOWN_HARD, fit_anchor  # noqa: PLC0415
         from write_camlab_anchor import write_manual  # noqa: PLC0415
 
         if clip in KNOWN_HARD:
@@ -192,15 +192,16 @@ def _job(kind: str, ident: str) -> None:
             _set("fitting the camera",
                  f"frame {c['frame']} ({c['n']} landmarks) — candidate {k} of {len(tries)}; "
                  f"camlab scores each one against the paint it detected", 2)
-            r = run(["scripts/anchor_from_pnlcalib.py", "--clip", clip, "--frame",
-                     str(c["frame"]), "--which", "camera_start.json", "--server", CFG.camlab,
-                     "--run-dir", str(CFG.run_dir), "--device", CFG.device])
-            if r.returncode != 0:
-                JOB.detail = f"frame {c['frame']} refused"
+            # In this process: as a subprocess each candidate re-read 500 MB of weights, about
+            # 11 s of a 49 s run for three of them.
+            r = fit_anchor(clip, c["frame"], which="camera_start.json", server=CFG.camlab,
+                           run_dir=str(CFG.run_dir), device=CFG.device)
+            last_log = "\n".join(r["log"])
+            if not r["ok"]:
+                JOB.detail = f"frame {c['frame']} refused: {r.get('reason', '')[:80]}"
                 continue
-            got = _score(clip, c["frame"], "camera_start.json", r.stdout.strip())
-            store = CFG.run_dir / clip / "camera_manual.json"
-            got["camera"] = json.loads(store.read_text())["camera_start.json"][str(c["frame"])]
+            got = _score(clip, c["frame"], "camera_start.json", last_log)
+            got["camera"] = r["camera"]
             JOB.detail = f"frame {c['frame']}: worst line {got['worst_line_px']} px"
             if best_row is None or (got["worst_line_px"] or 1e9) < (best_row["worst_line_px"]
                                                                    or 1e9):
@@ -208,8 +209,7 @@ def _job(kind: str, ident: str) -> None:
         if best_row is None:
             JOB.error = (
                 f"Every candidate frame of {clip} was refused — the landmarks are there but the "
-                f"camera they imply does not land on the paint.\n\n"
-                + (r.stdout + r.stderr).strip()[-500:])
+                f"camera they imply does not land on the paint.\n\n" + last_log[-700:])
             return
         # Write the winner back from what was already measured, rather than refitting it. The
         # later candidates overwrote the store, but each one's camera was captured as it went, so

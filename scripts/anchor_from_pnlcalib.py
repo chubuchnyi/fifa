@@ -134,47 +134,49 @@ def _restore(store: Path, backup: str | None) -> None:
         store.write_text(backup)
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--clip", required=True)
-    ap.add_argument("--frame", type=int, default=0)
-    ap.add_argument("--which", default="camera_start.json", help="the solve the anchor overlays")
-    ap.add_argument("--server", default="http://127.0.0.1:8899")
-    ap.add_argument("--run-dir", default="/home/chubuchnyi/camlab/runs")
-    ap.add_argument("--device", default="cpu")
-    ap.add_argument("--no-lines", action="store_true", help="points only, no point-on-line rows")
-    ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--force", action="store_true", help="try a clip listed in KNOWN_HARD anyway")
-    args = ap.parse_args()
+def fit_anchor(clip: str, frame: int, *, which: str = "camera_start.json",
+               server: str = "http://127.0.0.1:8899",
+               run_dir: str = "/home/chubuchnyi/camlab/runs", device: str = "cpu",
+               no_lines: bool = False, dry_run: bool = False, force: bool = False) -> dict:
+    """Fit one anchor and let camlab judge it. Returns the verdict and the lines to print.
 
-    if args.clip in KNOWN_HARD and not args.force:
-        print(f"{args.clip}: known not to solve on this path — {KNOWN_HARD[args.clip]}")
-        print("  Pass --force to try anyway.")
-        return 4
+    Callable rather than a CLI-only path so the review page runs it **in this process**: each
+    candidate used to be a subprocess that re-read 500 MB of weights, about 11 s of a 49 s run for
+    three candidates. `main` is now a thin wrapper that prints what this returns, so the page and
+    the command line cannot drift into two opinions of what a good anchor is.
+    """
+    log: list[str] = []
+    out: dict = {"ok": False, "code": 1, "log": log, "clip": clip, "frame": frame, "which": which}
+    if clip in KNOWN_HARD and not force:
+        log.append(f"{clip}: known not to solve on this path — {KNOWN_HARD[clip]}")
+        log.append("  Pass --force to try anyway.")
+        out["code"], out["reason"] = 4, KNOWN_HARD[clip]
+        return out
 
-    base = f"{args.server}/api/run/{args.clip}"
-    cam = get_json(f"{base}/camera?which={args.which}")
+    base = f"{server}/api/run/{clip}"
+    cam = get_json(f"{base}/camera?which={which}")
     cx, cy = float(cam["cx"]), float(cam["cy"])
-    run = Path(args.run_dir) / args.clip
+    run = Path(run_dir) / clip
 
-    image_uv, world_xy, conf, lines = landmarks(run / "frames", args.frame, args.device)
-    print(f"{args.clip} f{args.frame}: PnLCalib returned {len(image_uv)} named keypoints "
-          f"(mean conf {conf.mean():.2f} )" if len(image_uv) else
-          f"{args.clip} f{args.frame}: PnLCalib returned NO keypoints")
-    n_lines = 0 if args.no_lines else len(lines["uv"])
-    print(f"  {n_lines} point-on-line rows used"
-          + (f" ({len(lines['uv'])} available, --no-lines)" if args.no_lines else "")
-          + f"; principal point ({cx:.1f}, {cy:.1f}) from camlab")
+    image_uv, world_xy, conf, lines = landmarks(run / "frames", frame, device)
+    log.append(f"{clip} f{frame}: PnLCalib returned {len(image_uv)} named keypoints "
+               f"(mean conf {conf.mean():.2f})" if len(image_uv) else
+               f"{clip} f{frame}: PnLCalib returned NO keypoints")
+    n_lines = 0 if no_lines else len(lines["uv"])
+    log.append(f"  {n_lines} point-on-line rows used"
+               + (f" ({len(lines['uv'])} available, --no-lines)" if no_lines else "")
+               + f"; principal point ({cx:.1f}, {cy:.1f}) from camlab")
     if len(image_uv) < 4:
-        print("  fewer than four named landmarks — no homography. Try another frame.")
-        return 1
+        log.append("  fewer than four named landmarks — no homography. Try another frame.")
+        out["reason"] = "fewer than four named landmarks on this frame"
+        return out
 
-    kw = {} if args.no_lines or not len(lines["uv"]) else {
+    kw = {} if no_lines or not len(lines["uv"]) else {
         "line_uv": lines["uv"], "line_abc": lines["abc"], "line_weights": lines["conf"]}
     h_i2w, inliers = solve_homography_ransac(
         image_uv, world_xy, weights=conf, threshold=RANSAC_THRESHOLD_M,
         max_iters=RANSAC_ITERS, seed=0, **kw)
-    print(f"  homography from {int(np.sum(inliers))}/{len(inliers)} inlier landmarks")
+    log.append(f"  homography from {int(np.sum(inliers))}/{len(inliers)} inlier landmarks")
 
     h_w2i = np.linalg.inv(h_i2w)
     focal = _measure_focal([h_w2i], cx, cy)
@@ -182,31 +184,37 @@ def main() -> int:
     centre = -rot.T @ t
     entry = {"focal_px": float(focal), "rotation": cv2.Rodrigues(rot)[0].ravel().tolist(),
              "position": [float(v) for v in centre]}
-    print(f"  camera: focal {focal:.0f} px, position {np.round(centre, 2).tolist()} m")
+    log.append(f"  camera: focal {focal:.0f} px, position {np.round(centre, 2).tolist()} m")
 
     edge = 0.01 * (FOCAL_BOUNDS[1] - FOCAL_BOUNDS[0])
     if not (FOCAL_BOUNDS[0] + edge < focal < FOCAL_BOUNDS[1] - edge):
-        print(f"  REFUSED: the focal came back at {focal:.0f} px, on the edge of the "
-              f"{FOCAL_BOUNDS[0]:.0f}–{FOCAL_BOUNDS[1]:.0f} px search range. That is the search "
-              f"giving up, not a lens — the landmarks do not pin a camera on this frame.")
-        return 3
+        out["reason"] = (
+            f"the focal came back at {focal:.0f} px, on the edge of the "
+            f"{FOCAL_BOUNDS[0]:.0f}–{FOCAL_BOUNDS[1]:.0f} px search range. That is the search "
+            f"giving up, not a lens — the landmarks do not pin a camera on this frame.")
+        log.append(f"  REFUSED: {out['reason']}")
+        out["code"] = 3
+        return out
     if not (HEIGHT_BOUNDS[0] < centre[2] < HEIGHT_BOUNDS[1]):
-        print(f"  REFUSED: this puts the camera {centre[2]:.2f} m above the pitch, outside "
-              f"{HEIGHT_BOUNDS[0]:.0f}–{HEIGHT_BOUNDS[1]:.0f} m. Nobody filmed from there.")
-        return 3
+        out["reason"] = (
+            f"this puts the camera {centre[2]:.2f} m above the pitch, outside "
+            f"{HEIGHT_BOUNDS[0]:.0f}–{HEIGHT_BOUNDS[1]:.0f} m. Nobody filmed from there.")
+        log.append(f"  REFUSED: {out['reason']}")
+        out["code"] = 3
+        return out
 
     store = run / "camera_manual.json"
     backup = store.read_text() if store.exists() else None
-    write_manual(run, args.which, args.frame, entry)
-    raw = get_json(f"{base}/residual/{args.frame}?which={args.which}")
-    ref = refine(base, args.which, args.frame)
-    got = get_json(f"{base}/residual/{args.frame}?which={args.which}")
-    final = json.loads(store.read_text())[args.which][str(args.frame)]
-    print(f"  raw aim      : median {raw['median_px']} px on {raw['n_scored']} samples")
-    print(f"  after refit  : median {got['median_px']} px, worst line {got['worst_line_px']} px "
-          f"on {got['n_scored']} samples  (moved={ref.get('moved')})")
-    print(f"  final camera : focal {final['focal_px']:.0f} px, "
-          f"position {np.round(final['position'], 2).tolist()} m")
+    write_manual(run, which, frame, entry)
+    raw = get_json(f"{base}/residual/{frame}?which={which}")
+    ref = refine(base, which, frame)
+    got = get_json(f"{base}/residual/{frame}?which={which}")
+    final = json.loads(store.read_text())[which][str(frame)]
+    log.append(f"  raw aim      : median {raw['median_px']} px on {raw['n_scored']} samples")
+    log.append(f"  after refit  : median {got['median_px']} px, worst line {got['worst_line_px']} "
+               f"px on {got['n_scored']} samples  (moved={ref.get('moved')})")
+    log.append(f"  final camera : focal {final['focal_px']:.0f} px, "
+               f"position {np.round(final['position'], 2).tolist()} m")
 
     # camlab's own rule, which this script read and then did not apply: "worst_line_px first,
     # because it is the verdict. A pooled median cannot show a camera sitting on one family of
@@ -217,9 +225,12 @@ def main() -> int:
     n_markings = len(got.get("per_line") or {})
     spot, p90 = got.get("worst_place_px"), got.get("p90_px")
     unmatched, projected = got.get("n_unmatched") or 0, got.get("n_projected") or 0
-    print(f"  worst line {worst} px · worst spot {spot} px · p90 {p90} px")
-    print(f"  support      : {n_markings} markings scored, {unmatched} projected with NO paint "
-          f"under them, coverage {got.get('coverage')}")
+    out.update(camera=final, median_px=got["median_px"], worst_line_px=worst,
+               n_scored=got["n_scored"], worst_place_px=spot, p90_px=p90,
+               n_markings=n_markings, unmatched=unmatched, coverage=got.get("coverage"))
+    log.append(f"  worst line {worst} px · worst spot {spot} px · p90 {p90} px")
+    log.append(f"  support      : {n_markings} markings scored, {unmatched} projected with NO "
+               f"paint under them, coverage {got.get('coverage')}")
 
     # camlab's landmine, applied at last: "A per-marking MEDIAN cannot be checked with a ruler. A
     # ruler lands where a line is furthest out; the median lands in the middle. Report both or the
@@ -237,18 +248,24 @@ def main() -> int:
     # would have to sit above 20.94 to keep ENG_FRA and below 75.84 to reject MOR_POR — a number
     # chosen to fit two points. `unmatched` is 0 against 24.
     if projected and unmatched > 0.05 * projected:
-        print(f"  REFUSED: {unmatched} of {projected} projected markings have no paint under them "
-              f"at all. The camera is being scored on the fraction of the pitch that happens to "
-              f"agree with it — camlab's own `g15449383` was called solved on 40 of 40 frames "
-              f"under 20 px on exactly this.")
+        out["reason"] = (
+            f"{unmatched} of {projected} projected markings have no paint under them at all. The "
+            f"camera is being scored on the fraction of the pitch that happens to agree with it — "
+            f"camlab's own `g15449383` was called solved on 40 of 40 frames under 20 px on "
+            f"exactly this.")
+        log.append(f"  REFUSED: {out['reason']}")
         _restore(store, backup)
-        return 3
+        out["code"] = 3
+        return out
     if worst is None or worst > BAND_PX:
-        print(f"  REFUSED: worst line {worst} px is outside camlab's {BAND_PX:.0f} px band. The "
-              f"median ({got['median_px']} px) is not the verdict — a camera can sit on one family "
-              f"of lines and be metres off the family parallel to it.")
+        out["reason"] = (
+            f"worst line {worst} px is outside camlab's {BAND_PX:.0f} px band. The median "
+            f"({got['median_px']} px) is not the verdict — a camera can sit on one family of "
+            f"lines and be metres off the family parallel to it.")
+        log.append(f"  REFUSED: {out['reason']}")
         _restore(store, backup)
-        return 3
+        out["code"] = 3
+        return out
 
     # camlab's auto-fit reports whether it could pair detected segments with projected markings.
     # Worth saying, **not worth refusing on**: it was a hard refusal for one commit, and it threw
@@ -256,16 +273,38 @@ def main() -> int:
     # inside the band. `matched: false` means the refit could not *improve* the aim, not that the
     # aim is wrong, and the verdict here is the paint.
     if not ref.get("matched", True) or ref.get("matched_after", 1) == 0:
-        print(f"  note: camlab's auto-fit matched {ref.get('matched_after')} of "
-              f"{ref.get('lines')} detected lines (it needs {ref.get('min_matched')}), so it left "
-              f"the aim as it was. The paint still scores it, and that is the verdict.")
+        log.append(f"  note: camlab's auto-fit matched {ref.get('matched_after')} of "
+                   f"{ref.get('lines')} detected lines (it needs {ref.get('min_matched')}), so it "
+                   f"left the aim as it was. The paint still scores it, and that is the verdict.")
 
-    if args.dry_run:
+    if dry_run:
         _restore(store, backup)
-        print("  store left as it was (dry run)")
+        log.append("  store left as it was (dry run)")
     else:
-        print(f"  wrote anchor f{args.frame} → {store}")
-    return 0
+        log.append(f"  wrote anchor f{frame} → {store}")
+    out["ok"], out["code"] = True, 0
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--clip", required=True)
+    ap.add_argument("--frame", type=int, default=0)
+    ap.add_argument("--which", default="camera_start.json", help="the solve the anchor overlays")
+    ap.add_argument("--server", default="http://127.0.0.1:8899")
+    ap.add_argument("--run-dir", default="/home/chubuchnyi/camlab/runs")
+    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--no-lines", action="store_true", help="points only, no point-on-line rows")
+    ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true", help="try a clip listed in KNOWN_HARD anyway")
+    args = ap.parse_args()
+
+    res = fit_anchor(args.clip, args.frame, which=args.which, server=args.server,
+                     run_dir=args.run_dir, device=args.device, no_lines=args.no_lines,
+                     dry_run=args.dry_run, force=args.force)
+    for line in res["log"]:
+        print(line)
+    return int(res["code"])
 
 
 if __name__ == "__main__":
