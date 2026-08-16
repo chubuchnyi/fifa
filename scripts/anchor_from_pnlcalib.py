@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -76,24 +77,41 @@ KNOWN_HARD = {
 }
 
 
-def landmarks(clip_frames_dir: Path, frame: int, device: str) -> tuple[np.ndarray, np.ndarray,
-                                                                      np.ndarray, dict]:
+#: One loaded backend per process. `make()` builds a fresh object every call and `_load()` caches
+#: on the instance, so without this the two HRNets were rebuilt and 500 MB of weights re-read for
+#: EVERY frame — measured at 3.5 s a call against 1.6 s of actual inference, i.e. more than half
+#: the probe was loading the same model nine times.
+_BACKEND: dict = {}
+
+
+def _backend(device: str):  # noqa: ANN202 - the adapter's own type is lazy-imported
+    from pitch3d.adapters.models.pnlcalib_backend import make
+
+    key = (device, os.environ.get("PNLCALIB_WEIGHTS_KP"), os.environ.get("PNLCALIB_REPO"))
+    if key not in _BACKEND:
+        b = make()
+        b.device = device
+        b._load()  # noqa: SLF001 - build the nets once, here, deliberately
+        _BACKEND[key] = b
+    return _BACKEND[key]
+
+
+def landmarks(clip_frames_dir: Path, frame: int, device: str,
+              want_lines: bool = True) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
     """Run PnLCalib on ONE frame and return ``(image_uv, world_xy, confidence, line_obs)``.
 
     Goes through the shipped adapter rather than a second copy of the inference: it owns the
     id→world table import (so the mapping always matches the weights actually loaded) and the
     letterbox fix, without which a portrait clip reaches the heads squashed 0.5x by 0.28x.
     """
-    from pitch3d.adapters.models.pnlcalib_backend import make
-
-    backend = make()
-    backend.device = device
-    s = backend._load()  # noqa: SLF001 - one frame, deliberately not the whole-clip iterator
+    backend = _backend(device)
+    s = backend._load()  # noqa: SLF001 - already built; this returns the cached state
     path = clip_frames_dir / f"{frame:06d}.jpg"
     bgr = cv2.imread(str(path))
     if bgr is None:
         raise SystemExit(f"could not read {path}")
-    kp_dict, lines_dict, w_orig, h_orig = backend._infer_frame(s, bgr)  # noqa: SLF001
+    kp_dict, lines_dict, w_orig, h_orig = backend._infer_frame(  # noqa: SLF001
+        s, bgr, lines=want_lines)
 
     uv, world, conf = [], [], []
     for kid, d in kp_dict.items():

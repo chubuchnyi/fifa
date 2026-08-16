@@ -137,7 +137,7 @@ class _PnLCalibBackend:
     _state: dict = field(default_factory=dict, init=False, repr=False)
 
     def _infer_frame(  # pragma: no cover - heavy path
-        self, s: dict, bgr: np.ndarray
+        self, s: dict, bgr: np.ndarray, *, lines: bool = True
     ) -> tuple[dict, dict, int, int]:
         """Run both HRNet heads on one BGR frame → ``(kp_dict, lines_dict, w_orig, h_orig)``.
 
@@ -168,16 +168,27 @@ class _PnLCalibBackend:
         canvas[:, :, pad_y:pad_y + new_h, pad_x:pad_x + new_w] = tensor
         tensor = canvas.to(self.device)
 
+        # `lines=False` skips the line head, which is 1.94 s of the 3.51 s per frame on CPU
+        # (the keypoint head is 1.57 s). Worth it only where the lines are not wanted — the frame
+        # probe counts landmarks and nothing else — and never on the frame actually being fitted,
+        # where the point-on-line rows take worst line 3.47 -> 2.10 px on `demo_14604680`.
+        # `complete_keypoints` also uses the lines to complete occluded keypoints, so a probe run
+        # can report slightly FEWER landmarks than the fit will see. That is the safe direction.
         with torch.no_grad():
             heatmaps = s["model"](tensor)
-            heatmaps_l = s["model_l"](tensor)
+            heatmaps_l = s["model_l"](tensor) if lines else None
         kp_raw = s["get_kp"](heatmaps[:, :-1, :, :])
-        line_raw = s["get_line"](heatmaps_l[:, :-1, :, :])
         kp_list = s["coords_to_dict"](kp_raw, threshold=self.kp_threshold)
-        line_list = s["coords_to_dict"](line_raw, threshold=self.line_threshold)
-        kp_dict, lines_dict = s["complete"](
-            kp_list[0], line_list[0], w=_INPUT_W, h=_INPUT_H, normalize=True
-        )
+        if heatmaps_l is None:
+            kp_dict, lines_dict = s["complete"](
+                kp_list[0], {}, w=_INPUT_W, h=_INPUT_H, normalize=True
+            )
+        else:
+            line_raw = s["get_line"](heatmaps_l[:, :-1, :, :])
+            line_list = s["coords_to_dict"](line_raw, threshold=self.line_threshold)
+            kp_dict, lines_dict = s["complete"](
+                kp_list[0], line_list[0], w=_INPUT_W, h=_INPUT_H, normalize=True
+            )
         # Undo the letterbox HERE, so the dicts are normalised against the ORIGINAL frame — which
         # is what this method's docstring already promised and what every consumer below assumes
         # when it multiplies by `w_orig` or hands them to a `denormalize=True` camera.

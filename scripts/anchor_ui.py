@@ -138,6 +138,7 @@ def _job(kind: str, ident: str) -> None:
             return
 
         from anchor_from_pnlcalib import KNOWN_HARD  # noqa: PLC0415
+        from write_camlab_anchor import write_manual  # noqa: PLC0415
 
         if clip in KNOWN_HARD:
             JOB.error = f"{clip} is a known-hard clip.\n\n{KNOWN_HARD[clip]}"
@@ -158,7 +159,10 @@ def _job(kind: str, ident: str) -> None:
             _set("looking for a frame that shows enough of the pitch",
                  f"frame {f} of {n - 1} — {k} of {len(range(0, n, step))} checked, "
                  f"about 4 seconds each", 1)
-            uv, _w, _c, _l = landmarks(d / "frames", f, CFG.device)
+            # Keypoints only: the probe wants a count and a spread, and the line head is 1.94 s
+            # of the 3.51 s per frame. It under-reports slightly, because `complete_keypoints`
+            # uses the lines to complete occluded points — the safe direction for a screen.
+            uv, _w, _c, _l = landmarks(d / "frames", f, CFG.device, want_lines=False)
             spread = float(np.hypot(*(uv.max(0) - uv.min(0)))) if len(uv) >= 2 else 0.0
             checked.append({"frame": f, "n": len(uv), "spread": round(spread)})
             JOB.detail = (f"frame {f} of {n - 1}: {len(uv)} landmarks — best so far "
@@ -195,6 +199,8 @@ def _job(kind: str, ident: str) -> None:
                 JOB.detail = f"frame {c['frame']} refused"
                 continue
             got = _score(clip, c["frame"], "camera_start.json", r.stdout.strip())
+            store = CFG.run_dir / clip / "camera_manual.json"
+            got["camera"] = json.loads(store.read_text())["camera_start.json"][str(c["frame"])]
             JOB.detail = f"frame {c['frame']}: worst line {got['worst_line_px']} px"
             if best_row is None or (got["worst_line_px"] or 1e9) < (best_row["worst_line_px"]
                                                                    or 1e9):
@@ -205,11 +211,13 @@ def _job(kind: str, ident: str) -> None:
                 f"camera they imply does not land on the paint.\n\n"
                 + (r.stdout + r.stderr).strip()[-500:])
             return
-        if best_row["frame"] != tries[0]["frame"]:
+        # Write the winner back from what was already measured, rather than refitting it. The
+        # later candidates overwrote the store, but each one's camera was captured as it went, so
+        # a second ~4 s inference buys nothing.
+        if best_row["frame"] != tries[-1]["frame"]:
             _set("fitting the camera", f"keeping frame {best_row['frame']}", 2)
-            run(["scripts/anchor_from_pnlcalib.py", "--clip", clip, "--frame",
-                 str(best_row["frame"]), "--which", "camera_start.json", "--server", CFG.camlab,
-                 "--run-dir", str(CFG.run_dir), "--device", CFG.device])
+            write_manual(CFG.run_dir / clip, "camera_start.json", best_row["frame"],
+                         best_row["camera"])
         JOB.result = best_row
         return
 
