@@ -18,6 +18,18 @@ needs more, write a findings doc and link it.
 
 ## Camera and calibration
 
+**camlab's solve and camlab's residual can use different ridge scales, so the judge is not the
+solver.** Since `066b7a9` the scales are derived per clip from its own paint width
+(`MOR_POR_181952` and `ENG_FRA_232015` get `2,4,7,13`, nine other clips keep `2,4,7`), but
+`measure/paint.py:59` fixes `RIDGE_SCALES` at **import** from `CAMLAB_RIDGE_SCALES`, and
+`pipeline.py` passes the derived value only into the **stage subprocesses**. The HTTP `residual`
+and `lines` routes run in the server process, so anything read through them — including this
+repo's anchor scoring — is measured at whatever the server was started with.
+Measured, same anchors, only the server's env differing: `stadium_a` f21 worst line 1.39 → 1.22 px,
+worst spot 6.12 → 5.40; `ENG_FRA` f22 median 0.95 → 0.92; `MOR_POR` f35 unmatched 24 → 22.
+· **Check:** start camlab with `CAMLAB_RIDGE_SCALES` matching the clip, or read the scales the
+solve reported. Small here, but it is a silent disagreement, not noise.
+
 **PnLCalib's line head has never contributed anything, and it is 55 % of the inference cost.**
 `_line_observations` keys `_PITCH_LINES` by SoccerNet class **name** and expects a **list** of
 `{x, y, p}`. The head actually returns **integer class ids** with a single dict
