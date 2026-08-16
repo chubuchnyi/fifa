@@ -18,6 +18,18 @@ needs more, write a findings doc and link it.
 
 ## Camera and calibration
 
+**PnLCalib's line head has never contributed anything, and it is 55 % of the inference cost.**
+`_line_observations` keys `_PITCH_LINES` by SoccerNet class **name** and expects a **list** of
+`{x, y, p}`. The head actually returns **integer class ids** with a single dict
+`{x_1, y_1, p_1, x_2, y_2, p_2}` — PnLCalib's own `FramebyFrameCalib.update` reads exactly that
+shape. So `_PITCH_LINES.get(str(5))` is always `None`, every line is skipped, and every run has
+printed `0 point-on-line observations` on every clip. Measured cost: keypoint head 1.57 s, line
+head 1.94 s per frame on CPU.
+· **Check:** the id→name map is `lines_list` in `PnLCalib/utils/utils_heatmap.py`, key =
+`lines_list.index(name) + 1`. Import it like the keypoint world table rather than copying it.
+· **Live.** Fixing it is not cosmetic: `bench_line_constraints.py` measured point-on-line rows
+taking p95 from 95.8 m to 1.26 m at 4 keypoints, which is exactly the thin-frame case that fails.
+
 **Frame 0 is a convention, and on a real clip it is often the worst frame there is.**
 `14604680`: PnLCalib returns **1** named landmark on frame 0 and **19** on frame 630. Same clip,
 same crop, same weights. camlab's `NET_ARG_225042` says it the other way round — f0 splits its
