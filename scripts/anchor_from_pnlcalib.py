@@ -61,6 +61,20 @@ HEIGHT_BOUNDS = (1.0, 80.0)
 #: judge and a bad anchor loses to the seed on the paint anyway — but the caller is told plainly.
 BAND_PX = 20.0
 
+#: Clips this path is known not to solve, with the reason and what was measured. Kept here rather
+#: than as a silent skip so the page can say WHY instead of spending a minute finding out again,
+#: and so a wrong entry is visible. Re-check an entry before believing it; none of these is a law.
+KNOWN_HARD = {
+    "MOR_POR_181952":
+        "the operator could not aim it by hand either. Its markings bow 1.83 px (median over 64 "
+        "clean runs) against 0.40 px on `fan` and 0.07 px on `broadcast`, measured with camlab's "
+        "own sag bench — so something on this clip really does bend the lines. Whether that is the "
+        "lens is NOT established: the bow is consistent in direction (94 % one way, which a lens "
+        "does) but SHRINKS with radius (3.41 px inner against 1.22 px outer, which a lens does "
+        "not), and the clip is framed on the centre circle, whose arcs the sag bench does not "
+        "exclude and camlab's `straight_markings()` does. Neither repo models distortion at all.",
+}
+
 
 def landmarks(clip_frames_dir: Path, frame: int, device: str) -> tuple[np.ndarray, np.ndarray,
                                                                       np.ndarray, dict]:
@@ -112,7 +126,13 @@ def main() -> int:
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--no-lines", action="store_true", help="points only, no point-on-line rows")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true", help="try a clip listed in KNOWN_HARD anyway")
     args = ap.parse_args()
+
+    if args.clip in KNOWN_HARD and not args.force:
+        print(f"{args.clip}: known not to solve on this path — {KNOWN_HARD[args.clip]}")
+        print("  Pass --force to try anyway.")
+        return 4
 
     base = f"{args.server}/api/run/{args.clip}"
     cam = get_json(f"{base}/camera?which={args.which}")

@@ -137,6 +137,12 @@ def _job(kind: str, ident: str) -> None:
                                 (r.stdout + r.stderr).strip())
             return
 
+        from anchor_from_pnlcalib import KNOWN_HARD  # noqa: PLC0415
+
+        if clip in KNOWN_HARD:
+            JOB.error = f"{clip} is a known-hard clip.\n\n{KNOWN_HARD[clip]}"
+            return
+
         d = CFG.run_dir / clip
         frames = sorted((d / "frames").glob("*.jpg"))
         if not frames:
