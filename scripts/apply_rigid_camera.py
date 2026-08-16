@@ -124,23 +124,71 @@ def scene_is_mirrored(calibration, width: int, height: int) -> bool:
     return bool(signs[0] < 0)
 
 
+def read_fit(blob) -> dict:
+    """Normalise either npz schema into ``focal (T,)``, ``centre (T,3)``, ``cx``, ``cy``.
+
+    **Two schemas, and the second is camlab's.** This repo's own
+    ``scripts/fit_rigid_camera.py`` writes schema 1 — ONE ``focal`` and ONE ``centre`` for the
+    whole clip, with no principal point, because it assumed the image centre. camlab's
+    ``export_camera.py`` writes schema 2: ``focal_px`` and ``position`` **per frame**, plus the
+    ``cx, cy`` the camera was actually solved under.
+
+    Reading both is deliberate and is not the compatibility branch ADR-0013 §4 forbids. That rule
+    is about not asking camlab to keep writing an old shape; schema 1 is *ours*, still produced by
+    our own fitter, and pinned by `tests/e2e/test_golden_real_camera.py` against a committed 7 kB
+    file. Dropping it would delete the only test in this repo backed by a real measurement.
+
+    What schema 2 buys, measured by camlab: collapsing a zooming clip to one focal costs
+    **1.65 → 4.56 px** on `fan` (zoom 1.59×) and drops 2 of 12 frames out of the 20 px band. And
+    ``cx, cy`` end the guess — on a cropped clip the optical axis is not the image centre
+    (`stadium_a`'s is at −204, not 304), which is the landmine both repos have hit.
+    """
+    # `np.load` gives an NpzFile (keys in `.files`), `main` then turns it into a plain dict to
+    # apply --focal. Ask both the same way, or the dict silently reads as schema 1 and dies on a
+    # key that only schema 1 has.
+    keys = set(getattr(blob, "files", None) or blob.keys())
+    schema = int(blob["schema"]) if "schema" in keys else 1
+    n = len(np.asarray(blob["frames"]))
+    if schema >= 2:
+        focal = np.asarray(blob["focal_px"], dtype=float).reshape(-1)
+        centre = np.asarray(blob["position"], dtype=float).reshape(-1, 3)
+        cx = float(blob["cx"]) if "cx" in keys else None
+        cy = float(blob["cy"]) if "cy" in keys else None
+    else:
+        focal = np.full(n, float(blob["focal"]))
+        centre = np.tile(np.asarray(blob["centre"], dtype=float), (n, 1))
+        cx = cy = None
+    if focal.shape != (n,) or centre.shape != (n, 3):
+        raise SystemExit(f"schema {schema}: focal {focal.shape} / centre {centre.shape} "
+                         f"do not match {n} frames")
+    return {"schema": schema, "focal": focal, "centre": centre, "cx": cx, "cy": cy}
+
+
 def camera_track(blob, width: int, height: int):
     """The fitted parameters as a CameraTrack, in the right-handed world."""
     from scipy.spatial.transform import Rotation
 
     from pitch3d.core.scene.camera import CameraIntrinsics, CameraTrack
 
-    focal = float(blob["focal"])
-    centre = np.asarray(blob["centre"], dtype=float)
+    fit = read_fit(blob)
+    focal, centre = fit["focal"], fit["centre"]
+    cx = fit["cx"] if fit["cx"] is not None else width / 2.0
+    cy = fit["cy"] if fit["cy"] is not None else height / 2.0
     rot = np.stack([rot_from_rvec(r) for r in blob["rvecs"]])
     quat = np.roll(Rotation.from_matrix(rot).as_quat(), 1, axis=1)  # (x,y,z,w) → (w,x,y,z)
+    # Per frame on both counts: `translation` always was, and `focal_px` now is. A track whose
+    # focal never changes carries the array anyway — `intrinsics_at` returns the shared intrinsics
+    # when it is None, and this is never None, so the nominal `fx` below is the median rather than
+    # a value that pretends to hold for every frame.
     return CameraTrack(
         intrinsics=CameraIntrinsics(
-            fx=focal, fy=focal, cx=width / 2.0, cy=height / 2.0, width=width, height=height
+            fx=float(np.median(focal)), fy=float(np.median(focal)),
+            cx=cx, cy=cy, width=width, height=height
         ),
+        focal_px=focal,
         frames=np.asarray(blob["frames"], dtype=int),
         rotation_quat=quat,
-        translation=-np.einsum("fij,j->fi", rot, centre),
+        translation=-np.einsum("fij,fj->fi", rot, centre),
         estimated=True,
         raw_frame_aligned=True,
     )
@@ -247,15 +295,27 @@ def main() -> None:
 
     assert args.out is None or len(args.scene) == 1, "--out takes a single --scene"
 
-    blob = dict(np.load(args.camera))
+    blob = np.load(args.camera)
+    fit = read_fit(blob)
+    blob = dict(blob)
     if args.focal is not None:
-        print(f"focal overridden: {float(blob['focal']):.1f} -> {args.focal:.1f}")
-        blob["focal"] = np.array(args.focal)
+        # The override collapses the clip to ONE focal, which is what schema 1 always was. Say so
+        # rather than let it look like a nudge: on `fan` that is 2875..4592 px replaced by a
+        # constant, 36 % of the value at the extremes.
+        print(f"focal overridden: {fit['focal'].min():.0f}..{fit['focal'].max():.0f} -> "
+              f"{args.focal:.1f} px, one focal for the whole clip")
+        blob["schema"], blob["focal"] = np.array(1), np.array(args.focal)
+        blob["centre"] = fit["centre"][0]
+        fit = read_fit(blob)
     width, height = int(blob.get("width", 1920)), int(blob.get("height", 1080))
     frames = np.asarray(blob["frames"], dtype=int)
-    print(f"fit: focal {float(blob['focal']):.0f} px @ {width}x{height}   frames "
+    spread = float(np.linalg.norm(fit["centre"] - fit["centre"][0], axis=1).max())
+    zoom = float(fit["focal"].max() / max(fit["focal"].min(), 1e-9))
+    print(f"fit: schema {fit['schema']}, focal {fit['focal'].min():.0f}.."
+          f"{fit['focal'].max():.0f} px (zoom {zoom:.3f}x) @ {width}x{height}   frames "
           f"{frames.min()}-{frames.max()} ({len(frames)})   centre "
-          f"{np.asarray(blob['centre'], dtype=float).round(1)} m (fixed, by construction)")
+          f"{fit['centre'][0].round(1)} m (spread {spread:.2f} m)   "
+          f"principal point {'from the fit' if fit['cx'] is not None else 'assumed at the centre'}")
 
     for path in args.scene:
         scene = load_scene(str(path))
@@ -275,8 +335,13 @@ def main() -> None:
             f"{path}: needs frames {want.min()}-{want.max()} ({len(want)}), the fit covers "
             f"{frames.min()}-{frames.max()} ({len(frames)}) — refit with --frames {want.max() + 1}"
         )
+        # Every per-frame array, not just the two schema 1 had. `read_fit`'s shape check caught
+        # this the first time it ran: a schema-2 blob cut to 60 frames still carried 120 focals.
         cut = {**blob, "frames": want, "rvecs": np.asarray(blob["rvecs"])[idx],
                "world_to_image": np.asarray(blob["world_to_image"])[idx]}
+        for key in ("focal_px", "position"):
+            if key in cut and np.ndim(cut[key]) and len(np.asarray(cut[key])) == len(frames):
+                cut[key] = np.asarray(cut[key])[idx]
 
         mirrored = scene_is_mirrored(cal, width, height)
         do_mirror = mirrored if args.mirror == "auto" else args.mirror == "on"
